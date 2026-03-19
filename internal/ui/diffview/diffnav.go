@@ -78,6 +78,24 @@ func (n *DiffNav) syncTreeCursorToFileCursor() {
 	}
 }
 
+// cyclicSearch finds the next index starting from start that satisfies match,
+// scanning forward or backward with wraparound over count elements.
+// Returns -1 if no match found.
+func cyclicSearch(start, count int, forward bool, match func(idx int) bool) int {
+	for i := 1; i < count; i++ {
+		var idx int
+		if forward {
+			idx = (start + i) % count
+		} else {
+			idx = (start - i + count) % count
+		}
+		if match(idx) {
+			return idx
+		}
+	}
+	return -1
+}
+
 // syncTreeViewportToCursor ensures the treeCursor row is visible in the tree viewport.
 func (n *DiffNav) syncTreeViewportToCursor() {
 	// Account for the 2-line header (title + blank line)
