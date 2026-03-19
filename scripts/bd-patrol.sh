@@ -149,7 +149,10 @@ auto_merge_prs() {
     return
   fi
 
-  echo "$prs" | jq -c '.[]' | while IFS= read -r pr; do
+  local merged_any=false
+
+  # Use process substitution to avoid subshell (preserves variable mutations)
+  while IFS= read -r pr; do
     local pr_num head_branch is_draft
     pr_num="$(echo "$pr" | jq -r '.number')"
     head_branch="$(echo "$pr" | jq -r '.headRefName')"
@@ -173,11 +176,25 @@ auto_merge_prs() {
       log "Auto-merging PR #${pr_num} (${head_branch}) — all checks passed"
       if gh pr merge "$pr_num" "--${MERGE_STRATEGY}" --delete-branch 2>&1; then
         log "Successfully merged PR #${pr_num}"
+        merged_any=true
       else
         log "Failed to merge PR #${pr_num} — may need manual intervention"
       fi
     fi
-  done
+  done < <(echo "$prs" | jq -c '.[]')
+
+  # After merging, force-fetch so workers start from up-to-date main
+  if [[ "$merged_any" == "true" ]]; then
+    log "Merge(s) completed — waiting for GitHub propagation..."
+    sleep 3
+    log "Force-fetching after merge..."
+    if jj git fetch 2>/dev/null; then
+      LAST_MAIN_UPDATE="$(date +%s)"
+      log "Post-merge fetch complete"
+    else
+      log "Warning: post-merge fetch failed"
+    fi
+  fi
 }
 
 # --- Update local main branch ---
