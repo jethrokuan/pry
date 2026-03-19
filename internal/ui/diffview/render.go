@@ -87,15 +87,28 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 	searchQuery := strings.ToLower(m.search.query)
 	cursorBg := lipgloss.Color(styles.Current.BgCursor)
 	searchBg := lipgloss.Color(styles.Current.BgSearch)
+	activeHunkBg := lipgloss.Color(styles.Current.BgActiveHunk)
 
+	// Determine which hunk is active (contains the cursor)
+	activeHunkIdx := -1
+	if m.nav.focus == FocusDiff && len(m.nav.diffLines) > 0 && m.nav.diffCursor < len(m.nav.diffLines) {
+		activeHunkIdx = m.nav.diffLines[m.nav.diffCursor].hunkIdx
+	}
+
+	hunkIndex := 0
 	for _, hunk := range file.Hunks {
 		header := fmt.Sprintf("@@ -%d,%d +%d,%d @@", hunk.OldStart, hunk.OldLines, hunk.NewStart, hunk.NewLines)
 		if hunk.Header != "" {
 			header += " " + hunk.Header
 		}
-		renderedHeader := hunkStyle.Render(header)
+		isActiveHunk := hunkIndex == activeHunkIdx && styles.Current.BgActiveHunk != ""
+		hs := hunkStyle
+		if isActiveHunk {
+			hs = hs.Background(activeHunkBg)
+		}
+		renderedHeader := hs.Render(header)
 		if w := lipgloss.Width(renderedHeader); w < m.nav.diffViewport.Width {
-			renderedHeader += hunkStyle.Render(strings.Repeat(" ", m.nav.diffViewport.Width-w))
+			renderedHeader += hs.Render(strings.Repeat(" ", m.nav.diffViewport.Width-w))
 		}
 		b.WriteString(renderedHeader + "\n")
 
@@ -107,7 +120,7 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 
 			highlighted := isCurrent || isVisualSelected
 
-			// Determine line background: cursor > diff-type background
+			// Determine line background: cursor > diff-type background > active hunk
 			var bg lipgloss.Color
 			hasBg := false
 			if highlighted {
@@ -118,6 +131,9 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 				hasBg = true
 			} else if line.Type == diff.LineDeletion {
 				bg = lipgloss.Color(styles.Current.BgDiffDelete)
+				hasBg = true
+			} else if isActiveHunk {
+				bg = activeHunkBg
 				hasBg = true
 			}
 
@@ -222,6 +238,7 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 			lineIdx++
 		}
 		b.WriteString("\n")
+		hunkIndex++
 	}
 
 	return b.String()

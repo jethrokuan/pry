@@ -25,8 +25,9 @@ type Theme struct {
 	DiffContext  string `toml:"diff_context"`
 	BgDiffAdd    string `toml:"bg_diff_add"`
 	BgDiffDelete string `toml:"bg_diff_delete"`
-	BgHunkHeader string `toml:"bg_hunk_header"`
-	LabelFg      string `toml:"label_fg"`
+	BgHunkHeader  string `toml:"bg_hunk_header"`
+	BgActiveHunk  string `toml:"bg_active_hunk"`
+	LabelFg       string `toml:"label_fg"`
 }
 
 // Current is the active theme.
@@ -54,6 +55,7 @@ func DefaultTheme() Theme {
 		BgDiffAdd:    "22",
 		BgDiffDelete: "52",
 		BgHunkHeader: "238",
+		BgActiveHunk: "234",
 		LabelFg:      "0",
 	}
 }
@@ -78,6 +80,7 @@ func SolarizedDark() Theme {
 		BgDiffAdd:       "#003520",
 		BgDiffDelete:    "#3a0c0c",
 		BgHunkHeader:    "#073642",
+		BgActiveHunk:    "#052f3a",
 		LabelFg:        "#002b36",
 	}
 }
@@ -102,6 +105,7 @@ func SolarizedLight() Theme {
 		BgDiffAdd:       "#e6f2d5",
 		BgDiffDelete:    "#f8d7d5",
 		BgHunkHeader:    "#eee8d5",
+		BgActiveHunk:    "#f0ead8",
 		LabelFg:        "#fdf6e3",
 	}
 }
@@ -126,6 +130,7 @@ func CatppuccinMocha() Theme {
 		BgDiffAdd:       "#1a3a2a",
 		BgDiffDelete:    "#3a1a2a",
 		BgHunkHeader:    "#313244",
+		BgActiveHunk:    "#242436",
 		LabelFg:        "#1e1e2e",
 	}
 }
@@ -150,6 +155,7 @@ func CatppuccinLatte() Theme {
 		BgDiffAdd:       "#d9f0d0",
 		BgDiffDelete:    "#f5d0d0",
 		BgHunkHeader:    "#ccd0da",
+		BgActiveHunk:    "#e2e5ed",
 		LabelFg:        "#eff1f5",
 	}
 }
@@ -174,6 +180,7 @@ func GruvboxDark() Theme {
 		BgDiffAdd:       "#2e3b1f",
 		BgDiffDelete:    "#3c1f1f",
 		BgHunkHeader:    "#3c3836",
+		BgActiveHunk:    "#32302f",
 		LabelFg:        "#282828",
 	}
 }
@@ -198,6 +205,7 @@ func GruvboxLight() Theme {
 		BgDiffAdd:       "#e2edb8",
 		BgDiffDelete:    "#f0c8c0",
 		BgHunkHeader:    "#ebdbb2",
+		BgActiveHunk:    "#f5ead0",
 		LabelFg:        "#fbf1c7",
 	}
 }
@@ -222,6 +230,7 @@ func Dracula() Theme {
 		BgDiffAdd:       "#1a3a1a",
 		BgDiffDelete:    "#3a1a1a",
 		BgHunkHeader:    "#44475a",
+		BgActiveHunk:    "#2e3044",
 		LabelFg:        "#282a36",
 	}
 }
@@ -246,6 +255,7 @@ func Nord() Theme {
 		BgDiffAdd:       "#2b3d2e",
 		BgDiffDelete:    "#3d2b2e",
 		BgHunkHeader:    "#3b4252",
+		BgActiveHunk:    "#333a48",
 		LabelFg:        "#2e3440",
 	}
 }
@@ -270,6 +280,7 @@ func TokyoNight() Theme {
 		BgDiffAdd:       "#1a2e1a",
 		BgDiffDelete:    "#2e1a1e",
 		BgHunkHeader:    "#292e42",
+		BgActiveHunk:    "#1f2030",
 		LabelFg:        "#1a1b26",
 	}
 }
@@ -404,6 +415,9 @@ func OverlayColors(base Theme, overrides Theme) Theme {
 	}
 	if overrides.BgHunkHeader != "" {
 		base.BgHunkHeader = overrides.BgHunkHeader
+	}
+	if overrides.BgActiveHunk != "" {
+		base.BgActiveHunk = overrides.BgActiveHunk
 	}
 	if overrides.LabelFg != "" {
 		base.LabelFg = overrides.LabelFg
