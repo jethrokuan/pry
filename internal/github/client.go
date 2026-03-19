@@ -12,6 +12,7 @@ type Client struct {
 	graphql *ghAPI.GraphQLClient
 	owner   string
 	repo    string
+	teams   userTeamsCache
 }
 
 // NewClient creates a new GitHub client for the given repository.

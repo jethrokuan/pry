@@ -24,6 +24,20 @@ type Config struct {
 	Theme    string         `toml:"theme"`
 	Colors   styles.Theme   `toml:"colors"`
 	Filters  []FilterConfig `toml:"filters"`
+	Columns  []string       `toml:"columns"`
+}
+
+// DefaultColumns returns the default PR list columns.
+func DefaultColumns() []string {
+	return []string{"number", "title", "author", "changes", "my_review", "my_teams", "updated"}
+}
+
+// PRColumns returns the configured columns, falling back to defaults.
+func (c Config) PRColumns() []string {
+	if len(c.Columns) > 0 {
+		return c.Columns
+	}
+	return DefaultColumns()
 }
 
 // Default returns the default configuration.
@@ -62,6 +76,7 @@ func Load() Config {
 func DefaultFilters() []FilterConfig {
 	return []FilterConfig{
 		{Name: "Needs My Review", Qualifier: "review-requested:@me"},
+		{Name: "My Team Pending", Qualifier: "team-review-requested:@my-teams"},
 		{Name: "Reviewed, Not Approved", Qualifier: "reviewed-by:@me -review:approved"},
 		{Name: "Awaiting My Review", Qualifier: "-reviewed-by:@me -review:approved review:required"},
 		{Name: "All Open", Qualifier: ""},

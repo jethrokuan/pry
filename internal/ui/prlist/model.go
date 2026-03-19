@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	ltable "github.com/charmbracelet/lipgloss/table"
 
 	"github.com/jkuan/pr-review/internal/review"
 	"github.com/jkuan/pr-review/internal/ui/styles"
@@ -28,6 +29,10 @@ type prsLoadedMsg struct {
 	err error
 }
 
+type userTeamsLoadedMsg struct {
+	teams []string
+}
+
 // KeyMap defines the key bindings for the PR list.
 type KeyMap struct {
 	Up      key.Binding
@@ -35,7 +40,7 @@ type KeyMap struct {
 	Select  key.Binding
 	Filter  key.Binding
 	Refresh key.Binding
-	Quit key.Binding
+	Quit    key.Binding
 	Help    key.Binding
 }
 
@@ -56,6 +61,8 @@ type Model struct {
 	cursor    int
 	filters   []review.PRFilter
 	filterIdx int
+	columns   []string
+	userTeams map[string]bool // cached user team membership ("org/slug" → true)
 	loading   bool
 	err       error
 	width     int
@@ -64,13 +71,14 @@ type Model struct {
 }
 
 // New creates a new PR list model.
-func New(svc review.Service, filters []review.PRFilter) Model {
+func New(svc review.Service, filters []review.PRFilter, columns []string) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
 	return Model{
 		svc:     svc,
 		filters: filters,
+		columns: columns,
 		loading: true,
 		spinner: s,
 	}
@@ -80,8 +88,16 @@ func New(svc review.Service, filters []review.PRFilter) Model {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.fetchPRs(),
+		m.fetchUserTeams(),
 		m.spinner.Tick,
 	)
+}
+
+func (m Model) fetchUserTeams() tea.Cmd {
+	return func() tea.Msg {
+		teams, _ := m.svc.UserTeams(context.Background())
+		return userTeamsLoadedMsg{teams: teams}
+	}
 }
 
 func (m Model) fetchPRs() tea.Cmd {
@@ -105,6 +121,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.prs = msg.prs
 			m.cursor = 0
+		}
+
+	case userTeamsLoadedMsg:
+		m.userTeams = make(map[string]bool, len(msg.teams))
+		for _, t := range msg.teams {
+			m.userTeams[t] = true
 		}
 
 	case spinner.TickMsg:
@@ -146,6 +168,150 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// renderCtx holds extra data needed by some columns at render time.
+type renderCtx struct {
+	userTeams map[string]bool // "org/team-slug" → true
+}
+
+// columnDef describes how to render a single column.
+type columnDef struct {
+	id     string
+	header string
+	width  int // fixed width; 0 means flexible (takes remaining space)
+	render func(pr review.PullRequest, ctx renderCtx) string
+	// style returns a lipgloss.Style for the cell. If nil, no extra styling.
+	style func(pr review.PullRequest, ctx renderCtx) lipgloss.Style
+}
+
+// knownColumns maps column IDs to their definitions.
+// Width 0 means the column is flexible and fills remaining space.
+var knownColumns = map[string]columnDef{
+	"number": {
+		id:     "number",
+		header: "#",
+		width:  7,
+		render: func(pr review.PullRequest, _ renderCtx) string {
+			return fmt.Sprintf("#%d", pr.Number)
+		},
+		style: func(_ review.PullRequest, _ renderCtx) lipgloss.Style {
+			return lipgloss.NewStyle().Foreground(styles.Primary)
+		},
+	},
+	"title": {
+		id:     "title",
+		header: "Title",
+		width:  0, // flexible
+		render: func(pr review.PullRequest, _ renderCtx) string {
+			return pr.Title
+		},
+		style: func(pr review.PullRequest, _ renderCtx) lipgloss.Style {
+			if pr.Draft {
+				return lipgloss.NewStyle().Italic(true).Foreground(styles.Muted)
+			}
+			return lipgloss.NewStyle()
+		},
+	},
+	"author": {
+		id:     "author",
+		header: "Author",
+		width:  14,
+		render: func(pr review.PullRequest, _ renderCtx) string {
+			return "@" + pr.Author
+		},
+		style: func(_ review.PullRequest, _ renderCtx) lipgloss.Style {
+			return lipgloss.NewStyle().Foreground(styles.Cyan)
+		},
+	},
+	"changes": {
+		id:     "changes",
+		header: "+/-",
+		width:  12,
+		render: func(pr review.PullRequest, _ renderCtx) string {
+			return fmt.Sprintf("+%d/-%d", pr.Additions, pr.Deletions)
+		},
+	},
+	"updated": {
+		id:     "updated",
+		header: "Updated",
+		width:  10,
+		render: func(pr review.PullRequest, _ renderCtx) string {
+			return timeAgo(pr.UpdatedAt)
+		},
+	},
+	"pending_teams": {
+		id:     "pending_teams",
+		header: "Pending Teams",
+		width:  20,
+		render: func(pr review.PullRequest, _ renderCtx) string {
+			if len(pr.PendingTeams) == 0 {
+				return ""
+			}
+			return strings.Join(stripOrgPrefixes(pr.PendingTeams), ", ")
+		},
+	},
+	"my_teams": {
+		id:     "my_teams",
+		header: "My Teams",
+		width:  20,
+		render: func(pr review.PullRequest, ctx renderCtx) string {
+			if len(pr.PendingTeams) == 0 || len(ctx.userTeams) == 0 {
+				return ""
+			}
+			var mine []string
+			for _, t := range pr.PendingTeams {
+				if ctx.userTeams[t] {
+					mine = append(mine, stripOrgPrefix(t))
+				}
+			}
+			return strings.Join(mine, ", ")
+		},
+	},
+	"my_review": {
+		id:     "my_review",
+		header: "Review",
+		width:  10,
+		render: func(pr review.PullRequest, _ renderCtx) string {
+			switch pr.MyReviewState {
+			case "APPROVED":
+				return "Approved"
+			case "CHANGES_REQUESTED":
+				return "Changes"
+			case "COMMENTED":
+				return "Commented"
+			case "DISMISSED":
+				return "Dismissed"
+			default:
+				return ""
+			}
+		},
+		style: func(pr review.PullRequest, _ renderCtx) lipgloss.Style {
+			switch pr.MyReviewState {
+			case "APPROVED":
+				return lipgloss.NewStyle().Foreground(styles.Success)
+			case "CHANGES_REQUESTED":
+				return lipgloss.NewStyle().Foreground(styles.Warning)
+			case "COMMENTED":
+				return lipgloss.NewStyle().Foreground(styles.Cyan)
+			case "DISMISSED":
+				return lipgloss.NewStyle().Foreground(styles.Muted)
+			default:
+				return lipgloss.NewStyle()
+			}
+		},
+	},
+}
+
+// resolveColumns returns ordered column defs for the configured column IDs.
+func resolveColumns(ids []string) []columnDef {
+	var cols []columnDef
+	for _, id := range ids {
+		if c, ok := knownColumns[id]; ok {
+			cols = append(cols, c)
+		}
+	}
+	return cols
+}
+
 // View renders the PR list.
 func (m Model) View() string {
 	if m.width == 0 {
@@ -183,60 +349,90 @@ func (m Model) View() string {
 		return b.String()
 	}
 
-	// Table header
-	headerFmt := fmt.Sprintf("  %-6s %-*s %-12s %-10s %s",
-		"#", m.width-50, "Title", "Author", "+/-", "Updated")
-	b.WriteString(styles.Subtitle.Render(headerFmt) + "\n")
-	b.WriteString(strings.Repeat("─", m.width) + "\n")
+	cols := resolveColumns(m.columns)
+	rctx := renderCtx{userTeams: m.userTeams}
 
-	// PR rows
-	maxVisible := m.height - 9 // account for header, qualifier line, footer, padding
-	if maxVisible < 1 {
-		maxVisible = 1
+	// Compute visible window (account for qualifier line from PR #6)
+	tableHeight := m.height - 7 // header + qualifier + footer + padding
+	if tableHeight < 3 {
+		tableHeight = 3
+	}
+	visibleRows := tableHeight - 2 // header row + border
+	if visibleRows < 1 {
+		visibleRows = 1
 	}
 	start := 0
-	if m.cursor >= maxVisible {
-		start = m.cursor - maxVisible + 1
+	if m.cursor >= visibleRows {
+		start = m.cursor - visibleRows + 1
 	}
-	end := start + maxVisible
+	end := start + visibleRows
 	if end > len(m.prs) {
 		end = len(m.prs)
 	}
 
-	for i := start; i < end; i++ {
-		pr := m.prs[i]
-		cursor := "  "
-		if i == m.cursor {
-			cursor = "> "
-		}
-
-		titleWidth := m.width - 50
-		if titleWidth < 20 {
-			titleWidth = 20
-		}
-		title := truncate(pr.Title, titleWidth)
-		if pr.Draft {
-			title = styles.PRDraft.Render(title)
-		}
-
-		changes := fmt.Sprintf("+%d/-%d", pr.Additions, pr.Deletions)
-		updated := timeAgo(pr.UpdatedAt)
-
-		line := fmt.Sprintf("%s%-6s %-*s %-12s %-10s %s",
-			cursor,
-			styles.PRNumber.Render(fmt.Sprintf("#%d", pr.Number)),
-			titleWidth, title,
-			styles.PRAuthor.Render("@"+pr.Author),
-			changes,
-			updated,
-		)
-
-		if i == m.cursor {
-			line = lipgloss.NewStyle().Bold(true).Render(line)
-		}
-
-		b.WriteString(line + "\n")
+	// Build headers
+	headers := make([]string, len(cols))
+	for i, c := range cols {
+		headers[i] = c.header
 	}
+
+	// Build rows for visible window
+	visiblePRs := m.prs[start:end]
+	rows := make([][]string, len(visiblePRs))
+	for i, pr := range visiblePRs {
+		row := make([]string, len(cols))
+		for j, c := range cols {
+			row[j] = c.render(pr, rctx)
+		}
+		rows[i] = row
+	}
+
+	// Cursor-relative index within the visible window
+	cursorInView := m.cursor - start
+
+	// Build lipgloss table
+	t := ltable.New().
+		Headers(headers...).
+		Rows(rows...).
+		Width(m.width).
+		BorderTop(false).
+		BorderBottom(false).
+		BorderLeft(false).
+		BorderRight(false).
+		BorderColumn(false).
+		BorderHeader(true).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			s := lipgloss.NewStyle().PaddingRight(1)
+
+			// Header row
+			if row == ltable.HeaderRow {
+				return s.Bold(true).Foreground(styles.Secondary)
+			}
+
+			// Per-column styling
+			if col >= 0 && col < len(cols) {
+				pr := visiblePRs[row]
+				if cols[col].style != nil {
+					colStyle := cols[col].style(pr, rctx)
+					fg, _ := colStyle.GetForeground().(lipgloss.Color)
+					if fg != "" {
+						s = s.Foreground(fg)
+					}
+					if colStyle.GetItalic() {
+						s = s.Italic(true)
+					}
+				}
+			}
+
+			// Selected row
+			if row == cursorInView {
+				s = s.Bold(true)
+			}
+
+			return s
+		})
+
+	b.WriteString(t.Render())
 
 	// Footer
 	b.WriteString("\n")
@@ -246,14 +442,20 @@ func (m Model) View() string {
 	return b.String()
 }
 
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
+// stripOrgPrefix removes the "org/" prefix from a team slug like "org/team-name".
+func stripOrgPrefix(slug string) string {
+	if i := strings.Index(slug, "/"); i >= 0 {
+		return slug[i+1:]
 	}
-	if max <= 3 {
-		return s[:max]
+	return slug
+}
+
+func stripOrgPrefixes(slugs []string) []string {
+	out := make([]string, len(slugs))
+	for i, s := range slugs {
+		out[i] = stripOrgPrefix(s)
 	}
-	return s[:max-3] + "..."
+	return out
 }
 
 func timeAgo(t time.Time) string {

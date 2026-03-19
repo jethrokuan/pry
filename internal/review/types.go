@@ -46,7 +46,9 @@ type PullRequest struct {
 	ChecksSummary string
 
 	// Review status
-	ReviewDecision string // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
+	ReviewDecision string   // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
+	PendingTeams   []string // Team slugs with outstanding review requests
+	MyReviewState  string   // Authenticated user's latest review: APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, or ""
 }
 
 

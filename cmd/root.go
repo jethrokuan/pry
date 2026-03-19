@@ -34,8 +34,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Load filters from config (falls back to defaults)
+	// Load filters and columns from config (falls back to defaults)
 	filters := cfg.PRFilters()
+	columns := cfg.PRColumns()
 
 	// Create the app — optionally jump to a specific PR
 	var model app.Model
@@ -45,9 +46,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Usage: pr-review [PR_NUMBER]\n")
 			os.Exit(1)
 		}
-		model = app.NewWithPR(svc, prNumber, filters)
+		model = app.NewWithPR(svc, prNumber, filters, columns)
 	} else {
-		model = app.New(svc, filters)
+		model = app.New(svc, filters, columns)
 	}
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
