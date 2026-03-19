@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	ltable "github.com/charmbracelet/lipgloss/table"
@@ -35,23 +36,25 @@ type userTeamsLoadedMsg struct {
 
 // KeyMap defines the key bindings for the PR list.
 type KeyMap struct {
-	Up      key.Binding
-	Down    key.Binding
-	Select  key.Binding
-	Filter  key.Binding
-	Refresh key.Binding
-	Quit    key.Binding
-	Help    key.Binding
+	Up         key.Binding
+	Down       key.Binding
+	Select     key.Binding
+	Filter     key.Binding
+	EditFilter key.Binding
+	Refresh    key.Binding
+	Quit       key.Binding
+	Help       key.Binding
 }
 
 var keys = KeyMap{
-	Up:      key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
-	Down:    key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-	Select:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
-	Filter:  key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "filter")),
-	Refresh: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-	Quit:    key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
-	Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+	Up:         key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
+	Down:       key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+	Select:     key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+	Filter:     key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "filter")),
+	EditFilter: key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "edit filter")),
+	Refresh:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
+	Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+	Help:       key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 }
 
 // Model is the Bubble Tea model for the PR list screen.
@@ -70,6 +73,11 @@ type Model struct {
 	spinner          spinner.Model
 	showFilterPicker bool
 	filterCursor     int
+
+	// Filter editing
+	editing      bool            // true when the qualifier text input is active
+	filterInput  textinput.Model // text input for editing the qualifier
+	customFilter *review.PRFilter // non-nil when a user-edited filter is active
 }
 
 // New creates a new PR list model.
@@ -77,12 +85,17 @@ func New(svc review.Service, filters []review.PRFilter, columns []string) Model 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
+	ti := textinput.New()
+	ti.Placeholder = "e.g. review-requested:@me label:bug author:octocat"
+	ti.CharLimit = 256
+
 	return Model{
-		svc:     svc,
-		filters: filters,
-		columns: columns,
-		loading: true,
-		spinner: s,
+		svc:         svc,
+		filters:     filters,
+		columns:     columns,
+		loading:     true,
+		spinner:     s,
+		filterInput: ti,
 	}
 }
 
@@ -102,9 +115,19 @@ func (m Model) fetchUserTeams() tea.Cmd {
 	}
 }
 
+// activeFilter returns the currently active filter — either a custom
+// user-edited filter or the selected preset filter.
+func (m Model) activeFilter() review.PRFilter {
+	if m.customFilter != nil {
+		return *m.customFilter
+	}
+	return m.filters[m.filterIdx]
+}
+
 func (m Model) fetchPRs() tea.Cmd {
+	filter := m.activeFilter()
 	return func() tea.Msg {
-		prs, err := m.svc.ListPRs(context.Background(), m.filters[m.filterIdx])
+		prs, err := m.svc.ListPRs(context.Background(), filter)
 		return prsLoadedMsg{prs: prs, err: err}
 	}
 }
@@ -137,6 +160,30 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyMsg:
+		// Filter editing mode: forward keys to the text input
+		if m.editing {
+			switch msg.String() {
+			case "enter":
+				qualifier := strings.TrimSpace(m.filterInput.Value())
+				m.editing = false
+				m.filterInput.Blur()
+				m.customFilter = &review.PRFilter{
+					Name:      "Custom",
+					Qualifier: qualifier,
+				}
+				m.loading = true
+				return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+			case "esc":
+				m.editing = false
+				m.filterInput.Blur()
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.filterInput, cmd = m.filterInput.Update(msg)
+				return m, cmd
+			}
+		}
+
 		if m.loading {
 			return m, nil
 		}
@@ -154,8 +201,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			case key.Matches(msg, keys.Select):
 				m.showFilterPicker = false
-				if m.filterCursor != m.filterIdx {
+				if m.filterCursor != m.filterIdx || m.customFilter != nil {
 					m.filterIdx = m.filterCursor
+					m.customFilter = nil
 					m.loading = true
 					return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
 				}
@@ -186,6 +234,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.Filter):
 			m.showFilterPicker = true
 			m.filterCursor = m.filterIdx
+		case key.Matches(msg, keys.EditFilter):
+			m.editing = true
+			m.customFilter = nil // clear custom filter when entering edit mode
+			m.filterInput.SetValue(m.activeFilter().Qualifier)
+			m.filterInput.Focus()
+			return m, m.filterInput.Cursor.BlinkCmd()
 		case key.Matches(msg, keys.Refresh):
 			m.loading = true
 			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
@@ -349,15 +403,25 @@ func (m Model) View() string {
 
 	// Header
 	header := styles.Title.Render("PR Review")
-	filterLabel := fmt.Sprintf("  Filter: [%s]", m.filters[m.filterIdx].Name)
+	af := m.activeFilter()
+	filterLabel := fmt.Sprintf("  Filter: [%s]", af.Name)
 	repoLabel := fmt.Sprintf("  %s/%s", m.svc.RepoOwner(), m.svc.RepoName())
 	b.WriteString(header + filterLabel + repoLabel + "\n")
-	qualifier := m.filters[m.filterIdx].Qualifier
-	if qualifier == "" {
-		qualifier = "(none)"
+
+	if m.editing {
+		prompt := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("  Qualifier: ")
+		b.WriteString(prompt + m.filterInput.View() + "\n")
+		hint := lipgloss.NewStyle().Foreground(styles.Muted)
+		b.WriteString(hint.Render("  enter apply  esc cancel  Examples: author:X label:Y review-requested:@me team-review-requested:@my-teams") + "\n\n")
+		// Still show the table below the editor
+	} else {
+		qualifier := af.Qualifier
+		if qualifier == "" {
+			qualifier = "(none)"
+		}
+		qualifierStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+		b.WriteString(qualifierStyle.Render("  "+qualifier) + "\n\n")
 	}
-	qualifierStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-	b.WriteString(qualifierStyle.Render("  "+qualifier) + "\n\n")
 
 	// Filter picker overlay
 	if m.showFilterPicker {
@@ -486,7 +550,7 @@ func (m Model) View() string {
 
 	// Footer
 	b.WriteString("\n")
-	help := "↑/k up  ↓/j down  enter select  f filter  r refresh  q quit"
+	help := "↑/k up  ↓/j down  enter select  f filter  / edit filter  r refresh  q quit"
 	b.WriteString(styles.HelpStyle.Render(help))
 
 	return b.String()
