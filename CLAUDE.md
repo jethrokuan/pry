@@ -129,9 +129,19 @@ Do NOT close an issue if any gate fails.
 
 ### No external side effects
 
-- Do NOT create pull requests, comment on GitHub issues/PRs, post to Slack, or interact with any external service.
+- Do NOT comment on GitHub issues/PRs, post to Slack, or interact with any external service (except creating a PR — see below).
 - Do NOT modify CI/CD configuration, GitHub Actions workflows, or Makefiles unless the issue explicitly requires it.
 - Do NOT push to `main`. Always work on a topic bookmark.
+
+### Pull request required
+
+- Autonomous workers **MUST** create a pull request before finishing. Work is not complete without a PR.
+- Use `gh pr create` to open the PR against `main`.
+- The PR **must** include:
+  - A clear title summarizing the change
+  - A **Summary** section explaining what the PR solves and why, explaining the motivation for the change
+  - A **Test plan** section describing how the change was tested (e.g., which tests were added/run, manual verification steps)
+- Do NOT stop or close the issue until the PR has been created and the URL is confirmed.
 
 ### Conflict avoidance
 
@@ -174,12 +184,23 @@ bd close <id>         # Complete work
    jj git push
    jj log -r 'mine()'  # Verify your changes are pushed
    ```
-5. **Verify** - All changes committed AND pushed
-6. **Hand off** - Provide context for next session (if interactive)
+5. **CREATE A PULL REQUEST** - This is MANDATORY (if code changed):
+   ```bash
+   gh pr create --title "Short description" --body "$(cat <<'EOF'
+   ## Summary
+   <What this PR does and why.>
+
+   ## Test plan
+   <How this was tested: new/existing tests run, manual verification, etc.>
+   EOF
+   )"
+   ```
+6. **Verify** - All changes committed, pushed, AND PR created
+7. **Hand off** - Provide context for next session (if interactive)
 
 **CRITICAL RULES:**
-- Work is NOT complete until `jj git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+- Work is NOT complete until `jj git push` succeeds AND a PR is created
+- NEVER stop before pushing and creating a PR - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push and create the PR
+- If push or PR creation fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
