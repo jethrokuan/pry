@@ -3,8 +3,6 @@ package prlist
 import (
 	"context"
 	"fmt"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -37,8 +35,7 @@ type KeyMap struct {
 	Select  key.Binding
 	Filter  key.Binding
 	Refresh key.Binding
-	Web     key.Binding
-	Quit    key.Binding
+	Quit key.Binding
 	Help    key.Binding
 }
 
@@ -48,7 +45,6 @@ var keys = KeyMap{
 	Select:  key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
 	Filter:  key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "filter")),
 	Refresh: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-	Web:     key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "open in web")),
 	Quit:    key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 }
@@ -143,28 +139,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.Refresh):
 			m.loading = true
 			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
-		case key.Matches(msg, keys.Web):
-			if len(m.prs) > 0 {
-				pr := m.prs[m.cursor]
-				return m, tea.Batch(openInBrowser(pr.URL))
-			}
 		}
 	}
 
 	return m, nil
-}
-
-func openInBrowser(url string) tea.Cmd {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default: // linux, freebsd, etc.
-		cmd = exec.Command("xdg-open", url)
-	}
-	return tea.ExecProcess(cmd, nil)
 }
 
 // View renders the PR list.
@@ -255,7 +233,7 @@ func (m Model) View() string {
 
 	// Footer
 	b.WriteString("\n")
-	help := "↑/k up  ↓/j down  enter select  f filter  r refresh  w web  q quit"
+	help := "↑/k up  ↓/j down  enter select  f filter  r refresh  q quit"
 	b.WriteString(styles.HelpStyle.Render(help))
 
 	return b.String()
