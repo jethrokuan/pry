@@ -259,7 +259,13 @@ func (m Model) renderFileTree() string {
 			}
 
 			if isCursorRow {
-				line = lipgloss.NewStyle().Bold(true).Render(line)
+				activeBg := lipgloss.Color(styles.Current.BgSurface)
+				visWidth := lipgloss.Width(line)
+				treeWidth := m.nav.treeViewport.Width
+				if visWidth < treeWidth {
+					line += strings.Repeat(" ", treeWidth-visWidth)
+				}
+				line = lipgloss.NewStyle().Bold(true).Background(activeBg).Render(line)
 			} else if isActiveFile {
 				// Highlight the active file with a background
 				activeBg := lipgloss.Color(styles.Current.BgSurface)
@@ -304,7 +310,13 @@ func (m Model) renderFileTree() string {
 			line := fmt.Sprintf("%s%s%s%s%s/%s", cursor, row.prefix, connector, indicator, dirStyle.Render(row.node.name), viewedInfo)
 
 			if isCursorRow {
-				line = lipgloss.NewStyle().Bold(true).Render(line)
+				activeBg := lipgloss.Color(styles.Current.BgSurface)
+				visWidth := lipgloss.Width(line)
+				treeWidth := m.nav.treeViewport.Width
+				if visWidth < treeWidth {
+					line += strings.Repeat(" ", treeWidth-visWidth)
+				}
+				line = lipgloss.NewStyle().Bold(true).Background(activeBg).Render(line)
 			}
 
 			b.WriteString(line + "\n")
