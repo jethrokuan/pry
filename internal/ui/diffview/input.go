@@ -402,25 +402,19 @@ func (m *Model) navigateFile(forward, unviewedOnly bool) {
 	}
 
 	// In diff view
-	for i := 1; i < n; i++ {
-		var idx int
-		if forward {
-			idx = (m.nav.fileCursor + i) % n
-		} else {
-			idx = (m.nav.fileCursor - i + n) % n
-		}
-		if unviewedOnly && m.review.ViewedFiles[m.files[idx].Path] {
-			continue
-		}
-		oldIdx := m.nav.fileCursor
-		m.nav.fileCursor = idx
-		m.nav.buildDiffLines(m.files)
-		m.nav.diffCursor = 0
-		m.nav.diffViewport.GotoTop()
-		m.updateDiffContent()
-		m.autoFollowFile(oldIdx, m.nav.fileCursor)
+	idx := cyclicSearch(m.nav.fileCursor, n, forward, func(i int) bool {
+		return !unviewedOnly || !m.review.ViewedFiles[m.files[i].Path]
+	})
+	if idx < 0 {
 		return
 	}
+	oldIdx := m.nav.fileCursor
+	m.nav.fileCursor = idx
+	m.nav.buildDiffLines(m.files)
+	m.nav.diffCursor = 0
+	m.nav.diffViewport.GotoTop()
+	m.updateDiffContent()
+	m.autoFollowFile(oldIdx, m.nav.fileCursor)
 }
 
 // moveToUnviewedFileInTree moves treeCursor to the next/prev unviewed file row.
@@ -429,19 +423,13 @@ func (m *Model) moveToUnviewedFileInTree(forward bool) {
 	if n == 0 {
 		return
 	}
-	for i := 1; i < n; i++ {
-		var idx int
-		if forward {
-			idx = (m.nav.treeCursor + i) % n
-		} else {
-			idx = (m.nav.treeCursor - i + n) % n
-		}
-		row := m.nav.treeRows[idx]
-		if row.node.fileIdx >= 0 && !m.review.ViewedFiles[m.files[row.node.fileIdx].Path] {
-			m.nav.treeCursor = idx
-			m.onTreeCursorChanged()
-			return
-		}
+	idx := cyclicSearch(m.nav.treeCursor, n, forward, func(i int) bool {
+		row := m.nav.treeRows[i]
+		return row.node.fileIdx >= 0 && !m.review.ViewedFiles[m.files[row.node.fileIdx].Path]
+	})
+	if idx >= 0 {
+		m.nav.treeCursor = idx
+		m.onTreeCursorChanged()
 	}
 }
 
@@ -449,70 +437,63 @@ func (m *Model) moveToUnviewedFileInTree(forward bool) {
 // When landing on a comment, expands the comment block and selects the first comment.
 func (m *Model) navigateComment(forward, crossFile bool) {
 	if crossFile {
-		m.navigateFileWithComments(forward)
+		m.navigateCommentToFile(forward)
 		return
 	}
 	// Within current file: find next diff line that has comments
 	if len(m.nav.diffLines) == 0 {
-		m.navigateCommentCrossFile(forward)
+		m.navigateCommentToFile(forward)
 		return
 	}
 	n := len(m.nav.diffLines)
 	path := m.files[m.nav.fileCursor].Path
-	for i := 1; i < n; i++ {
-		var idx int
-		if forward {
-			idx = (m.nav.diffCursor + i) % n
-		} else {
-			idx = (m.nav.diffCursor - i + n) % n
-		}
-		dl := m.nav.diffLines[idx]
-		if m.lineHasComments(path, dl) {
-			m.nav.diffCursor = idx
-			m.expandAndSelectComment(idx)
-			m.syncViewportToCursorWithComments()
-			return
-		}
-	}
-	// No more comments in current file — try cross-file
-	m.navigateCommentCrossFile(forward)
-}
-
-// navigateCommentCrossFile jumps to the next/prev file that has comments,
-// positions the cursor on the first/last commented line, and expands+selects it.
-// Skips files where comments exist but don't map to any visible diff line.
-func (m *Model) navigateCommentCrossFile(forward bool) {
-	nFiles := len(m.files)
-	for i := 1; i < nFiles; i++ {
-		var idx int
-		if forward {
-			idx = (m.nav.fileCursor + i) % nFiles
-		} else {
-			idx = (m.nav.fileCursor - i + nFiles) % nFiles
-		}
-		if !m.fileHasComments(m.files[idx].Path) {
-			continue
-		}
-		oldIdx := m.nav.fileCursor
-		m.nav.fileCursor = idx
-		m.nav.buildDiffLines(m.files)
-		// Find first/last commented diff line
-		commentLine := m.findCommentedDiffLine(m.files[idx].Path, forward)
-		if commentLine < 0 {
-			// Comments exist but none map to visible diff lines (e.g. outdated);
-			// restore and keep searching.
-			m.nav.fileCursor = oldIdx
-			m.nav.buildDiffLines(m.files)
-			continue
-		}
-		m.nav.diffCursor = commentLine
-		m.expandAndSelectComment(m.nav.diffCursor)
-		m.nav.diffViewport.GotoTop()
-		m.updateDiffContent()
-		m.autoFollowFile(oldIdx, m.nav.fileCursor)
+	idx := cyclicSearch(m.nav.diffCursor, n, forward, func(i int) bool {
+		return m.lineHasComments(path, m.nav.diffLines[i])
+	})
+	if idx >= 0 {
+		m.nav.diffCursor = idx
+		m.expandAndSelectComment(idx)
 		m.syncViewportToCursorWithComments()
 		return
 	}
+	// No more comments in current file — try cross-file
+	m.navigateCommentToFile(forward)
+}
+
+// navigateCommentToFile jumps to the next/prev file that has comments,
+// positions the cursor on the first/last commented line, and expands+selects it.
+// Skips files where comments exist but don't map to any visible diff line.
+func (m *Model) navigateCommentToFile(forward bool) {
+	nFiles := len(m.files)
+	if nFiles == 0 {
+		return
+	}
+	oldIdx := m.nav.fileCursor
+	idx := cyclicSearch(m.nav.fileCursor, nFiles, forward, func(i int) bool {
+		if !m.fileHasComments(m.files[i].Path) {
+			return false
+		}
+		// Temporarily switch to this file to check if comments map to diff lines
+		m.nav.fileCursor = i
+		m.nav.buildDiffLines(m.files)
+		if m.findCommentedDiffLine(m.files[i].Path, forward) < 0 {
+			// Comments exist but none map to visible diff lines; restore and skip
+			m.nav.fileCursor = oldIdx
+			m.nav.buildDiffLines(m.files)
+			return false
+		}
+		return true
+	})
+	if idx < 0 {
+		return
+	}
+	// m.nav.fileCursor and diffLines are already set to the found file by the match function
+	m.nav.diffCursor = m.findCommentedDiffLine(m.files[idx].Path, forward)
+	m.expandAndSelectComment(m.nav.diffCursor)
+	m.nav.diffViewport.GotoTop()
+	m.updateDiffContent()
+	m.autoFollowFile(oldIdx, m.nav.fileCursor)
+	m.syncViewportToCursorWithComments()
 }
 
 // expandAndSelectComment expands the comment block at the given cursor and selects the first comment.
@@ -529,43 +510,6 @@ func (m *Model) expandAndSelectComment(cursor int) {
 		m.comments.expanded[commentKey(path, dl.oldLine)] = true
 	}
 	m.comments.cursor = 0
-}
-
-// navigateFileWithComments moves to the next/prev file that has comments,
-// positioning the cursor on the first/last commented line.
-func (m *Model) navigateFileWithComments(forward bool) {
-	n := len(m.files)
-	if n == 0 {
-		return
-	}
-	for i := 1; i < n; i++ {
-		var idx int
-		if forward {
-			idx = (m.nav.fileCursor + i) % n
-		} else {
-			idx = (m.nav.fileCursor - i + n) % n
-		}
-		if !m.fileHasComments(m.files[idx].Path) {
-			continue
-		}
-		oldIdx := m.nav.fileCursor
-		m.nav.fileCursor = idx
-		m.nav.buildDiffLines(m.files)
-		commentLine := m.findCommentedDiffLine(m.files[idx].Path, forward)
-		if commentLine < 0 {
-			// Comments exist but none map to visible diff lines; restore and keep searching.
-			m.nav.fileCursor = oldIdx
-			m.nav.buildDiffLines(m.files)
-			continue
-		}
-		m.nav.diffCursor = commentLine
-		m.expandAndSelectComment(m.nav.diffCursor)
-		m.nav.diffViewport.GotoTop()
-		m.updateDiffContent()
-		m.autoFollowFile(oldIdx, m.nav.fileCursor)
-		m.syncViewportToCursorWithComments()
-		return
-	}
 }
 
 // findCommentedDiffLine returns the index of the first (forward=true) or last (forward=false)
