@@ -2,8 +2,6 @@ package github
 
 import (
 	"fmt"
-
-	ghAPI "github.com/cli/go-gh/v2/pkg/api"
 )
 
 const restPageSize = 100
@@ -11,7 +9,7 @@ const restPageSize = 100
 // paginateREST fetches all pages from a paginated GitHub REST endpoint.
 // endpointFmt must contain a single %d verb for the page number,
 // e.g. "repos/o/r/pulls/1/files?per_page=100&page=%d".
-func paginateREST[T any](rest *ghAPI.RESTClient, endpointFmt string) ([]T, error) {
+func paginateREST[T any](rest restClient, endpointFmt string) ([]T, error) {
 	var all []T
 	page := 1
 
