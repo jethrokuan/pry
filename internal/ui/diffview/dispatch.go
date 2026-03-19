@@ -107,14 +107,14 @@ func (m Model) handleCommentSelectKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 
-	switch msg.String() {
-	case "r":
+	switch {
+	case key.Matches(msg, keys.Reply):
 		m.comments.cursor = -1
 		return m, m.startComment(), true
-	case "e":
+	case key.Matches(msg, keys.EditComment):
 		newM, cmd := m.editSelectedComment()
 		return newM, cmd, true
-	case "d":
+	case key.Matches(msg, keys.DeleteComment):
 		newM, cmd := m.deleteSelectedComment()
 		return newM, cmd, true
 	}

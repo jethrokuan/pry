@@ -24,25 +24,22 @@ func (m Model) handleTreeKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 	case key.Matches(msg, keys.Enter):
 		return m.handleTreeEnter()
-	}
-
-	switch msg.String() {
-	case "/":
+	case key.Matches(msg, keys.Search):
 		m.search.filterActive = true
 		m.search.filterInput = ""
 		m.search.filterFiles = m.allFileIndices()
 		m.search.filterCursor = 0
 		return m, nil
-	case "g":
+	case key.Matches(msg, keys.GotoPrefix):
 		m.nav.pendingG = true
 		return m, nil
-	case "n":
+	case key.Matches(msg, keys.NextMatch):
 		m.repeatCycler(true)
 		return m, nil
-	case "p":
+	case key.Matches(msg, keys.PrevMatch):
 		m.repeatCycler(false)
 		return m, nil
-	case "?":
+	case key.Matches(msg, keys.Help):
 		m.showHelp = true
 		return m, nil
 	}
@@ -262,39 +259,35 @@ func (m Model) handleDiffKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-	}
-
-	// Trigger input modes (check raw key string)
-	switch msg.String() {
-	case "n":
+	case key.Matches(msg, keys.NextMatch):
 		m.repeatCycler(true)
 		return m, nil
-	case "p":
+	case key.Matches(msg, keys.PrevMatch):
 		m.repeatCycler(false)
 		return m, nil
-	case "d":
+	case key.Matches(msg, keys.DeleteComment):
 		m.nav.pendingD = true
 		return m, nil
-	case "g":
+	case key.Matches(msg, keys.GotoPrefix):
 		m.nav.pendingG = true
 		return m, nil
-	case "G":
+	case key.Matches(msg, keys.GotoEnd):
 		if len(m.nav.diffLines) > 0 {
 			m.nav.diffCursor = len(m.nav.diffLines) - 1
 			m.syncViewportToCursor()
 		}
 		return m, nil
-	case "/":
+	case key.Matches(msg, keys.Search):
 		m.search.active = true
 		m.search.input = ""
 		return m, nil
-	case "ctrl+p":
+	case key.Matches(msg, keys.FilterFile):
 		m.search.filterActive = true
 		m.search.filterInput = ""
 		m.search.filterFiles = m.allFileIndices()
 		m.search.filterCursor = 0
 		return m, nil
-	case "?":
+	case key.Matches(msg, keys.Help):
 		m.showHelp = true
 		return m, nil
 	}
