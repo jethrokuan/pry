@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# bd-patrol: Watch for ready beads tasks and spawn Claude Code worktrees to work on them.
-# Also auto-merges PRs that pass CI and periodically updates local main.
+# bd-patrol: Watch for ready beads tasks, spawn Claude Code worktrees, merge completed work.
+# Fully local — no GitHub PRs. Workers commit in jj worktrees, patrol merges into main.
 #
 # Usage:
 #   ./scripts/bd-patrol.sh                  # default: poll every 5s
@@ -8,8 +8,6 @@
 #   ./scripts/bd-patrol.sh --dry-run        # show what would be spawned, don't run
 #   ./scripts/bd-patrol.sh --max-workers 3  # limit concurrent worktrees (default: 5)
 #   ./scripts/bd-patrol.sh --once           # run once and exit (no loop)
-#   ./scripts/bd-patrol.sh --no-auto-merge  # disable auto-merge of passing PRs
-#   ./scripts/bd-patrol.sh --merge-strategy squash  # merge strategy: merge|squash|rebase (default: squash)
 
 set -euo pipefail
 
@@ -19,22 +17,15 @@ DRY_RUN=false
 MAX_WORKERS=5
 ONCE=false
 CLAUDE_MODEL=""
-AUTO_MERGE=true
-MERGE_STRATEGY="squash"
-MAIN_UPDATE_INTERVAL=60  # seconds between main branch updates
-LAST_MAIN_UPDATE=0
 
 # --- Parse args ---
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --interval)   POLL_INTERVAL="$2"; shift 2 ;;
-    --dry-run)    DRY_RUN=true; shift ;;
-    --max-workers) MAX_WORKERS="$2"; shift 2 ;;
-    --once)       ONCE=true; shift ;;
-    --model)      CLAUDE_MODEL="$2"; shift 2 ;;
-    --no-auto-merge) AUTO_MERGE=false; shift ;;
-    --merge-strategy) MERGE_STRATEGY="$2"; shift 2 ;;
-    --main-update-interval) MAIN_UPDATE_INTERVAL="$2"; shift 2 ;;
+    --interval)     POLL_INTERVAL="$2"; shift 2 ;;
+    --dry-run)      DRY_RUN=true; shift ;;
+    --max-workers)  MAX_WORKERS="$2"; shift 2 ;;
+    --once)         ONCE=true; shift ;;
+    --model)        CLAUDE_MODEL="$2"; shift 2 ;;
     -h|--help)
       sed -n '2,/^$/s/^# //p' "$0"
       exit 0
@@ -47,9 +38,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- State ---
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+REPO_ROOT="$(jj workspace root 2>/dev/null || git rev-parse --show-toplevel)"
 STATE_DIR="${REPO_ROOT}/.bd-patrol"
 mkdir -p "$STATE_DIR"
+
+# Active workers: track via sentinel files in STATE_DIR
+# Running: $STATE_DIR/<issue_id>.worker  (contains worktree name + PID)
+# Done:    $STATE_DIR/<issue_id>.exit    (contains exit code)
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
@@ -60,11 +55,95 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
-# Count currently in_progress issues as active workers
+# --- Count active workers ---
 count_active_workers() {
-  bd list --status=in_progress --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0
+  local count=0
+  shopt -s nullglob
+  for f in "$STATE_DIR"/*.worker; do
+    count=$(( count + 1 ))
+  done
+  shopt -u nullglob
+  echo "$count"
 }
 
+# --- Merge a worker's commits into main ---
+merge_worker() {
+  local issue_id="$1"
+  local ws_name="$2"
+
+  # Find the worker's commit (parent of the worktree's working copy)
+  local change_id
+  change_id="$(jj log --no-graph -r "${ws_name}@-" -T 'change_id' 2>/dev/null || echo "")"
+
+  if [[ -z "$change_id" ]]; then
+    log "No commit found for workspace $ws_name, nothing to merge"
+    return 1
+  fi
+
+  # Check if the commit is empty
+  if jj diff -r "$change_id" --stat 2>/dev/null | grep -q 'no changes'; then
+    log "Worker $ws_name produced no changes, skipping merge"
+    return 1
+  fi
+
+  # Rebase the commit onto main, then advance main
+  if jj rebase -r "$change_id" -d main 2>&1; then
+    jj bookmark set main -r "$change_id" 2>&1
+    log "Merged $issue_id into main (main now at $change_id)"
+    return 0
+  else
+    log "Failed to rebase $issue_id onto main — may need manual resolution"
+    return 1
+  fi
+}
+
+# --- Clean up a worktree ---
+cleanup_worktree() {
+  local ws_name="$1"
+  jj workspace forget "$ws_name" 2>/dev/null || true
+  local ws_path="${REPO_ROOT}/.worktrees/${ws_name}"
+  if [[ -d "$ws_path" ]]; then
+    rm -rf "$ws_path"
+  fi
+}
+
+# --- Reap completed workers ---
+reap_workers() {
+  shopt -s nullglob
+  local exit_files=("$STATE_DIR"/*.exit)
+  shopt -u nullglob
+  if [[ ${#exit_files[@]} -eq 0 ]]; then return; fi
+  for exit_file in "${exit_files[@]}"; do
+
+    local issue_id
+    issue_id="$(basename "$exit_file" .exit)"
+    local worker_file="$STATE_DIR/${issue_id}.worker"
+
+    if [[ ! -f "$worker_file" ]]; then
+      rm -f "$exit_file"
+      continue
+    fi
+
+    local ws_name exit_code
+    ws_name="$(head -1 "$worker_file")"
+    exit_code="$(cat "$exit_file")"
+
+    if [[ "$exit_code" -eq 0 ]]; then
+      log "Worker for $issue_id completed, merging $ws_name into main..."
+      if merge_worker "$issue_id" "$ws_name"; then
+        bd close "$issue_id" 2>/dev/null || true
+      fi
+    else
+      log "Worker for $issue_id failed (exit $exit_code)"
+      bd update "$issue_id" --notes="Worker failed with exit code $exit_code" 2>/dev/null || true
+    fi
+
+    cleanup_worktree "$ws_name"
+    rm -f "$worker_file" "$exit_file"
+  done
+}
+
+# --- Spawn a worker ---
 spawn_worker() {
   local issue_id="$1"
   local title="$2"
@@ -79,8 +158,12 @@ spawn_worker() {
     return
   fi
 
-  # Claim the issue before spawning so bd ready won't return it again
-  bd update "$issue_id" --claim 2>/dev/null || true
+  # Claim atomically — if it fails, someone else got it
+  local claim_err
+  if ! claim_err="$(bd update "$issue_id" --claim 2>&1)"; then
+    log "Failed to claim $issue_id: $claim_err — skipping"
+    return
+  fi
 
   log "Spawning worker for $issue_id ($ws_name): $title"
 
@@ -105,13 +188,15 @@ Description: $description
 3. go build ./cmd/...                   — must pass
 4. ginkgo -r -v                         — must pass
 5. jj diff                              — review your own diff, remove anything unrelated
-6. jj commit -m "<issue_id>: <summary>"
-7. bd close $issue_id
-8. bd dolt push && jj git push          — work is NOT done until pushed
+6. jj commit -m "$issue_id: <summary>"  — commit with issue ID in message
 
+Do NOT push, do NOT create PRs. Just commit locally. Patrol will merge.
 If any quality gate fails or the task is ambiguous, add notes (bd update $issue_id --notes="...") and stop.
 PROMPT
 )"
+
+  # Track the worker
+  echo "$ws_name" > "$STATE_DIR/${issue_id}.worker"
 
   # shellcheck disable=SC2086
   zellij run --name "$ws_name" -- \
@@ -125,146 +210,36 @@ PROMPT
       elif .type == \"result\" then
         \"\\n✓ Done\\n\"
       else empty end
-    '" -- "$prompt"
+    '; echo \$? > \"$STATE_DIR/${issue_id}.exit\"" -- "$prompt"
 
-  # Restore focus to the bd-patrol pane so workers don't steal focus
+  # Restore focus to the bd-patrol pane
   zellij action focus-previous-pane
 
   log "Worker launched for $issue_id ($ws_name)"
 }
 
-# --- Auto-merge passing PRs ---
-auto_merge_prs() {
-  if ! $AUTO_MERGE || $DRY_RUN; then
-    return
-  fi
-
-  # List open PRs targeting main, authored by the current user (the bot operator)
-  local prs
-  prs="$(gh pr list --base main --json number,headRefName,statusCheckRollup,isDraft --limit 50 2>/dev/null || echo "[]")"
-
-  local count
-  count="$(echo "$prs" | jq 'length')"
-  if [[ "$count" -eq 0 ]]; then
-    return
-  fi
-
-  local merged_any=false
-
-  # Use process substitution to avoid subshell (preserves variable mutations)
-  while IFS= read -r pr; do
-    local pr_num head_branch is_draft
-    pr_num="$(echo "$pr" | jq -r '.number')"
-    head_branch="$(echo "$pr" | jq -r '.headRefName')"
-    is_draft="$(echo "$pr" | jq -r '.isDraft')"
-
-    # Skip draft PRs
-    if [[ "$is_draft" == "true" ]]; then
-      continue
-    fi
-
-    # Check if all status checks passed (or no checks exist)
-    local checks_passed
-    checks_passed="$(echo "$pr" | jq '
-      .statusCheckRollup
-      | if . == null or length == 0 then true
-        else all(.[]; .state == "SUCCESS" or (.status == "COMPLETED" and .conclusion == "SUCCESS"))
-        end
-    ')"
-
-    if [[ "$checks_passed" == "true" ]]; then
-      log "Auto-merging PR #${pr_num} (${head_branch}) — all checks passed"
-      if gh pr merge "$pr_num" "--${MERGE_STRATEGY}" --delete-branch 2>&1; then
-        log "Successfully merged PR #${pr_num}"
-        merged_any=true
-      else
-        log "Failed to merge PR #${pr_num} — may need manual intervention"
-      fi
-    fi
-  done < <(echo "$prs" | jq -c '.[]')
-
-  # After merging, force-fetch so workers start from up-to-date main.
-  # Retry with backoff because GitHub may not have propagated the merge yet.
-  if [[ "$merged_any" == "true" ]]; then
-    local max_retries=3
-    local delay=3
-    local fetched=false
-
-    for (( attempt=1; attempt<=max_retries; attempt++ )); do
-      log "Post-merge fetch attempt ${attempt}/${max_retries} (waiting ${delay}s for propagation)..."
-      sleep "$delay"
-
-      # Fetch and check if main actually advanced (merge is visible)
-      local before after
-      before="$(jj log --no-graph -r main -T 'commit_id' 2>/dev/null || echo "")"
-      if jj git fetch 2>/dev/null; then
-        after="$(jj log --no-graph -r main -T 'commit_id' 2>/dev/null || echo "")"
-        if [[ "$before" != "$after" ]]; then
-          log "Post-merge fetch complete — main advanced"
-          fetched=true
-          break
-        elif [[ $attempt -lt $max_retries ]]; then
-          log "Fetch succeeded but main unchanged — GitHub may still be propagating, retrying..."
-          delay=$(( delay * 2 ))
-        else
-          log "Fetch succeeded but main unchanged after ${max_retries} attempts — proceeding anyway"
-          fetched=true
-        fi
-      else
-        log "Warning: fetch failed on attempt ${attempt}"
-        delay=$(( delay * 2 ))
-      fi
-    done
-
-    if $fetched; then
-      LAST_MAIN_UPDATE="$(date +%s)"
-    fi
-  fi
-}
-
-# --- Update local main branch ---
-update_main() {
-  local now
-  now="$(date +%s)"
-  local elapsed=$(( now - LAST_MAIN_UPDATE ))
-
-  if [[ $elapsed -lt $MAIN_UPDATE_INTERVAL ]]; then
-    return
-  fi
-
-  LAST_MAIN_UPDATE="$now"
-  log "Updating local main branch..."
-  if jj git fetch 2>/dev/null; then
-    log "Main branch updated"
-  else
-    log "Warning: failed to update main branch"
-  fi
-}
-
 # --- Main loop ---
-log "bd-patrol starting (interval=${POLL_INTERVAL}s, max-workers=${MAX_WORKERS}, dry-run=${DRY_RUN}, auto-merge=${AUTO_MERGE})"
+log "bd-patrol starting (interval=${POLL_INTERVAL}s, max-workers=${MAX_WORKERS}, dry-run=${DRY_RUN})"
 
 while true; do
-  # Auto-merge passing PRs and update main before dispatching new workers
-  auto_merge_prs
-  update_main
+  reap_workers
 
   active_count="$(count_active_workers)"
   available_slots=$(( MAX_WORKERS - active_count ))
 
   if [[ $available_slots -le 0 ]]; then
-    log "All $MAX_WORKERS worker slots occupied ($active_count in_progress), waiting..."
+    log "All $MAX_WORKERS worker slots occupied, waiting..."
   else
-    # Fetch ready issues as JSON
     ready_json="$(bd ready --json --limit "$available_slots" 2>/dev/null || echo "[]")"
     issue_count="$(echo "$ready_json" | jq 'length')"
 
     if [[ "$issue_count" -eq 0 ]]; then
-      log "No ready issues found ($active_count active)"
+      if [[ "$active_count" -gt 0 ]]; then
+        log "No ready issues ($active_count worker(s) active)"
+      fi
     else
       log "Found $issue_count ready issue(s), $available_slots slot(s) available"
 
-      # Use process substitution to avoid subshell (preserves array mutations)
       while IFS= read -r issue; do
         id="$(echo "$issue" | jq -r '.id')"
         title="$(echo "$issue" | jq -r '.title')"
