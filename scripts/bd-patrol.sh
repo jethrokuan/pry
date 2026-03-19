@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # bd-patrol: Watch for ready beads tasks and spawn Claude Code worktrees to work on them.
+# Also auto-merges PRs that pass CI and periodically updates local main.
 #
 # Usage:
 #   ./scripts/bd-patrol.sh                  # default: poll every 5s
@@ -7,6 +8,8 @@
 #   ./scripts/bd-patrol.sh --dry-run        # show what would be spawned, don't run
 #   ./scripts/bd-patrol.sh --max-workers 3  # limit concurrent worktrees (default: 5)
 #   ./scripts/bd-patrol.sh --once           # run once and exit (no loop)
+#   ./scripts/bd-patrol.sh --no-auto-merge  # disable auto-merge of passing PRs
+#   ./scripts/bd-patrol.sh --merge-strategy squash  # merge strategy: merge|squash|rebase (default: squash)
 
 set -euo pipefail
 
@@ -16,6 +19,10 @@ DRY_RUN=false
 MAX_WORKERS=5
 ONCE=false
 CLAUDE_MODEL=""
+AUTO_MERGE=true
+MERGE_STRATEGY="squash"
+MAIN_UPDATE_INTERVAL=60  # seconds between main branch updates
+LAST_MAIN_UPDATE=0
 
 # --- Parse args ---
 while [[ $# -gt 0 ]]; do
@@ -25,6 +32,9 @@ while [[ $# -gt 0 ]]; do
     --max-workers) MAX_WORKERS="$2"; shift 2 ;;
     --once)       ONCE=true; shift ;;
     --model)      CLAUDE_MODEL="$2"; shift 2 ;;
+    --no-auto-merge) AUTO_MERGE=false; shift ;;
+    --merge-strategy) MERGE_STRATEGY="$2"; shift 2 ;;
+    --main-update-interval) MAIN_UPDATE_INTERVAL="$2"; shift 2 ;;
     -h|--help)
       sed -n '2,/^$/s/^# //p' "$0"
       exit 0
@@ -119,10 +129,80 @@ PROMPT
   log "Worker launched for $issue_id ($ws_name)"
 }
 
+# --- Auto-merge passing PRs ---
+auto_merge_prs() {
+  if ! $AUTO_MERGE || $DRY_RUN; then
+    return
+  fi
+
+  # List open PRs targeting main, authored by the current user (the bot operator)
+  local prs
+  prs="$(gh pr list --base main --json number,headRefName,statusCheckRollup,isDraft --limit 50 2>/dev/null || echo "[]")"
+
+  local count
+  count="$(echo "$prs" | jq 'length')"
+  if [[ "$count" -eq 0 ]]; then
+    return
+  fi
+
+  echo "$prs" | jq -c '.[]' | while IFS= read -r pr; do
+    local pr_num head_branch is_draft
+    pr_num="$(echo "$pr" | jq -r '.number')"
+    head_branch="$(echo "$pr" | jq -r '.headRefName')"
+    is_draft="$(echo "$pr" | jq -r '.isDraft')"
+
+    # Skip draft PRs
+    if [[ "$is_draft" == "true" ]]; then
+      continue
+    fi
+
+    # Check if all status checks passed (or no checks exist)
+    local checks_passed
+    checks_passed="$(echo "$pr" | jq '
+      .statusCheckRollup
+      | if . == null or length == 0 then true
+        else all(.[]; .state == "SUCCESS" or (.status == "COMPLETED" and .conclusion == "SUCCESS"))
+        end
+    ')"
+
+    if [[ "$checks_passed" == "true" ]]; then
+      log "Auto-merging PR #${pr_num} (${head_branch}) — all checks passed"
+      if gh pr merge "$pr_num" "--${MERGE_STRATEGY}" --delete-branch 2>&1; then
+        log "Successfully merged PR #${pr_num}"
+      else
+        log "Failed to merge PR #${pr_num} — may need manual intervention"
+      fi
+    fi
+  done
+}
+
+# --- Update local main branch ---
+update_main() {
+  local now
+  now="$(date +%s)"
+  local elapsed=$(( now - LAST_MAIN_UPDATE ))
+
+  if [[ $elapsed -lt $MAIN_UPDATE_INTERVAL ]]; then
+    return
+  fi
+
+  LAST_MAIN_UPDATE="$now"
+  log "Updating local main branch..."
+  if jj git fetch 2>/dev/null; then
+    log "Main branch updated"
+  else
+    log "Warning: failed to update main branch"
+  fi
+}
+
 # --- Main loop ---
-log "bd-patrol starting (interval=${POLL_INTERVAL}s, max-workers=${MAX_WORKERS}, dry-run=${DRY_RUN})"
+log "bd-patrol starting (interval=${POLL_INTERVAL}s, max-workers=${MAX_WORKERS}, dry-run=${DRY_RUN}, auto-merge=${AUTO_MERGE})"
 
 while true; do
+  # Auto-merge passing PRs and update main before dispatching new workers
+  auto_merge_prs
+  update_main
+
   active_count="$(count_active_workers)"
   available_slots=$(( MAX_WORKERS - active_count ))
 
