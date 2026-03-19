@@ -39,3 +39,26 @@ func (c *Client) RepoOwner() string { return c.owner }
 
 // RepoName returns the current repo name.
 func (c *Client) RepoName() string { return c.repo }
+
+// paginateREST fetches all pages of a paginated REST endpoint.
+// endpoint is the base URL without pagination params (e.g. "repos/o/r/pulls/1/files").
+// The helper appends ?per_page=100&page=N automatically.
+func paginateREST[T any](rest *ghAPI.RESTClient, endpoint string) ([]T, error) {
+	var all []T
+	page := 1
+
+	for {
+		url := fmt.Sprintf("%s?per_page=100&page=%d", endpoint, page)
+		var batch []T
+		if err := rest.Get(url, &batch); err != nil {
+			return nil, err
+		}
+		all = append(all, batch...)
+		if len(batch) < 100 {
+			break
+		}
+		page++
+	}
+
+	return all, nil
+}
