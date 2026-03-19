@@ -56,18 +56,20 @@ var keys = KeyMap{
 
 // Model is the Bubble Tea model for the PR list screen.
 type Model struct {
-	svc       review.Service
-	prs       []review.PullRequest
-	cursor    int
-	filters   []review.PRFilter
-	filterIdx int
-	columns   []string
-	userTeams map[string]bool // cached user team membership ("org/slug" → true)
-	loading   bool
-	err       error
-	width     int
-	height    int
-	spinner   spinner.Model
+	svc              review.Service
+	prs              []review.PullRequest
+	cursor           int
+	filters          []review.PRFilter
+	filterIdx        int
+	columns          []string
+	userTeams        map[string]bool // cached user team membership ("org/slug" → true)
+	loading          bool
+	err              error
+	width            int
+	height           int
+	spinner          spinner.Model
+	showFilterPicker bool
+	filterCursor     int
 }
 
 // New creates a new PR list model.
@@ -138,6 +140,32 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.loading {
 			return m, nil
 		}
+
+		// Filter picker mode
+		if m.showFilterPicker {
+			switch {
+			case key.Matches(msg, keys.Up):
+				if m.filterCursor > 0 {
+					m.filterCursor--
+				}
+			case key.Matches(msg, keys.Down):
+				if m.filterCursor < len(m.filters)-1 {
+					m.filterCursor++
+				}
+			case key.Matches(msg, keys.Select):
+				m.showFilterPicker = false
+				if m.filterCursor != m.filterIdx {
+					m.filterIdx = m.filterCursor
+					m.loading = true
+					return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+				}
+			case key.Matches(msg, keys.Quit), key.Matches(msg, key.NewBinding(key.WithKeys("esc", "f"))):
+				m.showFilterPicker = false
+			}
+			return m, nil
+		}
+
+		// Normal mode
 		switch {
 		case key.Matches(msg, keys.Quit):
 			return m, tea.Quit
@@ -156,9 +184,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 		case key.Matches(msg, keys.Filter):
-			m.filterIdx = (m.filterIdx + 1) % len(m.filters)
-			m.loading = true
-			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+			m.showFilterPicker = true
+			m.filterCursor = m.filterIdx
 		case key.Matches(msg, keys.Refresh):
 			m.loading = true
 			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
@@ -331,6 +358,29 @@ func (m Model) View() string {
 	}
 	qualifierStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 	b.WriteString(qualifierStyle.Render("  "+qualifier) + "\n\n")
+
+	// Filter picker overlay
+	if m.showFilterPicker {
+		b.WriteString("Select a filter:\n\n")
+		for i, f := range m.filters {
+			cursor := "  "
+			if i == m.filterCursor {
+				cursor = "> "
+			}
+			name := f.Name
+			if i == m.filterIdx {
+				name += " (current)"
+			}
+			if i == m.filterCursor {
+				b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render(cursor+name) + "\n")
+			} else {
+				b.WriteString(cursor + name + "\n")
+			}
+		}
+		b.WriteString("\n")
+		b.WriteString(styles.HelpStyle.Render("↑/k up  ↓/j down  enter select  esc/f cancel"))
+		return b.String()
+	}
 
 	if m.loading {
 		b.WriteString(m.spinner.View() + " Loading PRs...\n")
