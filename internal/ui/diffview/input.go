@@ -1,6 +1,7 @@
 package diffview
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -34,11 +35,11 @@ func (m Model) handleTreeKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.nav.pendingG = true
 		return m, nil
 	case key.Matches(msg, keys.NextMatch):
-		m.repeatCycler(true)
-		return m, nil
+		cmd := m.repeatCycler(true)
+		return m, cmd
 	case key.Matches(msg, keys.PrevMatch):
-		m.repeatCycler(false)
-		return m, nil
+		cmd := m.repeatCycler(false)
+		return m, cmd
 	case key.Matches(msg, keys.Help):
 		m.showHelp = true
 		return m, nil
@@ -172,25 +173,43 @@ func (m Model) toggleFoldAll() Model {
 }
 
 // moveToNextFile moves treeCursor to the next file row (skipping folders).
-func (m *Model) moveToNextFile() {
-	for i := m.nav.treeCursor + 1; i < len(m.nav.treeRows); i++ {
-		if m.nav.treeRows[i].node.fileIdx >= 0 {
-			m.nav.treeCursor = i
+// Wraps around to the first file when at the end.
+func (m *Model) moveToNextFile() tea.Cmd {
+	n := len(m.nav.treeRows)
+	start := m.nav.treeCursor
+	for i := 1; i < n; i++ {
+		idx := (start + i) % n
+		if m.nav.treeRows[idx].node.fileIdx >= 0 {
+			m.nav.treeCursor = idx
 			m.onTreeCursorChanged()
-			return
+			m.updateFileCyclerPosition(false)
+			if idx <= start {
+				return m.setFlash("Wrapped to first file")
+			}
+			return nil
 		}
 	}
+	return nil
 }
 
 // moveToPrevFile moves treeCursor to the previous file row (skipping folders).
-func (m *Model) moveToPrevFile() {
-	for i := m.nav.treeCursor - 1; i >= 0; i-- {
-		if m.nav.treeRows[i].node.fileIdx >= 0 {
-			m.nav.treeCursor = i
+// Wraps around to the last file when at the beginning.
+func (m *Model) moveToPrevFile() tea.Cmd {
+	n := len(m.nav.treeRows)
+	start := m.nav.treeCursor
+	for i := 1; i < n; i++ {
+		idx := (start - i + n) % n
+		if m.nav.treeRows[idx].node.fileIdx >= 0 {
+			m.nav.treeCursor = idx
 			m.onTreeCursorChanged()
-			return
+			m.updateFileCyclerPosition(false)
+			if idx >= start {
+				return m.setFlash("Wrapped to last file")
+			}
+			return nil
 		}
 	}
+	return nil
 }
 
 func (m Model) handleDiffKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -260,11 +279,11 @@ func (m Model) handleDiffKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			}
 		}
 	case key.Matches(msg, keys.NextMatch):
-		m.repeatCycler(true)
-		return m, nil
+		cmd := m.repeatCycler(true)
+		return m, cmd
 	case key.Matches(msg, keys.PrevMatch):
-		m.repeatCycler(false)
-		return m, nil
+		cmd := m.repeatCycler(false)
+		return m, cmd
 	case key.Matches(msg, keys.DeleteComment):
 		m.nav.pendingD = true
 		return m, nil
@@ -301,22 +320,23 @@ func (m Model) handlePendingG(msg tea.KeyMsg) (Model, tea.Cmd) {
 	m.nav.pendingG = false
 	s := msg.String()
 
+	var cmd tea.Cmd
 	switch s {
 	case "h":
 		m.nav.activeCycler = 'h'
-		m.navigateHunk(true)
+		cmd = m.navigateHunk(true)
 	case "f":
 		m.nav.activeCycler = 'f'
-		m.navigateFile(true, false)
+		cmd = m.navigateFile(true, false)
 	case "F":
 		m.nav.activeCycler = 'F'
-		m.navigateFile(true, true)
+		cmd = m.navigateFile(true, true)
 	case "c":
 		m.nav.activeCycler = 'c'
-		m.navigateComment(true, false)
+		cmd = m.navigateComment(true, false)
 	case "C":
 		m.nav.activeCycler = 'C'
-		m.navigateComment(true, true)
+		cmd = m.navigateComment(true, true)
 	case "g":
 		// gg = go to top
 		m.nav.diffCursor = 0
@@ -331,7 +351,7 @@ func (m Model) handlePendingG(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		// Unknown key — ignore
 	}
-	return m, nil
+	return m, cmd
 }
 
 // --- Pending d key (for dd delete, de edit) ---
@@ -348,58 +368,58 @@ func (m Model) handlePendingD(msg tea.KeyMsg) (Model, tea.Cmd) {
 }
 
 // repeatCycler repeats the last go-to motion in the active cycler direction.
-func (m *Model) repeatCycler(forward bool) {
+// Returns a tea.Cmd for flash messages (e.g., wrap-around notification).
+func (m *Model) repeatCycler(forward bool) tea.Cmd {
 	switch m.nav.activeCycler {
 	case 'f':
-		m.navigateFile(forward, false)
+		return m.navigateFile(forward, false)
 	case 'F':
-		m.navigateFile(forward, true)
+		return m.navigateFile(forward, true)
 	case 'c':
-		m.navigateComment(forward, false)
+		return m.navigateComment(forward, false)
 	case 'C':
-		m.navigateComment(forward, true)
+		return m.navigateComment(forward, true)
 	case '/':
 		if m.search.query != "" {
 			if forward {
-				m.jumpToNextSearchMatch()
-			} else {
-				m.jumpToPrevSearchMatch()
+				return m.jumpToNextSearchMatch()
 			}
+			return m.jumpToPrevSearchMatch()
 		}
+		return nil
 	case 'h':
 		fallthrough
 	default:
-		m.navigateHunk(forward)
+		return m.navigateHunk(forward)
 	}
 }
 
 // navigateFile moves to the next/prev file. If unviewedOnly, skip viewed files.
-func (m *Model) navigateFile(forward, unviewedOnly bool) {
+// Returns a tea.Cmd for flash messages when wrapping occurs.
+func (m *Model) navigateFile(forward, unviewedOnly bool) tea.Cmd {
 	n := len(m.files)
 	if n == 0 {
-		return
+		return nil
 	}
 
 	if m.nav.focus == FocusFileTree {
 		// In tree view, delegate to tree navigation
 		if unviewedOnly {
-			m.moveToUnviewedFileInTree(forward)
-		} else {
-			if forward {
-				m.moveToNextFile()
-			} else {
-				m.moveToPrevFile()
-			}
+			return m.moveToUnviewedFileInTree(forward)
 		}
-		return
+		if forward {
+			return m.moveToNextFile()
+		}
+		return m.moveToPrevFile()
 	}
 
 	// In diff view
-	idx := cyclicSearch(m.nav.fileCursor, n, forward, func(i int) bool {
+	start := m.nav.fileCursor
+	idx := cyclicSearch(start, n, forward, func(i int) bool {
 		return !unviewedOnly || !m.review.ViewedFiles[m.files[i].Path]
 	})
 	if idx < 0 {
-		return
+		return nil
 	}
 	oldIdx := m.nav.fileCursor
 	m.nav.fileCursor = idx
@@ -408,61 +428,95 @@ func (m *Model) navigateFile(forward, unviewedOnly bool) {
 	m.nav.diffViewport.GotoTop()
 	m.updateDiffContent()
 	m.autoFollowFile(oldIdx, m.nav.fileCursor)
+
+	// Compute cycler position and detect wrap
+	m.updateFileCyclerPosition(unviewedOnly)
+	wrapped := (forward && idx <= start) || (!forward && idx >= start)
+	if wrapped {
+		label := "file"
+		if unviewedOnly {
+			label = "unviewed file"
+		}
+		if forward {
+			return m.setFlash(fmt.Sprintf("Wrapped to first %s", label))
+		}
+		return m.setFlash(fmt.Sprintf("Wrapped to last %s", label))
+	}
+	return nil
 }
 
 // moveToUnviewedFileInTree moves treeCursor to the next/prev unviewed file row.
-func (m *Model) moveToUnviewedFileInTree(forward bool) {
+func (m *Model) moveToUnviewedFileInTree(forward bool) tea.Cmd {
 	n := len(m.nav.treeRows)
 	if n == 0 {
-		return
+		return nil
 	}
-	idx := cyclicSearch(m.nav.treeCursor, n, forward, func(i int) bool {
+	start := m.nav.treeCursor
+	idx := cyclicSearch(start, n, forward, func(i int) bool {
 		row := m.nav.treeRows[i]
 		return row.node.fileIdx >= 0 && !m.review.ViewedFiles[m.files[row.node.fileIdx].Path]
 	})
-	if idx >= 0 {
-		m.nav.treeCursor = idx
-		m.onTreeCursorChanged()
+	if idx < 0 {
+		return nil
 	}
+	m.nav.treeCursor = idx
+	m.onTreeCursorChanged()
+	m.updateFileCyclerPosition(true)
+	wrapped := (forward && idx <= start) || (!forward && idx >= start)
+	if wrapped {
+		if forward {
+			return m.setFlash("Wrapped to first unviewed file")
+		}
+		return m.setFlash("Wrapped to last unviewed file")
+	}
+	return nil
 }
 
 // navigateComment moves to the next/prev comment. If crossFile, jump to next file with comments.
 // When landing on a comment, expands the comment block and selects the first comment.
-func (m *Model) navigateComment(forward, crossFile bool) {
+func (m *Model) navigateComment(forward, crossFile bool) tea.Cmd {
 	if crossFile {
-		m.navigateCommentToFile(forward)
-		return
+		return m.navigateCommentToFile(forward)
 	}
 	// Within current file: find next diff line that has comments
 	if len(m.nav.diffLines) == 0 {
-		m.navigateCommentToFile(forward)
-		return
+		return m.navigateCommentToFile(forward)
 	}
 	n := len(m.nav.diffLines)
+	start := m.nav.diffCursor
 	path := m.files[m.nav.fileCursor].Path
-	idx := cyclicSearch(m.nav.diffCursor, n, forward, func(i int) bool {
+	idx := cyclicSearch(start, n, forward, func(i int) bool {
 		return m.lineHasComments(path, m.nav.diffLines[i])
 	})
 	if idx >= 0 {
 		m.nav.diffCursor = idx
 		m.expandAndSelectComment(idx)
 		m.syncViewportToCursorWithComments()
-		return
+		m.updateCommentCyclerPosition(crossFile)
+		wrapped := (forward && idx <= start) || (!forward && idx >= start)
+		if wrapped {
+			if forward {
+				return m.setFlash("Wrapped to first comment")
+			}
+			return m.setFlash("Wrapped to last comment")
+		}
+		return nil
 	}
 	// No more comments in current file — try cross-file
-	m.navigateCommentToFile(forward)
+	return m.navigateCommentToFile(forward)
 }
 
 // navigateCommentToFile jumps to the next/prev file that has comments,
 // positions the cursor on the first/last commented line, and expands+selects it.
 // Skips files where comments exist but don't map to any visible diff line.
-func (m *Model) navigateCommentToFile(forward bool) {
+func (m *Model) navigateCommentToFile(forward bool) tea.Cmd {
 	nFiles := len(m.files)
 	if nFiles == 0 {
-		return
+		return nil
 	}
+	start := m.nav.fileCursor
 	oldIdx := m.nav.fileCursor
-	idx := cyclicSearch(m.nav.fileCursor, nFiles, forward, func(i int) bool {
+	idx := cyclicSearch(start, nFiles, forward, func(i int) bool {
 		if !m.fileHasComments(m.files[i].Path) {
 			return false
 		}
@@ -478,7 +532,7 @@ func (m *Model) navigateCommentToFile(forward bool) {
 		return true
 	})
 	if idx < 0 {
-		return
+		return nil
 	}
 	// m.nav.fileCursor and diffLines are already set to the found file by the match function
 	m.nav.diffCursor = m.findCommentedDiffLine(m.files[idx].Path, forward)
@@ -487,6 +541,15 @@ func (m *Model) navigateCommentToFile(forward bool) {
 	m.updateDiffContent()
 	m.autoFollowFile(oldIdx, m.nav.fileCursor)
 	m.syncViewportToCursorWithComments()
+	m.updateCommentCyclerPosition(true)
+	wrapped := (forward && idx <= start) || (!forward && idx >= start)
+	if wrapped {
+		if forward {
+			return m.setFlash("Wrapped to first commented file")
+		}
+		return m.setFlash("Wrapped to last commented file")
+	}
+	return nil
 }
 
 // expandAndSelectComment expands the comment block at the given cursor and selects the first comment.
@@ -526,10 +589,9 @@ func (m *Model) findCommentedDiffLine(path string, forward bool) int {
 
 // navigateHunk moves to the first line of the next/prev hunk.
 // Crosses file boundaries when at the last/first hunk.
-func (m *Model) navigateHunk(forward bool) {
+func (m *Model) navigateHunk(forward bool) tea.Cmd {
 	if len(m.nav.diffLines) == 0 {
-		m.navigateHunkCrossFile(forward)
-		return
+		return m.navigateHunkCrossFile(forward)
 	}
 	currentHunk := m.nav.diffLines[m.nav.diffCursor].hunkIdx
 
@@ -538,53 +600,56 @@ func (m *Model) navigateHunk(forward bool) {
 			if m.nav.diffLines[i].hunkIdx != currentHunk {
 				m.nav.diffCursor = i
 				m.syncViewportToCursor()
-				return
+				m.updateHunkCyclerPosition()
+				return nil
 			}
 		}
 		// At last hunk — cross to next file
-		m.navigateHunkCrossFile(true)
-	} else {
-		// First, go to start of current hunk
-		startOfCurrent := m.nav.diffCursor
-		for startOfCurrent > 0 && m.nav.diffLines[startOfCurrent-1].hunkIdx == currentHunk {
-			startOfCurrent--
-		}
-		if startOfCurrent < m.nav.diffCursor {
-			// We weren't at the start — go there
-			m.nav.diffCursor = startOfCurrent
-			m.syncViewportToCursor()
-			return
-		}
-		// Already at start — go to start of previous hunk
-		if startOfCurrent > 0 {
-			prevHunk := m.nav.diffLines[startOfCurrent-1].hunkIdx
-			for i := startOfCurrent - 1; i >= 0; i-- {
-				if i == 0 || m.nav.diffLines[i-1].hunkIdx != prevHunk {
-					m.nav.diffCursor = i
-					m.syncViewportToCursor()
-					return
-				}
+		return m.navigateHunkCrossFile(true)
+	}
+
+	// First, go to start of current hunk
+	startOfCurrent := m.nav.diffCursor
+	for startOfCurrent > 0 && m.nav.diffLines[startOfCurrent-1].hunkIdx == currentHunk {
+		startOfCurrent--
+	}
+	if startOfCurrent < m.nav.diffCursor {
+		// We weren't at the start — go there
+		m.nav.diffCursor = startOfCurrent
+		m.syncViewportToCursor()
+		m.updateHunkCyclerPosition()
+		return nil
+	}
+	// Already at start — go to start of previous hunk
+	if startOfCurrent > 0 {
+		prevHunk := m.nav.diffLines[startOfCurrent-1].hunkIdx
+		for i := startOfCurrent - 1; i >= 0; i-- {
+			if i == 0 || m.nav.diffLines[i-1].hunkIdx != prevHunk {
+				m.nav.diffCursor = i
+				m.syncViewportToCursor()
+				m.updateHunkCyclerPosition()
+				return nil
 			}
 		}
-		// At first hunk — cross to prev file
-		m.navigateHunkCrossFile(false)
 	}
+	// At first hunk — cross to prev file
+	return m.navigateHunkCrossFile(false)
 }
 
 // navigateHunkCrossFile moves to the next/prev file and positions at the
 // first hunk (forward) or the last hunk's start (backward).
-func (m *Model) navigateHunkCrossFile(forward bool) {
+func (m *Model) navigateHunkCrossFile(forward bool) tea.Cmd {
 	nFiles := len(m.files)
 	if nFiles <= 1 {
-		return
+		return nil
 	}
+	oldIdx := m.nav.fileCursor
 	var nextIdx int
 	if forward {
 		nextIdx = (m.nav.fileCursor + 1) % nFiles
 	} else {
 		nextIdx = (m.nav.fileCursor - 1 + nFiles) % nFiles
 	}
-	oldIdx := m.nav.fileCursor
 	m.nav.fileCursor = nextIdx
 	m.nav.buildDiffLines(m.files)
 	if forward {
@@ -605,6 +670,15 @@ func (m *Model) navigateHunkCrossFile(forward bool) {
 	m.updateDiffContent()
 	m.autoFollowFile(oldIdx, m.nav.fileCursor)
 	m.syncViewportToCursor()
+	m.updateHunkCyclerPosition()
+	wrapped := (forward && nextIdx <= oldIdx) || (!forward && nextIdx >= oldIdx)
+	if wrapped {
+		if forward {
+			return m.setFlash("Wrapped to first file")
+		}
+		return m.setFlash("Wrapped to last file")
+	}
+	return nil
 }
 
 // lineHasComments returns true if the given diff line has any comments.
@@ -621,6 +695,82 @@ func (m *Model) lineHasComments(path string, dl diffLineInfo) bool {
 // fileHasComments returns true if any comments exist for the given file path.
 func (m *Model) fileHasComments(path string) bool {
 	return m.comments.fileCommentIndex[path]
+}
+
+// --- Cycler position helpers ---
+
+// updateFileCyclerPosition computes the current position and total count for file cycling.
+func (m *Model) updateFileCyclerPosition(unviewedOnly bool) {
+	if unviewedOnly {
+		total := 0
+		pos := 0
+		for i, f := range m.files {
+			if !m.review.ViewedFiles[f.Path] {
+				total++
+				if i == m.nav.fileCursor {
+					pos = total
+				}
+			}
+		}
+		m.nav.cyclerTotal = total
+		m.nav.cyclerIndex = pos
+	} else {
+		m.nav.cyclerTotal = len(m.files)
+		m.nav.cyclerIndex = m.nav.fileCursor + 1
+	}
+}
+
+// updateHunkCyclerPosition computes the current hunk position and total hunks in the file.
+func (m *Model) updateHunkCyclerPosition() {
+	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+		m.nav.cyclerIndex = 0
+		m.nav.cyclerTotal = 0
+		return
+	}
+	file := m.files[m.nav.fileCursor]
+	m.nav.cyclerTotal = len(file.Hunks)
+	if len(m.nav.diffLines) > 0 && m.nav.diffCursor < len(m.nav.diffLines) {
+		m.nav.cyclerIndex = m.nav.diffLines[m.nav.diffCursor].hunkIdx + 1
+	} else {
+		m.nav.cyclerIndex = 0
+	}
+}
+
+// updateCommentCyclerPosition computes comment position for the cycler indicator.
+func (m *Model) updateCommentCyclerPosition(crossFile bool) {
+	if crossFile {
+		// Count files with comments
+		total := 0
+		pos := 0
+		for i, f := range m.files {
+			if m.fileHasComments(f.Path) {
+				total++
+				if i == m.nav.fileCursor {
+					pos = total
+				}
+			}
+		}
+		m.nav.cyclerTotal = total
+		m.nav.cyclerIndex = pos
+	} else {
+		// Count commented lines in current file
+		if len(m.files) == 0 {
+			return
+		}
+		path := m.files[m.nav.fileCursor].Path
+		total := 0
+		pos := 0
+		for i, dl := range m.nav.diffLines {
+			if m.lineHasComments(path, dl) {
+				total++
+				if i == m.nav.diffCursor {
+					pos = total
+				}
+			}
+		}
+		m.nav.cyclerTotal = total
+		m.nav.cyclerIndex = pos
+	}
 }
 
 // --- Goto line handling ---
@@ -671,12 +821,13 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "enter":
 		m.search.query = m.search.input
 		m.search.active = false
+		var cmd tea.Cmd
 		if m.search.query != "" {
 			m.nav.activeCycler = '/'
-			m.jumpToNextSearchMatch()
+			cmd = m.jumpToNextSearchMatch()
 		}
 		m.updateDiffContent()
-		return m, nil
+		return m, cmd
 	case "esc":
 		m.search.active = false
 		m.search.input = ""
@@ -695,13 +846,14 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 }
 
-func (m *Model) jumpToNextSearchMatch() {
+func (m *Model) jumpToNextSearchMatch() tea.Cmd {
 	query := strings.ToLower(m.search.query)
 	for i := m.nav.diffCursor + 1; i < len(m.nav.diffLines); i++ {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.diffCursor = i
 			m.syncViewportToCursor()
-			return
+			m.updateSearchCyclerPosition()
+			return nil
 		}
 	}
 	// Wrap around
@@ -709,18 +861,21 @@ func (m *Model) jumpToNextSearchMatch() {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.diffCursor = i
 			m.syncViewportToCursor()
-			return
+			m.updateSearchCyclerPosition()
+			return m.setFlash("Wrapped to first match")
 		}
 	}
+	return nil
 }
 
-func (m *Model) jumpToPrevSearchMatch() {
+func (m *Model) jumpToPrevSearchMatch() tea.Cmd {
 	query := strings.ToLower(m.search.query)
 	for i := m.nav.diffCursor - 1; i >= 0; i-- {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.diffCursor = i
 			m.syncViewportToCursor()
-			return
+			m.updateSearchCyclerPosition()
+			return nil
 		}
 	}
 	// Wrap around
@@ -728,9 +883,28 @@ func (m *Model) jumpToPrevSearchMatch() {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.diffCursor = i
 			m.syncViewportToCursor()
-			return
+			m.updateSearchCyclerPosition()
+			return m.setFlash("Wrapped to last match")
 		}
 	}
+	return nil
+}
+
+// updateSearchCyclerPosition computes the current search match position and total.
+func (m *Model) updateSearchCyclerPosition() {
+	query := strings.ToLower(m.search.query)
+	total := 0
+	pos := 0
+	for i, dl := range m.nav.diffLines {
+		if strings.Contains(strings.ToLower(dl.content), query) {
+			total++
+			if i == m.nav.diffCursor {
+				pos = total
+			}
+		}
+	}
+	m.nav.cyclerTotal = total
+	m.nav.cyclerIndex = pos
 }
 
 // --- File filter handling ---

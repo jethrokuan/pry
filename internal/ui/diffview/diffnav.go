@@ -34,6 +34,10 @@ type DiffNav struct {
 	pendingG     bool
 	pendingD     bool
 	activeCycler rune // 'h' = hunk (default); 'f','F','c','C' = go-to motion; '/' = search
+
+	// Cycler position tracking
+	cyclerIndex int // 1-based current position in cycle
+	cyclerTotal int // total items in cycle
 }
 
 // buildDiffLines flattens the hunks of the current file into a flat diffLines slice.

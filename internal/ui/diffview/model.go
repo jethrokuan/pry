@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -83,6 +84,8 @@ type editorFinishedMsg struct {
 	content string
 	err     error
 }
+
+type flashExpiredMsg struct{}
 
 // --- Inline comment mode ---
 
@@ -202,6 +205,9 @@ type Model struct {
 	// PR info popup
 	prInfoActive   bool
 	prInfoViewport viewport.Model
+
+	// Flash message (auto-dismissing status text)
+	flashMsg string
 
 	// Caches
 	mdCache  map[mdCacheKey]string // rendered markdown cache
@@ -502,6 +508,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.comments.inlineTextarea.SetValue(msg.content)
 		}
 
+	case flashExpiredMsg:
+		m.flashMsg = ""
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -665,6 +674,14 @@ func (m *Model) commentRenderedLines(path string, lineNum int, side string) int 
 		return maxH
 	}
 	return lines
+}
+
+// setFlash sets a flash message and returns a command that clears it after a delay.
+func (m *Model) setFlash(msg string) tea.Cmd {
+	m.flashMsg = msg
+	return tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
+		return flashExpiredMsg{}
+	})
 }
 
 // hasUnsavedWork returns true if the review has any pending comments that would
@@ -924,11 +941,22 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "? help")
 		}
 
-		// Show active cycler indicator
+		// Show active cycler indicator with position
 		if m.nav.activeCycler != 0 {
 			label := cyclerLabel(m.nav.activeCycler)
+			cyclerText := fmt.Sprintf("[n/N: %s", label)
+			if m.nav.cyclerTotal > 0 {
+				cyclerText += fmt.Sprintf(" %d/%d", m.nav.cyclerIndex, m.nav.cyclerTotal)
+			}
+			cyclerText += "]"
 			helpParts = append(helpParts,
-				lipgloss.NewStyle().Foreground(styles.Warning).Render(fmt.Sprintf("[n/N: %s]", label)))
+				lipgloss.NewStyle().Foreground(styles.Warning).Render(cyclerText))
+		}
+
+		// Show flash message if active
+		if m.flashMsg != "" {
+			helpParts = append(helpParts,
+				lipgloss.NewStyle().Foreground(styles.Cyan).Italic(true).Render(m.flashMsg))
 		}
 
 		b.WriteString(styles.HelpStyle.Render(strings.Join(helpParts, "  ")))

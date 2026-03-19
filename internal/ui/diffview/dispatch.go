@@ -51,6 +51,9 @@ func (m Model) activeMode() inputMode {
 
 // handleKey dispatches a key event to the appropriate mode handler.
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	// Clear flash message on any keypress
+	m.flashMsg = ""
+
 	switch m.activeMode() {
 	case modeGoto:
 		return m.handleGotoKey(msg)
