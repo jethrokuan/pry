@@ -166,15 +166,10 @@ type Model struct {
 	width    int
 	height   int
 	loading  bool
-	loadErr  error
 	spinner  spinner.Model
 	showHelp bool
 
-	// Scoped sync errors — each operation tracks its own error independently
-	// so that a successful sync doesn't erase an unrelated failure.
-	commentSyncErrors map[int]error // keyed by localID
-	reviewCreateErr   error
-	viewedErr         error
+	errors errorStore // unified error tracking for all async operations
 
 	confirmQuit bool // true when waiting for second quit key to confirm
 
@@ -203,10 +198,10 @@ func New(svc review.Service, pr review.PullRequest, rev *review.PendingReview) M
 		svc:               svc,
 		pr:                pr,
 		review:            rev,
-		loading:           true,
-		spinner:           s,
-		commentSyncErrors: make(map[int]error),
-		mdCache:           make(map[mdCacheKey]string),
+		loading: true,
+		spinner: s,
+		errors:  newErrorStore(),
+		mdCache: make(map[mdCacheKey]string),
 		treeDirty:         true,
 		nav: DiffNav{
 			showTree:      true,
@@ -334,7 +329,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case filesLoadedMsg:
 		m.loading = false
 		if msg.err != nil {
-			m.loadErr = msg.err
+			m.errors.set(errCatLoad, 0, msg.err)
 		} else {
 			m.files = msg.files
 			m.nav.cachedTree = buildTree(m.files)
@@ -347,7 +342,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case existingCommentsMsg:
 		if msg.err != nil {
-			m.loadErr = fmt.Errorf("comments: %w", msg.err)
+			m.errors.set(errCatLoad, 0, fmt.Errorf("comments: %w", msg.err))
 		} else {
 			m.comments.existing = msg.comments
 			m.rebuildCommentIndex()
@@ -356,7 +351,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case pendingReviewMsg:
 		if msg.err != nil {
-			m.reviewCreateErr = msg.err
+			m.errors.set(errCatReview, 0, msg.err)
 		} else if msg.reviewID > 0 {
 			m.review.ReviewID = msg.reviewID
 			m.review.ReviewNodeID = msg.reviewNodeID
@@ -395,7 +390,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				return m, tea.Batch(cmds...)
 			}
 		} else {
-			m.reviewCreateErr = msg.err
+			m.errors.set(errCatReview, 0, msg.err)
 		}
 
 	case commentSyncedMsg:
@@ -403,11 +398,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if msg.err != nil {
 				c.SyncStatus = review.SyncFailed
 				c.SyncError = msg.err
-				m.commentSyncErrors[msg.localID] = msg.err
+				m.errors.set(errCatCommentSync, msg.localID, msg.err)
 			} else {
 				c.SyncStatus = review.SyncComplete
 				c.ForgeID = msg.forgeID
-				delete(m.commentSyncErrors, msg.localID)
+				m.errors.clear(errCatCommentSync, msg.localID)
 			}
 			m.rebuildCommentIndex()
 			m.updateDiffContent()
@@ -415,18 +410,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case commentDeletedMsg:
 		if msg.err != nil {
-			m.commentSyncErrors[msg.localID] = fmt.Errorf("delete: %w", msg.err)
+			m.errors.set(errCatCommentSync, msg.localID, fmt.Errorf("delete: %w", msg.err))
 		} else {
-			delete(m.commentSyncErrors, msg.localID)
+			m.errors.clear(errCatCommentSync, msg.localID)
 		}
 		m.rebuildCommentIndex()
 		m.updateDiffContent()
 
 	case commentEditedMsg:
 		if msg.err != nil {
-			m.commentSyncErrors[msg.localID] = fmt.Errorf("edit: %w", msg.err)
+			m.errors.set(errCatCommentSync, msg.localID, fmt.Errorf("edit: %w", msg.err))
 		} else {
-			delete(m.commentSyncErrors, msg.localID)
+			m.errors.clear(errCatCommentSync, msg.localID)
 			// Update the local comment body
 			if c := m.review.FindByLocalID(msg.localID); c != nil {
 				c.Body = msg.body
@@ -437,7 +432,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case viewedFilesMsg:
 		if msg.err != nil {
-			m.viewedErr = fmt.Errorf("viewed files: %w", msg.err)
+			m.errors.set(errCatViewed, 0, fmt.Errorf("viewed files: %w", msg.err))
 		} else if msg.viewed != nil {
 			for path := range msg.viewed {
 				m.review.ViewedFiles[path] = true
@@ -451,7 +446,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case markViewedMsg:
 		if msg.err != nil {
-			m.viewedErr = fmt.Errorf("mark viewed: %w", msg.err)
+			m.errors.set(errCatViewed, 0, fmt.Errorf("mark viewed: %w", msg.err))
 		}
 		// Tree is refreshed optimistically in markTreeItemViewed/markCurrentFileViewed,
 		// but also refresh here to pick up any server-side state corrections
@@ -770,23 +765,14 @@ func (m Model) View() string {
 		return b.String()
 	}
 
-	if m.loadErr != nil {
+	if err := m.errors.get(errCatLoad); err != nil {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).
-			Render(fmt.Sprintf("Error: %v", m.loadErr)) + "\n")
+			Render(fmt.Sprintf("Error: %v", err)) + "\n")
 		return b.String()
 	}
 
-	// Show scoped sync errors
-	errStyle := lipgloss.NewStyle().Foreground(styles.Danger)
-	if m.reviewCreateErr != nil {
-		b.WriteString(errStyle.Render(fmt.Sprintf("Review error: %v", m.reviewCreateErr)) + "\n")
-	}
-	if m.viewedErr != nil {
-		b.WriteString(errStyle.Render(fmt.Sprintf("Viewed error: %v", m.viewedErr)) + "\n")
-	}
-	if len(m.commentSyncErrors) > 0 {
-		b.WriteString(errStyle.Render(fmt.Sprintf("Comment sync errors: %d failed", len(m.commentSyncErrors))) + "\n")
-	}
+	// Show sync errors (review, viewed, comment sync)
+	b.WriteString(m.errors.renderSyncErrors())
 
 	// File name bar
 	if len(m.files) > 0 {
