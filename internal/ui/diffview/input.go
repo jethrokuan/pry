@@ -321,6 +321,10 @@ func (m Model) handlePendingG(msg tea.KeyMsg) (Model, tea.Cmd) {
 	s := msg.String()
 
 	var cmd tea.Cmd
+	// Reset cycler position before switching modes so stale counts
+	// don't persist if the new mode finds no items.
+	m.nav.cyclerIndex = 0
+	m.nav.cyclerTotal = 0
 	switch s {
 	case "h":
 		m.nav.activeCycler = 'h'
