@@ -81,7 +81,7 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 	var b strings.Builder
 	lineIdx := 0
 
-	hunkStyle := lipgloss.NewStyle().Foreground(styles.Cyan)
+	hunkStyle := styles.HunkHeader
 	commentMarker := lipgloss.NewStyle().Foreground(styles.Warning).Render("▎")
 	noMarker := " "
 	searchQuery := strings.ToLower(m.search.query)
@@ -93,7 +93,11 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 		if hunk.Header != "" {
 			header += " " + hunk.Header
 		}
-		b.WriteString(hunkStyle.Render(header) + "\n")
+		renderedHeader := hunkStyle.Render(header)
+		if w := lipgloss.Width(renderedHeader); w < m.nav.diffViewport.Width {
+			renderedHeader += hunkStyle.Render(strings.Repeat(" ", m.nav.diffViewport.Width-w))
+		}
+		b.WriteString(renderedHeader + "\n")
 
 		for _, line := range hunk.Lines {
 			isCurrent := m.nav.focus == FocusDiff && lineIdx == m.nav.diffCursor
@@ -103,11 +107,17 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 
 			highlighted := isCurrent || isVisualSelected
 
-			// Cursor/visual uses full-line background
+			// Determine line background: cursor > diff-type background
 			var bg lipgloss.Color
 			hasBg := false
 			if highlighted {
 				bg = cursorBg
+				hasBg = true
+			} else if line.Type == diff.LineAddition {
+				bg = lipgloss.Color(styles.Current.BgDiffAdd)
+				hasBg = true
+			} else if line.Type == diff.LineDeletion {
+				bg = lipgloss.Color(styles.Current.BgDiffDelete)
 				hasBg = true
 			}
 
@@ -182,8 +192,8 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 			}
 			fullLine := marker + nums + sep + lineContent
 
-			if highlighted {
-				// Pad to full viewport width
+			// Pad to full viewport width for lines with background
+			if hasBg {
 				visWidth := lipgloss.Width(fullLine)
 				if visWidth < m.nav.diffViewport.Width {
 					fullLine += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", m.nav.diffViewport.Width-visWidth))

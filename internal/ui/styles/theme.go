@@ -22,8 +22,11 @@ type Theme struct {
 	AccentWarning   string `toml:"accent_warning"`
 	AccentDanger    string `toml:"accent_danger"`
 
-	DiffContext string `toml:"diff_context"`
-	LabelFg    string `toml:"label_fg"`
+	DiffContext  string `toml:"diff_context"`
+	BgDiffAdd    string `toml:"bg_diff_add"`
+	BgDiffDelete string `toml:"bg_diff_delete"`
+	BgHunkHeader string `toml:"bg_hunk_header"`
+	LabelFg      string `toml:"label_fg"`
 }
 
 // Current is the active theme.
@@ -47,8 +50,11 @@ func DefaultTheme() Theme {
 		AccentWarning:   "3",
 		AccentDanger:    "1",
 
-		DiffContext: "7",
-		LabelFg:    "0",
+		DiffContext:  "7",
+		BgDiffAdd:    "22",
+		BgDiffDelete: "52",
+		BgHunkHeader: "238",
+		LabelFg:      "0",
 	}
 }
 
@@ -69,6 +75,9 @@ func SolarizedDark() Theme {
 		AccentWarning:   "#b58900",
 		AccentDanger:    "#dc322f",
 		DiffContext:     "#839496",
+		BgDiffAdd:       "#003520",
+		BgDiffDelete:    "#3a0c0c",
+		BgHunkHeader:    "#073642",
 		LabelFg:        "#002b36",
 	}
 }
@@ -90,6 +99,9 @@ func SolarizedLight() Theme {
 		AccentWarning:   "#b58900",
 		AccentDanger:    "#dc322f",
 		DiffContext:     "#657b83",
+		BgDiffAdd:       "#e6f2d5",
+		BgDiffDelete:    "#f8d7d5",
+		BgHunkHeader:    "#eee8d5",
 		LabelFg:        "#fdf6e3",
 	}
 }
@@ -111,6 +123,9 @@ func CatppuccinMocha() Theme {
 		AccentWarning:   "#f9e2af",
 		AccentDanger:    "#f38ba8",
 		DiffContext:     "#bac2de",
+		BgDiffAdd:       "#1a3a2a",
+		BgDiffDelete:    "#3a1a2a",
+		BgHunkHeader:    "#313244",
 		LabelFg:        "#1e1e2e",
 	}
 }
@@ -132,6 +147,9 @@ func CatppuccinLatte() Theme {
 		AccentWarning:   "#df8e1d",
 		AccentDanger:    "#d20f39",
 		DiffContext:     "#5c5f77",
+		BgDiffAdd:       "#d9f0d0",
+		BgDiffDelete:    "#f5d0d0",
+		BgHunkHeader:    "#ccd0da",
 		LabelFg:        "#eff1f5",
 	}
 }
@@ -153,6 +171,9 @@ func GruvboxDark() Theme {
 		AccentWarning:   "#fabd2f",
 		AccentDanger:    "#fb4934",
 		DiffContext:     "#d5c4a1",
+		BgDiffAdd:       "#2e3b1f",
+		BgDiffDelete:    "#3c1f1f",
+		BgHunkHeader:    "#3c3836",
 		LabelFg:        "#282828",
 	}
 }
@@ -174,6 +195,9 @@ func GruvboxLight() Theme {
 		AccentWarning:   "#d79921",
 		AccentDanger:    "#cc241d",
 		DiffContext:     "#504945",
+		BgDiffAdd:       "#e2edb8",
+		BgDiffDelete:    "#f0c8c0",
+		BgHunkHeader:    "#ebdbb2",
 		LabelFg:        "#fbf1c7",
 	}
 }
@@ -195,6 +219,9 @@ func Dracula() Theme {
 		AccentWarning:   "#f1fa8c",
 		AccentDanger:    "#ff5555",
 		DiffContext:     "#f8f8f2",
+		BgDiffAdd:       "#1a3a1a",
+		BgDiffDelete:    "#3a1a1a",
+		BgHunkHeader:    "#44475a",
 		LabelFg:        "#282a36",
 	}
 }
@@ -216,6 +243,9 @@ func Nord() Theme {
 		AccentWarning:   "#ebcb8b",
 		AccentDanger:    "#bf616a",
 		DiffContext:     "#d8dee9",
+		BgDiffAdd:       "#2b3d2e",
+		BgDiffDelete:    "#3d2b2e",
+		BgHunkHeader:    "#3b4252",
 		LabelFg:        "#2e3440",
 	}
 }
@@ -237,6 +267,9 @@ func TokyoNight() Theme {
 		AccentWarning:   "#e0af68",
 		AccentDanger:    "#f7768e",
 		DiffContext:     "#a9b1d6",
+		BgDiffAdd:       "#1a2e1a",
+		BgDiffDelete:    "#2e1a1e",
+		BgHunkHeader:    "#292e42",
 		LabelFg:        "#1a1b26",
 	}
 }
@@ -302,9 +335,10 @@ func Apply(t Theme) {
 		Background(color(t.AccentInfo)).
 		Padding(0, 1)
 
-	Addition = lipgloss.NewStyle().Foreground(color(t.AccentSuccess))
-	Deletion = lipgloss.NewStyle().Foreground(color(t.AccentDanger))
+	Addition = lipgloss.NewStyle().Foreground(color(t.AccentSuccess)).Background(color(t.BgDiffAdd))
+	Deletion = lipgloss.NewStyle().Foreground(color(t.AccentDanger)).Background(color(t.BgDiffDelete))
 	Context = lipgloss.NewStyle().Foreground(color(t.DiffContext))
+	HunkHeader = lipgloss.NewStyle().Foreground(color(t.AccentInfo)).Background(color(t.BgHunkHeader))
 
 	CommentBorder = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -361,6 +395,15 @@ func OverlayColors(base Theme, overrides Theme) Theme {
 	}
 	if overrides.DiffContext != "" {
 		base.DiffContext = overrides.DiffContext
+	}
+	if overrides.BgDiffAdd != "" {
+		base.BgDiffAdd = overrides.BgDiffAdd
+	}
+	if overrides.BgDiffDelete != "" {
+		base.BgDiffDelete = overrides.BgDiffDelete
+	}
+	if overrides.BgHunkHeader != "" {
+		base.BgHunkHeader = overrides.BgHunkHeader
 	}
 	if overrides.LabelFg != "" {
 		base.LabelFg = overrides.LabelFg

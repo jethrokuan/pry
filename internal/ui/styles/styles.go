@@ -29,9 +29,10 @@ var (
 	PRDraft    lipgloss.Style
 	LabelStyle lipgloss.Style
 
-	Addition lipgloss.Style
-	Deletion lipgloss.Style
-	Context  lipgloss.Style
+	Addition   lipgloss.Style
+	Deletion   lipgloss.Style
+	Context    lipgloss.Style
+	HunkHeader lipgloss.Style
 
 	CommentBorder lipgloss.Style
 	CommentAuthor lipgloss.Style

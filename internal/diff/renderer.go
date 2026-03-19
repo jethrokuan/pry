@@ -47,8 +47,7 @@ func RenderFile(file *DiffFile, width int) string {
 		if hunk.Header != "" {
 			header += " " + hunk.Header
 		}
-		hunkStyle := lipgloss.NewStyle().Foreground(styles.Cyan)
-		b.WriteString(hunkStyle.Render(header))
+		b.WriteString(styles.HunkHeader.Render(header))
 		b.WriteString("\n")
 
 		// Lines
