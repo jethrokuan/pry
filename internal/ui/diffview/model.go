@@ -106,6 +106,8 @@ type KeyMap struct {
 	ToggleTree    key.Binding
 	Comment       key.Binding
 	DeleteComment key.Binding
+	EditComment   key.Binding
+	Reply         key.Binding
 	SelectLine    key.Binding
 	Submit        key.Binding
 	ToggleComment key.Binding
@@ -116,6 +118,13 @@ type KeyMap struct {
 	Back          key.Binding
 	Quit          key.Binding
 	Enter         key.Binding
+	Search        key.Binding
+	FilterFile    key.Binding
+	Help          key.Binding
+	GotoPrefix    key.Binding
+	GotoEnd       key.Binding
+	NextMatch     key.Binding
+	PrevMatch     key.Binding
 }
 
 var keys = KeyMap{
@@ -125,7 +134,9 @@ var keys = KeyMap{
 	PageDown:      key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "page down")),
 	ToggleTree:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "toggle tree")),
 	Comment:       key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment")),
-	DeleteComment: key.NewBinding(key.WithKeys("d"), key.WithHelp("dd", "delete comment")),
+	DeleteComment: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete comment")),
+	EditComment:   key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit comment")),
+	Reply:         key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reply")),
 	SelectLine:    key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "select")),
 	Submit:        key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "submit review")),
 	ToggleComment: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle comments")),
@@ -136,6 +147,13 @@ var keys = KeyMap{
 	Back:          key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	Quit:          key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	Enter:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select file")),
+	Search:        key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+	FilterFile:    key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "filter files")),
+	Help:          key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+	GotoPrefix:    key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "go to...")),
+	GotoEnd:       key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "go to end")),
+	NextMatch:     key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next match")),
+	PrevMatch:     key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "prev match")),
 }
 
 // Inline comment key bindings (when textarea is active)
