@@ -40,28 +40,17 @@ func (c *Client) getUserTeams() ([]string, error) {
 // fetchUserTeams fetches all teams the authenticated user belongs to,
 // filtered to the current repo's org.
 func (c *Client) fetchUserTeams() ([]string, error) {
-	var allTeams []string
-	page := 1
-
-	for {
-		var pageTeams []team
-		path := fmt.Sprintf("user/teams?per_page=100&page=%d", page)
-		err := c.rest.Get(path, &pageTeams)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch user teams: %w", err)
-		}
-
-		for _, t := range pageTeams {
-			if strings.EqualFold(t.Org.Login, c.owner) {
-				allTeams = append(allTeams, fmt.Sprintf("%s/%s", t.Org.Login, t.Slug))
-			}
-		}
-
-		if len(pageTeams) < 100 {
-			break
-		}
-		page++
+	allTeams, err := paginateREST[team](c.rest, "user/teams?per_page=100&page=%d")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch user teams: %w", err)
 	}
 
-	return allTeams, nil
+	var filtered []string
+	for _, t := range allTeams {
+		if strings.EqualFold(t.Org.Login, c.owner) {
+			filtered = append(filtered, fmt.Sprintf("%s/%s", t.Org.Login, t.Slug))
+		}
+	}
+
+	return filtered, nil
 }

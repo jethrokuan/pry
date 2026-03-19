@@ -63,39 +63,29 @@ func (c *Client) FetchPendingReview(_ context.Context, prNumber int) (int, strin
 }
 
 func (c *Client) fetchReviewComments(prNumber, reviewID int) ([]review.ExistingComment, error) {
-	var allComments []review.ExistingComment
-	page := 1
+	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews/%d/comments?per_page=100&page=%%d",
+		c.owner, c.repo, prNumber, reviewID)
 
-	for {
-		endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews/%d/comments?per_page=100&page=%d",
-			c.owner, c.repo, prNumber, reviewID, page)
-
-		var batch []apiComment
-		err := c.rest.Get(endpoint, &batch)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch review comments: %w", err)
-		}
-
-		for _, ac := range batch {
-			allComments = append(allComments, review.ExistingComment{
-				ID:        ac.ID,
-				Path:      ac.Path,
-				Line:      ac.Line,
-				Side:      ac.Side,
-				Body:      ac.Body,
-				Author:    ac.User.Login,
-				CreatedAt: ac.CreatedAt,
-				IsPending: true,
-			})
-		}
-
-		if len(batch) < 100 {
-			break
-		}
-		page++
+	batch, err := paginateREST[apiComment](c.rest, endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch review comments: %w", err)
 	}
 
-	return allComments, nil
+	comments := make([]review.ExistingComment, len(batch))
+	for i, ac := range batch {
+		comments[i] = review.ExistingComment{
+			ID:        ac.ID,
+			Path:      ac.Path,
+			Line:      ac.Line,
+			Side:      ac.Side,
+			Body:      ac.Body,
+			Author:    ac.User.Login,
+			CreatedAt: ac.CreatedAt,
+			IsPending: true,
+		}
+	}
+
+	return comments, nil
 }
 
 // CreatePendingReview creates a new PENDING review on GitHub (no event = pending).
@@ -383,36 +373,26 @@ func (c *Client) UnmarkFileAsViewed(_ context.Context, prNodeID, path string) er
 // FetchExistingComments gets all submitted review comments on a PR.
 // Paginates automatically to retrieve all comments.
 func (c *Client) FetchExistingComments(_ context.Context, prNumber int) ([]review.ExistingComment, error) {
-	var allComments []review.ExistingComment
-	page := 1
+	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/comments?per_page=100&page=%%d",
+		c.owner, c.repo, prNumber)
 
-	for {
-		endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/comments?per_page=100&page=%d",
-			c.owner, c.repo, prNumber, page)
-
-		var batch []apiComment
-		err := c.rest.Get(endpoint, &batch)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch comments: %w", err)
-		}
-
-		for _, ac := range batch {
-			allComments = append(allComments, review.ExistingComment{
-				ID:        ac.ID,
-				Path:      ac.Path,
-				Line:      ac.Line,
-				Side:      ac.Side,
-				Body:      ac.Body,
-				Author:    ac.User.Login,
-				CreatedAt: ac.CreatedAt,
-			})
-		}
-
-		if len(batch) < 100 {
-			break
-		}
-		page++
+	batch, err := paginateREST[apiComment](c.rest, endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch comments: %w", err)
 	}
 
-	return allComments, nil
+	comments := make([]review.ExistingComment, len(batch))
+	for i, ac := range batch {
+		comments[i] = review.ExistingComment{
+			ID:        ac.ID,
+			Path:      ac.Path,
+			Line:      ac.Line,
+			Side:      ac.Side,
+			Body:      ac.Body,
+			Author:    ac.User.Login,
+			CreatedAt: ac.CreatedAt,
+		}
+	}
+
+	return comments, nil
 }

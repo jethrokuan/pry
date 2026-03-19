@@ -22,25 +22,12 @@ type prFile struct {
 // FetchDiffFiles fetches and parses the changed files for a PR.
 // Paginates automatically to retrieve all files.
 func (c *Client) FetchDiffFiles(_ context.Context, number int) ([]diff.DiffFile, error) {
-	var allFiles []prFile
-	page := 1
+	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/files?per_page=100&page=%%d",
+		c.owner, c.repo, number)
 
-	for {
-		endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/files?per_page=100&page=%d",
-			c.owner, c.repo, number, page)
-
-		var batch []prFile
-		err := c.rest.Get(endpoint, &batch)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch PR files: %w", err)
-		}
-
-		allFiles = append(allFiles, batch...)
-
-		if len(batch) < 100 {
-			break
-		}
-		page++
+	allFiles, err := paginateREST[prFile](c.rest, endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch PR files: %w", err)
 	}
 
 	patches := make([]diff.FilePatch, len(allFiles))
