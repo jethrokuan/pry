@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# bd-patrol: Watch for ready beads tasks, spawn Claude Code worktrees, merge completed work.
-# Fully local — no GitHub PRs. Workers commit in jj worktrees, patrol merges into main.
+# bd-patrol: Watch for ready beads tasks, spawn Claude Code worktrees, verify completed work.
+# Fully local — no GitHub PRs. Workers commit, rebase onto main, and close their own issues.
 #
 # Usage:
 #   ./scripts/bd-patrol.sh                  # default: poll every 5s
@@ -66,8 +66,8 @@ count_active_workers() {
   echo "$count"
 }
 
-# --- Merge a worker's commits into main ---
-merge_worker() {
+# --- Verify a worker landed its commit on main ---
+verify_worker() {
   local issue_id="$1"
   local ws_name="$2"
 
@@ -76,23 +76,22 @@ merge_worker() {
   change_id="$(jj log --no-graph -r "${ws_name}@-" -T 'change_id' 2>/dev/null || echo "")"
 
   if [[ -z "$change_id" ]]; then
-    log "No commit found for workspace $ws_name, nothing to merge"
+    log "No commit found for workspace $ws_name, nothing to verify"
     return 1
   fi
 
   # Check if the commit is empty
   if jj diff -r "$change_id" --stat 2>/dev/null | grep -q 'no changes'; then
-    log "Worker $ws_name produced no changes, skipping merge"
+    log "Worker $ws_name produced no changes"
     return 1
   fi
 
-  # Rebase the commit onto main, then advance main
-  if jj rebase -r "$change_id" -d main 2>&1; then
-    jj bookmark set main -r "$change_id" 2>&1
-    log "Merged $issue_id into main (main now at $change_id)"
+  # Verify the commit is an ancestor of main (worker rebased + updated bookmark)
+  if jj log --no-graph -r "$change_id & ancestors(main)" -T 'change_id' 2>/dev/null | grep -q .; then
+    log "Verified $issue_id landed on main ($change_id)"
     return 0
   else
-    log "Failed to rebase $issue_id onto main — may need manual resolution"
+    log "Worker $issue_id committed but did NOT land on main — may need manual intervention"
     return 1
   fi
 }
@@ -129,10 +128,8 @@ reap_workers() {
     exit_code="$(cat "$exit_file")"
 
     if [[ "$exit_code" -eq 0 ]]; then
-      log "Worker for $issue_id completed, merging $ws_name into main..."
-      if merge_worker "$issue_id" "$ws_name"; then
-        bd close "$issue_id" 2>/dev/null || true
-      fi
+      log "Worker for $issue_id completed, verifying landing..."
+      verify_worker "$issue_id" "$ws_name"
     else
       log "Worker for $issue_id failed (exit $exit_code)"
       bd update "$issue_id" --notes="Worker failed with exit code $exit_code" 2>/dev/null || true
@@ -190,7 +187,14 @@ Description: $description
 5. jj diff                              — review your own diff, remove anything unrelated
 6. jj commit -m "$issue_id: <summary>"  — commit with issue ID in message
 
-Do NOT push, do NOT create PRs. Just commit locally. Patrol will merge.
+## Land your change
+After committing, you MUST rebase onto main and advance the bookmark:
+7. jj rebase -r @- -d main             — rebase your commit onto main
+   - If there are conflicts, resolve them, then re-run build + tests before continuing
+8. jj bookmark set main -r @-          — advance main to your commit
+9. bd close $issue_id                   — mark issue done
+
+Do NOT push, do NOT create PRs. Just commit and land locally.
 If any quality gate fails or the task is ambiguous, add notes (bd update $issue_id --notes="...") and stop.
 PROMPT
 )"
