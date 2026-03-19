@@ -516,6 +516,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 
+	case tea.MouseMsg:
+		// Forward mouse events to active popup viewports for scroll support
+		if m.prInfoActive {
+			var cmd tea.Cmd
+			m.prInfoViewport, cmd = m.prInfoViewport.Update(msg)
+			return m, cmd
+		}
+		if m.comments.popupActive {
+			var cmd tea.Cmd
+			m.comments.popupViewport, cmd = m.comments.popupViewport.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.loading {
 			return m, nil
