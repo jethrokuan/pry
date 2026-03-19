@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/glamour"
 	glamourstyles "github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
@@ -422,6 +423,151 @@ func (m Model) renderCommentPopup() string {
 		Width(popupW)
 
 	return boxStyle.Render(content)
+}
+
+// --- PR Info Popup ---
+
+// openPRInfoPopup opens the PR details popup with description and metadata.
+func (m *Model) openPRInfoPopup() {
+	popupW := m.width - 6
+	if popupW > 120 {
+		popupW = 120
+	}
+	popupH := m.height - 6
+	if popupH < 5 {
+		popupH = 5
+	}
+	contentW := popupW - 4 // border(2) + padding(2)
+	vpH := popupH - 2     // title + footer
+
+	content := m.buildPRInfoContent(contentW)
+
+	vp := viewport.New(contentW, vpH)
+	vp.SetContent(content)
+
+	m.prInfoActive = true
+	m.prInfoViewport = vp
+}
+
+// buildPRInfoContent builds the PR info popup content showing metadata and description.
+func (m *Model) buildPRInfoContent(width int) string {
+	authorStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
+	labelStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	sepStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	separator := sepStyle.Render(strings.Repeat("─", width))
+
+	var b strings.Builder
+
+	// Metadata
+	b.WriteString(authorStyle.Render("@"+m.pr.Author) + " → " + m.pr.Base + "\n")
+	b.WriteString(fmt.Sprintf("+%d/-%d  |  %d files\n", m.pr.Additions, m.pr.Deletions, m.pr.Files))
+
+	// Labels
+	if len(m.pr.Labels) > 0 {
+		var labels []string
+		for _, l := range m.pr.Labels {
+			labels = append(labels, styles.LabelStyle.Render(l))
+		}
+		b.WriteString("Labels: " + strings.Join(labels, " ") + "\n")
+	}
+
+	// Review status
+	reviewStatus := "pending"
+	reviewStyle := lipgloss.NewStyle().Foreground(styles.Warning)
+	switch m.pr.ReviewDecision {
+	case "APPROVED":
+		reviewStatus = "approved"
+		reviewStyle = lipgloss.NewStyle().Foreground(styles.Success)
+	case "CHANGES_REQUESTED":
+		reviewStatus = "changes requested"
+		reviewStyle = lipgloss.NewStyle().Foreground(styles.Danger)
+	}
+	b.WriteString(labelStyle.Render("Review: ") + reviewStyle.Render(reviewStatus) + "\n")
+
+	b.WriteString(separator + "\n\n")
+
+	// Body
+	if m.pr.Body == "" {
+		b.WriteString(labelStyle.Render("No description provided."))
+	} else {
+		rendered := m.renderMarkdown(m.pr.Body, width, styles.Current.BgOverlay)
+		b.WriteString(rendered)
+	}
+
+	// Existing PR comments section
+	if len(m.comments.existing) > 0 || len(m.comments.forgeComments) > 0 {
+		b.WriteString("\n\n" + separator + "\n")
+		commentHeader := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
+		total := len(m.comments.existing) + len(m.comments.forgeComments)
+		b.WriteString(commentHeader.Render(fmt.Sprintf("Review Comments (%d)", total)) + "\n\n")
+
+		bodyStyle := lipgloss.NewStyle().Width(width)
+		innerSep := sepStyle.Render(strings.Repeat("─", width/2))
+
+		for _, c := range m.comments.existing {
+			icon := "💬"
+			if c.IsPending {
+				icon = "📝"
+			}
+			b.WriteString(icon + " " + authorStyle.Render("@"+c.Author))
+			if c.Path != "" {
+				b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", c.Path, c.Line)))
+			}
+			b.WriteString("\n")
+			rendered := m.renderMarkdown(c.Body, width, styles.Current.BgOverlay)
+			b.WriteString(bodyStyle.Render(rendered) + "\n")
+			b.WriteString(innerSep + "\n\n")
+		}
+
+		for _, c := range m.comments.forgeComments {
+			b.WriteString("📝 " + authorStyle.Render("@"+c.Author))
+			if c.Path != "" {
+				b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", c.Path, c.Line)))
+			}
+			b.WriteString("\n")
+			rendered := m.renderMarkdown(c.Body, width, styles.Current.BgOverlay)
+			b.WriteString(bodyStyle.Render(rendered) + "\n")
+			b.WriteString(innerSep + "\n\n")
+		}
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// renderPRInfoPopup builds the bordered PR info popup.
+func (m Model) renderPRInfoPopup() string {
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
+	title := titleStyle.Render(fmt.Sprintf("  PR #%d: %s", m.pr.Number, m.pr.Title))
+
+	scrollPct := ""
+	if m.prInfoViewport.TotalLineCount() > m.prInfoViewport.Height {
+		pct := int(m.prInfoViewport.ScrollPercent() * 100)
+		scrollPct = lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf(" (%d%%)", pct))
+	}
+
+	help := styles.HelpStyle.Render("  j/k scroll  i/esc close") + scrollPct
+
+	content := title + "\n" + m.prInfoViewport.View() + "\n" + help
+
+	popupW := m.width - 6
+	if popupW > 120 {
+		popupW = 120
+	}
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.Primary).
+		Background(lipgloss.Color(styles.Current.BgOverlay)).
+		Padding(0, 1).
+		Width(popupW)
+
+	return boxStyle.Render(content)
+}
+
+// overlayPRInfoPopup renders the PR info popup centered over the base content.
+func (m Model) overlayPRInfoPopup(base string) string {
+	popup := m.renderPRInfoPopup()
+	return m.overlayGeneric(base, popup)
 }
 
 // overlayCommentPopup renders the comment popup centered over the base content.

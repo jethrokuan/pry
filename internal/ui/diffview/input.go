@@ -837,6 +837,23 @@ func (m Model) handleInlineKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
+// --- PR info popup key handling ---
+
+func (m Model) handlePRInfoKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "i", "q":
+		m.prInfoActive = false
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+
+	// Delegate scrolling to the viewport
+	var cmd tea.Cmd
+	m.prInfoViewport, cmd = m.prInfoViewport.Update(msg)
+	return m, cmd
+}
+
 // --- Comment popup key handling ---
 
 func (m Model) handleCommentPopupKey(msg tea.KeyMsg) (Model, tea.Cmd) {

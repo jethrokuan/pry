@@ -57,13 +57,16 @@ func New(svc review.Service, filters []review.PRFilter, columns []string) Model 
 
 // NewWithPR creates the application model starting at a specific PR.
 func NewWithPR(svc review.Service, prNumber int, filters []review.PRFilter, columns []string) Model {
+	pr := review.PullRequest{Number: prNumber}
+	rev := review.NewPendingReview(prNumber, "", "")
 	return Model{
 		svc:       svc,
 		filters:   filters,
 		columns:   columns,
-		screen:    ScreenPRDetail,
+		screen:    ScreenDiffView,
 		prList:    prlist.New(svc, filters, columns),
-		prDetail:  prdetail.New(review.PullRequest{Number: prNumber}),
+		diffView:  diffview.New(svc, pr, rev),
+		review:    rev,
 		initialPR: prNumber,
 	}
 }
@@ -73,6 +76,7 @@ func (m Model) Init() tea.Cmd {
 	if m.initialPR > 0 {
 		prNumber := m.initialPR
 		return tea.Batch(
+			m.diffView.Init(),
 			tea.WindowSize(),
 			func() tea.Msg {
 				full, err := m.svc.GetPR(context.Background(), prNumber)
@@ -121,10 +125,12 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case prlist.PRSelectedMsg:
 		m.selectedPR = &msg.PR
-		m.screen = ScreenPRDetail
-		m.prDetail = prdetail.New(msg.PR)
 		pr := msg.PR
+		m.review = review.NewPendingReview(pr.Number, pr.NodeID, pr.HeadSHA)
+		m.diffView = diffview.New(m.svc, pr, m.review)
+		m.screen = ScreenDiffView
 		return m, tea.Batch(
+			m.diffView.Init(),
 			tea.WindowSize(),
 			func() tea.Msg {
 				full, err := m.svc.GetPR(context.Background(), pr.Number)
@@ -182,7 +188,7 @@ func (m Model) updatePRDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case diffview.SubmitReviewMsg:
 		m.submit = submit.New(m.svc, m.review)
 		m.screen = ScreenSubmit
@@ -191,8 +197,19 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tea.WindowSize(),
 		)
 	case diffview.BackMsg:
-		m.screen = ScreenPRDetail
+		m.review = nil
+		m.selectedPR = nil
+		m.screen = ScreenPRList
 		return m, tea.WindowSize()
+	case prBodyLoadedMsg:
+		if msg.err == nil && msg.pr != nil {
+			m.selectedPR = msg.pr
+		}
+		// Forward to diffview as PRBodyLoadedMsg
+		pr := m.selectedPR
+		var dvCmd tea.Cmd
+		m.diffView, dvCmd = m.diffView.Update(diffview.PRBodyLoadedMsg{PR: pr, Err: msg.err})
+		return m, dvCmd
 	}
 
 	var cmd tea.Cmd

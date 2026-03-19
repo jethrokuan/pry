@@ -16,6 +16,7 @@ const (
 	modePendingG
 	modePendingD
 	modeHelp
+	modePRInfo
 	modeCommentPopup
 	modeCommentSelect
 )
@@ -37,6 +38,8 @@ func (m Model) activeMode() inputMode {
 		return modePendingD
 	case m.showHelp:
 		return modeHelp
+	case m.prInfoActive:
+		return modePRInfo
 	case m.comments.popupActive:
 		return modeCommentPopup
 	case m.comments.cursor >= 0 && m.nav.focus == FocusDiff:
@@ -62,6 +65,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case modeHelp:
 		m.showHelp = false
 		return m, nil
+	case modePRInfo:
+		return m.handlePRInfoKey(msg)
 	case modeCommentPopup:
 		return m.handleCommentPopupKey(msg)
 	case modeCommentSelect:
@@ -205,6 +210,10 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Editor):
 		return m, m.openInEditor()
+
+	case key.Matches(msg, keys.Info):
+		m.openPRInfoPopup()
+		return m, nil
 
 	case key.Matches(msg, keys.Submit):
 		return m, func() tea.Msg { return SubmitReviewMsg{} }

@@ -23,6 +23,12 @@ import (
 type SubmitReviewMsg struct{}
 type BackMsg struct{}
 
+// PRBodyLoadedMsg carries the full PR data after async fetch.
+type PRBodyLoadedMsg struct {
+	PR  *review.PullRequest
+	Err error
+}
+
 type filesLoadedMsg struct {
 	files []diff.DiffFile
 	err   error
@@ -121,6 +127,7 @@ type KeyMap struct {
 	Search        key.Binding
 	FilterFile    key.Binding
 	Help          key.Binding
+	Info          key.Binding
 	GotoPrefix    key.Binding
 	GotoEnd       key.Binding
 	NextMatch     key.Binding
@@ -150,6 +157,7 @@ var keys = KeyMap{
 	Search:        key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 	FilterFile:    key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "filter files")),
 	Help:          key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+	Info:          key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "PR info")),
 	GotoPrefix:    key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "go to...")),
 	GotoEnd:       key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "go to end")),
 	NextMatch:     key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next match")),
@@ -190,6 +198,10 @@ type Model struct {
 	errors errorStore // unified error tracking for all async operations
 
 	confirmQuit bool // true when waiting for second quit key to confirm
+
+	// PR info popup
+	prInfoActive   bool
+	prInfoViewport viewport.Model
 
 	// Caches
 	mdCache  map[mdCacheKey]string // rendered markdown cache
@@ -343,6 +355,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Reopen to resize the popup viewport
 			m.openCommentPopup()
 		}
+		if m.prInfoActive {
+			m.openPRInfoPopup()
+		}
 
 	case filesLoadedMsg:
 		m.loading = false
@@ -472,6 +487,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if len(m.files) > 0 {
 			m.nav.treeViewport.SetContent(m.renderFileTree())
 			m.treeDirty = false
+		}
+
+	case PRBodyLoadedMsg:
+		if msg.Err == nil && msg.PR != nil {
+			m.pr = *msg.PR
+			if m.prInfoActive {
+				m.openPRInfoPopup()
+			}
 		}
 
 	case editorFinishedMsg:
@@ -878,6 +901,7 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "/ filter")
 			helpParts = append(helpParts, "m viewed")
 			helpParts = append(helpParts, "e tree")
+			helpParts = append(helpParts, "i info")
 			helpParts = append(helpParts, "ctrl+s submit")
 			helpParts = append(helpParts, "? help")
 		} else {
@@ -895,6 +919,7 @@ func (m Model) View() string {
 			if m.search.query != "" {
 				helpParts = append(helpParts, fmt.Sprintf("[/%s]", m.search.query))
 			}
+			helpParts = append(helpParts, "i info")
 			helpParts = append(helpParts, "ctrl+s submit")
 			helpParts = append(helpParts, "? help")
 		}
@@ -917,6 +942,9 @@ func (m Model) View() string {
 	}
 	if m.comments.popupActive {
 		result = m.overlayCommentPopup(result)
+	}
+	if m.prInfoActive {
+		result = m.overlayPRInfoPopup(result)
 	}
 
 	return result
@@ -1018,6 +1046,7 @@ func (m Model) renderHelpPopup() string {
 			title: "Other",
 			bindings: []binding{
 				{"e", "Toggle file tree"},
+				{"i", "Toggle PR info popup"},
 				{"w", "Open in browser"},
 				{"ctrl+e", "Open in $EDITOR"},
 				{"esc", "Back"},
