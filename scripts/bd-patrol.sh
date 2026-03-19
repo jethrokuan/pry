@@ -183,16 +183,41 @@ auto_merge_prs() {
     fi
   done < <(echo "$prs" | jq -c '.[]')
 
-  # After merging, force-fetch so workers start from up-to-date main
+  # After merging, force-fetch so workers start from up-to-date main.
+  # Retry with backoff because GitHub may not have propagated the merge yet.
   if [[ "$merged_any" == "true" ]]; then
-    log "Merge(s) completed — waiting for GitHub propagation..."
-    sleep 3
-    log "Force-fetching after merge..."
-    if jj git fetch 2>/dev/null; then
+    local max_retries=3
+    local delay=3
+    local fetched=false
+
+    for (( attempt=1; attempt<=max_retries; attempt++ )); do
+      log "Post-merge fetch attempt ${attempt}/${max_retries} (waiting ${delay}s for propagation)..."
+      sleep "$delay"
+
+      # Fetch and check if main actually advanced (merge is visible)
+      local before after
+      before="$(jj log --no-graph -r main -T 'commit_id' 2>/dev/null || echo "")"
+      if jj git fetch 2>/dev/null; then
+        after="$(jj log --no-graph -r main -T 'commit_id' 2>/dev/null || echo "")"
+        if [[ "$before" != "$after" ]]; then
+          log "Post-merge fetch complete — main advanced"
+          fetched=true
+          break
+        elif [[ $attempt -lt $max_retries ]]; then
+          log "Fetch succeeded but main unchanged — GitHub may still be propagating, retrying..."
+          delay=$(( delay * 2 ))
+        else
+          log "Fetch succeeded but main unchanged after ${max_retries} attempts — proceeding anyway"
+          fetched=true
+        fi
+      else
+        log "Warning: fetch failed on attempt ${attempt}"
+        delay=$(( delay * 2 ))
+      fi
+    done
+
+    if $fetched; then
       LAST_MAIN_UPDATE="$(date +%s)"
-      log "Post-merge fetch complete"
-    else
-      log "Warning: post-merge fetch failed"
     fi
   fi
 }
