@@ -47,22 +47,22 @@ type response struct {
 }
 
 type responseError struct {
-	Code    int              `json:"code"`
+	Code    any              `json:"code"`
 	Message string           `json:"message"`
 	Data    json.RawMessage  `json:"data,omitempty"`
 }
 
 func (e *responseError) Error() string {
-	return fmt.Sprintf("termwright RPC error %d: %s", e.Code, e.Message)
+	return fmt.Sprintf("termwright RPC error %v: %s", e.Code, e.Message)
 }
 
 // ScreenFormat controls how screen content is returned.
 type ScreenFormat string
 
 const (
-	ScreenFormatText        ScreenFormat = "Text"
-	ScreenFormatJSON        ScreenFormat = "Json"
-	ScreenFormatJSONCompact ScreenFormat = "JsonCompact"
+	ScreenFormatText        ScreenFormat = "text"
+	ScreenFormatJSON        ScreenFormat = "json"
+	ScreenFormatJSONCompact ScreenFormat = "json_compact"
 )
 
 // Spawn starts a termwright daemon for the given command and connects to it.
@@ -119,7 +119,7 @@ func Spawn(cols, rows int, command string, args ...string) (*Client, error) {
 
 	// Perform handshake
 	var hs struct {
-		ProtocolVersion  string `json:"protocol_version"`
+		ProtocolVersion  json.Number `json:"protocol_version"`
 		TermwrightVersion string `json:"termwright_version"`
 		PID              int    `json:"pid"`
 	}
