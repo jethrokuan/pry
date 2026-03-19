@@ -27,6 +27,7 @@ const (
 type Model struct {
 	svc     review.Service
 	filters []review.PRFilter
+	columns []string
 	screen  Screen
 	width   int
 	height  int
@@ -44,22 +45,24 @@ type Model struct {
 }
 
 // New creates the application model.
-func New(svc review.Service, filters []review.PRFilter) Model {
+func New(svc review.Service, filters []review.PRFilter, columns []string) Model {
 	return Model{
 		svc:     svc,
 		filters: filters,
+		columns: columns,
 		screen:  ScreenPRList,
-		prList:  prlist.New(svc, filters),
+		prList:  prlist.New(svc, filters, columns),
 	}
 }
 
 // NewWithPR creates the application model starting at a specific PR.
-func NewWithPR(svc review.Service, prNumber int, filters []review.PRFilter) Model {
+func NewWithPR(svc review.Service, prNumber int, filters []review.PRFilter, columns []string) Model {
 	return Model{
 		svc:       svc,
 		filters:   filters,
+		columns:   columns,
 		screen:    ScreenPRDetail,
-		prList:    prlist.New(svc, filters),
+		prList:    prlist.New(svc, filters, columns),
 		prDetail:  prdetail.New(review.PullRequest{Number: prNumber}),
 		initialPR: prNumber,
 	}
@@ -203,7 +206,7 @@ func (m Model) updateSubmit(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.review = nil
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		m.prList = prlist.New(m.svc, m.filters)
+		m.prList = prlist.New(m.svc, m.filters, m.columns)
 		return m, tea.Batch(
 			m.prList.Init(),
 			tea.WindowSize(),

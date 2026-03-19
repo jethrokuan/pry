@@ -13,6 +13,9 @@ type Service interface {
 	RepoOwner() string
 	// RepoName returns the repository name.
 	RepoName() string
+	// UserTeams returns the team slugs ("org/team") the authenticated user
+	// belongs to in the current repo's org. Results may be cached.
+	UserTeams(ctx context.Context) ([]string, error)
 
 	// ListPRs fetches pull requests matching the given filter.
 	ListPRs(ctx context.Context, filter PRFilter) ([]PullRequest, error)
