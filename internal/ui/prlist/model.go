@@ -51,25 +51,26 @@ var keys = KeyMap{
 
 // Model is the Bubble Tea model for the PR list screen.
 type Model struct {
-	svc     review.Service
-	prs     []review.PullRequest
-	cursor  int
-	filter  review.PRFilter
-	loading bool
-	err     error
-	width   int
-	height  int
-	spinner spinner.Model
+	svc       review.Service
+	prs       []review.PullRequest
+	cursor    int
+	filters   []review.PRFilter
+	filterIdx int
+	loading   bool
+	err       error
+	width     int
+	height    int
+	spinner   spinner.Model
 }
 
 // New creates a new PR list model.
-func New(svc review.Service) Model {
+func New(svc review.Service, filters []review.PRFilter) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
 	return Model{
 		svc:     svc,
-		filter:  review.FilterReviewRequested,
+		filters: filters,
 		loading: true,
 		spinner: s,
 	}
@@ -85,7 +86,7 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) fetchPRs() tea.Cmd {
 	return func() tea.Msg {
-		prs, err := m.svc.ListPRs(context.Background(), m.filter)
+		prs, err := m.svc.ListPRs(context.Background(), m.filters[m.filterIdx])
 		return prsLoadedMsg{prs: prs, err: err}
 	}
 }
@@ -133,7 +134,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 			}
 		case key.Matches(msg, keys.Filter):
-			m.filter = (m.filter + 1) % 3
+			m.filterIdx = (m.filterIdx + 1) % len(m.filters)
 			m.loading = true
 			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
 		case key.Matches(msg, keys.Refresh):
@@ -155,7 +156,7 @@ func (m Model) View() string {
 
 	// Header
 	header := styles.Title.Render("PR Review")
-	filterLabel := fmt.Sprintf("  Filter: [%s]", m.filter)
+	filterLabel := fmt.Sprintf("  Filter: [%s]", m.filters[m.filterIdx].Name)
 	repoLabel := fmt.Sprintf("  %s/%s", m.svc.RepoOwner(), m.svc.RepoName())
 	b.WriteString(header + filterLabel + repoLabel + "\n\n")
 

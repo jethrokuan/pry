@@ -47,17 +47,7 @@ type graphqlPRResponse struct {
 
 // ListPRs fetches PRs based on the given filter.
 func (c *Client) ListPRs(_ context.Context, filter review.PRFilter) ([]review.PullRequest, error) {
-	var searchQualifier string
-	switch filter {
-	case review.FilterReviewRequested:
-		searchQualifier = "review-requested:@me"
-	case review.FilterAllOpen:
-		searchQualifier = ""
-	case review.FilterAuthored:
-		searchQualifier = "author:@me"
-	}
-
-	query := fmt.Sprintf("is:pr is:open repo:%s/%s %s sort:updated-desc", c.owner, c.repo, searchQualifier)
+	query := fmt.Sprintf("is:pr is:open repo:%s/%s %s sort:updated-desc", c.owner, c.repo, filter.Qualifier)
 
 	// Minimal fields for the list view — details fetched on demand via GetPR.
 	graphqlQuery := `

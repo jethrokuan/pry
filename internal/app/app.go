@@ -25,10 +25,11 @@ const (
 
 // Model is the top-level application model.
 type Model struct {
-	svc    review.Service
-	screen Screen
-	width  int
-	height int
+	svc     review.Service
+	filters []review.PRFilter
+	screen  Screen
+	width   int
+	height  int
 
 	// Screen models
 	prList   prlist.Model
@@ -43,22 +44,24 @@ type Model struct {
 }
 
 // New creates the application model.
-func New(svc review.Service) Model {
+func New(svc review.Service, filters []review.PRFilter) Model {
 	return Model{
-		svc:    svc,
-		screen: ScreenPRList,
-		prList: prlist.New(svc),
+		svc:     svc,
+		filters: filters,
+		screen:  ScreenPRList,
+		prList:  prlist.New(svc, filters),
 	}
 }
 
 // NewWithPR creates the application model starting at a specific PR.
-func NewWithPR(svc review.Service, prNumber int) Model {
+func NewWithPR(svc review.Service, prNumber int, filters []review.PRFilter) Model {
 	return Model{
-		svc:        svc,
-		screen:     ScreenPRDetail,
-		prList:     prlist.New(svc),
-		prDetail:   prdetail.New(review.PullRequest{Number: prNumber}),
-		initialPR:  prNumber,
+		svc:       svc,
+		filters:   filters,
+		screen:    ScreenPRDetail,
+		prList:    prlist.New(svc, filters),
+		prDetail:  prdetail.New(review.PullRequest{Number: prNumber}),
+		initialPR: prNumber,
 	}
 }
 
@@ -200,7 +203,7 @@ func (m Model) updateSubmit(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.review = nil
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		m.prList = prlist.New(m.svc)
+		m.prList = prlist.New(m.svc, m.filters)
 		return m, tea.Batch(
 			m.prList.Init(),
 			tea.WindowSize(),

@@ -6,16 +6,24 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/jkuan/pr-review/internal/review"
 	"github.com/jkuan/pr-review/internal/ui/styles"
 )
 
+// FilterConfig defines a PR list filter in the config file.
+type FilterConfig struct {
+	Name      string `toml:"name"`
+	Qualifier string `toml:"qualifier"`
+}
+
 // Config holds user configuration for the tool.
 type Config struct {
-	Editor   string       `toml:"editor"`
-	UseDelta bool         `toml:"use_delta"`
-	PageSize int          `toml:"page_size"`
-	Theme    string       `toml:"theme"`
-	Colors   styles.Theme `toml:"colors"`
+	Editor   string         `toml:"editor"`
+	UseDelta bool           `toml:"use_delta"`
+	PageSize int            `toml:"page_size"`
+	Theme    string         `toml:"theme"`
+	Colors   styles.Theme   `toml:"colors"`
+	Filters  []FilterConfig `toml:"filters"`
 }
 
 // Default returns the default configuration.
@@ -48,6 +56,30 @@ func Load() Config {
 	}
 
 	return cfg
+}
+
+// DefaultFilters returns the built-in filter presets.
+func DefaultFilters() []FilterConfig {
+	return []FilterConfig{
+		{Name: "Needs My Review", Qualifier: "review-requested:@me"},
+		{Name: "Reviewed, Not Approved", Qualifier: "reviewed-by:@me -review:approved"},
+		{Name: "Awaiting My Review", Qualifier: "-reviewed-by:@me -review:approved review:required"},
+		{Name: "All Open", Qualifier: ""},
+		{Name: "Authored by Me", Qualifier: "author:@me"},
+	}
+}
+
+// PRFilters converts config filters to domain types, falling back to defaults if empty.
+func (c Config) PRFilters() []review.PRFilter {
+	filters := c.Filters
+	if len(filters) == 0 {
+		filters = DefaultFilters()
+	}
+	result := make([]review.PRFilter, len(filters))
+	for i, f := range filters {
+		result[i] = review.PRFilter{Name: f.Name, Qualifier: f.Qualifier}
+	}
+	return result
 }
 
 // ResolveTheme returns a Theme based on the config: picks a built-in theme
