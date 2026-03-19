@@ -158,7 +158,13 @@ func (m Model) View() string {
 	header := styles.Title.Render("PR Review")
 	filterLabel := fmt.Sprintf("  Filter: [%s]", m.filters[m.filterIdx].Name)
 	repoLabel := fmt.Sprintf("  %s/%s", m.svc.RepoOwner(), m.svc.RepoName())
-	b.WriteString(header + filterLabel + repoLabel + "\n\n")
+	b.WriteString(header + filterLabel + repoLabel + "\n")
+	qualifier := m.filters[m.filterIdx].Qualifier
+	if qualifier == "" {
+		qualifier = "(none)"
+	}
+	qualifierStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	b.WriteString(qualifierStyle.Render("  "+qualifier) + "\n\n")
 
 	if m.loading {
 		b.WriteString(m.spinner.View() + " Loading PRs...\n")
@@ -184,7 +190,7 @@ func (m Model) View() string {
 	b.WriteString(strings.Repeat("─", m.width) + "\n")
 
 	// PR rows
-	maxVisible := m.height - 8 // account for header, footer, padding
+	maxVisible := m.height - 9 // account for header, qualifier line, footer, padding
 	if maxVisible < 1 {
 		maxVisible = 1
 	}
