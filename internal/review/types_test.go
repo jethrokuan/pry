@@ -267,10 +267,3 @@ var _ = Describe("PendingReview", func() {
 	})
 })
 
-var _ = Describe("PRFilter", func() {
-	It("has correct string representations", func() {
-		Expect(review.FilterReviewRequested.String()).To(Equal("Needs My Review"))
-		Expect(review.FilterAllOpen.String()).To(Equal("All Open"))
-		Expect(review.FilterAuthored.String()).To(Equal("Authored by Me"))
-	})
-})

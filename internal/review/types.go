@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+// PRFilter defines a named filter with a GitHub search qualifier.
+type PRFilter struct {
+	Name      string
+	Qualifier string
+}
+
 // SyncStatus tracks the sync state of a comment with the forge.
 type SyncStatus int
 
@@ -43,27 +49,6 @@ type PullRequest struct {
 	ReviewDecision string // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
 }
 
-// PRFilter determines which PRs to show.
-type PRFilter int
-
-const (
-	FilterReviewRequested PRFilter = iota
-	FilterAllOpen
-	FilterAuthored
-)
-
-func (f PRFilter) String() string {
-	switch f {
-	case FilterReviewRequested:
-		return "Needs My Review"
-	case FilterAllOpen:
-		return "All Open"
-	case FilterAuthored:
-		return "Authored by Me"
-	default:
-		return "Unknown"
-	}
-}
 
 // ReviewEvent is the type of review action.
 type ReviewEvent string
