@@ -116,6 +116,10 @@ PROMPT
         \"\\n✓ Done\\n\"
       else empty end
     '" -- "$prompt"
+
+  # Restore focus to the bd-patrol pane so workers don't steal focus
+  zellij action focus-previous-pane
+
   log "Worker launched for $issue_id ($ws_name)"
 }
 
