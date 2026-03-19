@@ -171,20 +171,16 @@ func (m Model) toggleFoldAll() Model {
 	return m
 }
 
-// moveToNextFile moves treeCursor to the next file row (skipping folders).
-func (m *Model) moveToNextFile() {
-	for i := m.nav.treeCursor + 1; i < len(m.nav.treeRows); i++ {
-		if m.nav.treeRows[i].node.fileIdx >= 0 {
-			m.nav.treeCursor = i
-			m.onTreeCursorChanged()
-			return
-		}
+// moveToAdjacentFile moves treeCursor to the next (forward=true) or previous
+// (forward=false) file row, skipping folders. Does not wrap around.
+func (m *Model) moveToAdjacentFile(forward bool) {
+	n := len(m.nav.treeRows)
+	start := m.nav.treeCursor
+	step := 1
+	if !forward {
+		step = -1
 	}
-}
-
-// moveToPrevFile moves treeCursor to the previous file row (skipping folders).
-func (m *Model) moveToPrevFile() {
-	for i := m.nav.treeCursor - 1; i >= 0; i-- {
+	for i := start + step; i >= 0 && i < n; i += step {
 		if m.nav.treeRows[i].node.fileIdx >= 0 {
 			m.nav.treeCursor = i
 			m.onTreeCursorChanged()
@@ -360,11 +356,7 @@ func (m *Model) repeatCycler(forward bool) {
 		m.navigateComment(forward, true)
 	case '/':
 		if m.search.query != "" {
-			if forward {
-				m.jumpToNextSearchMatch()
-			} else {
-				m.jumpToPrevSearchMatch()
-			}
+			m.jumpToSearchMatch(forward)
 		}
 	case 'h':
 		fallthrough
@@ -385,11 +377,7 @@ func (m *Model) navigateFile(forward, unviewedOnly bool) {
 		if unviewedOnly {
 			m.moveToUnviewedFileInTree(forward)
 		} else {
-			if forward {
-				m.moveToNextFile()
-			} else {
-				m.moveToPrevFile()
-			}
+			m.moveToAdjacentFile(forward)
 		}
 		return
 	}
@@ -673,7 +661,7 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.search.active = false
 		if m.search.query != "" {
 			m.nav.activeCycler = '/'
-			m.jumpToNextSearchMatch()
+			m.jumpToSearchMatch(true)
 		}
 		m.updateDiffContent()
 		return m, nil
@@ -695,41 +683,20 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 }
 
-func (m *Model) jumpToNextSearchMatch() {
+// jumpToSearchMatch moves to the next (forward=true) or previous search match
+// using cyclicSearch for wraparound.
+func (m *Model) jumpToSearchMatch(forward bool) {
+	n := len(m.nav.diffLines)
+	if n == 0 {
+		return
+	}
 	query := strings.ToLower(m.search.query)
-	for i := m.nav.diffCursor + 1; i < len(m.nav.diffLines); i++ {
-		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
-			m.nav.diffCursor = i
-			m.syncViewportToCursor()
-			return
-		}
-	}
-	// Wrap around
-	for i := 0; i <= m.nav.diffCursor; i++ {
-		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
-			m.nav.diffCursor = i
-			m.syncViewportToCursor()
-			return
-		}
-	}
-}
-
-func (m *Model) jumpToPrevSearchMatch() {
-	query := strings.ToLower(m.search.query)
-	for i := m.nav.diffCursor - 1; i >= 0; i-- {
-		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
-			m.nav.diffCursor = i
-			m.syncViewportToCursor()
-			return
-		}
-	}
-	// Wrap around
-	for i := len(m.nav.diffLines) - 1; i >= m.nav.diffCursor; i-- {
-		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
-			m.nav.diffCursor = i
-			m.syncViewportToCursor()
-			return
-		}
+	idx := cyclicSearch(m.nav.diffCursor, n, forward, func(i int) bool {
+		return strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query)
+	})
+	if idx >= 0 {
+		m.nav.diffCursor = idx
+		m.syncViewportToCursor()
 	}
 }
 
