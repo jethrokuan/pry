@@ -456,10 +456,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Restore comments from forge (crash recovery)
 			m.restoreForgeComments(msg.comments, msg.comments)
 			m.updateDiffContent()
-		} else {
-			// No existing pending review — create one on the forge
-			return m, m.createPendingReviewCmd()
 		}
+		// No existing pending review — that's fine, we'll create one lazily
+		// when the user actually takes a review action (e.g., adds a comment).
 
 	case reviewCreatedMsg:
 		if msg.err == nil {

@@ -658,6 +658,12 @@ func (m Model) saveInlineComment() (Model, tea.Cmd) {
 	added := m.review.Comments[len(m.review.Comments)-1]
 
 	m.closeInlineComment()
+
+	// If no pending review exists on the forge yet, create one now.
+	// The reviewCreatedMsg handler will flush all pending comments.
+	if m.review.ReviewNodeID == "" {
+		return m, m.createPendingReviewCmd()
+	}
 	return m, m.syncCommentCmd(added)
 }
 
