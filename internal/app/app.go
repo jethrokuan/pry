@@ -217,6 +217,16 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prBodyLoadedMsg:
 		if msg.err == nil && msg.pr != nil {
 			m.selectedPR = msg.pr
+			// Backfill review fields that may have been empty at creation
+			// (e.g., when launched via CLI with just a PR number).
+			if m.review != nil {
+				if m.review.PRNodeID == "" {
+					m.review.PRNodeID = msg.pr.NodeID
+				}
+				if m.review.CommitID == "" {
+					m.review.CommitID = msg.pr.HeadSHA
+				}
+			}
 		}
 		// Forward to diffview as PRBodyLoadedMsg
 		pr := m.selectedPR
