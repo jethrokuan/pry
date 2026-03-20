@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jkuan/pr-review/internal/review"
+	"github.com/jkuan/pr-review/internal/ui/mdutil"
 	"github.com/jkuan/pr-review/internal/ui/styles"
 )
 
@@ -145,7 +146,7 @@ func (m Model) renderBody() string {
 	if err != nil {
 		return m.pr.Body
 	}
-	rendered, err := renderer.Render(m.pr.Body)
+	rendered, err := renderer.Render(mdutil.ReplaceImages(m.pr.Body))
 	if err != nil {
 		return m.pr.Body
 	}

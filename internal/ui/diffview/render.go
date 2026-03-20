@@ -11,6 +11,7 @@ import (
 
 	"github.com/jkuan/pr-review/internal/diff"
 	"github.com/jkuan/pr-review/internal/review"
+	"github.com/jkuan/pr-review/internal/ui/mdutil"
 	"github.com/jkuan/pr-review/internal/ui/styles"
 )
 
@@ -29,6 +30,8 @@ func (m *Model) renderMarkdown(body string, width int, bgColor string) string {
 	if width < 10 {
 		width = 10
 	}
+
+	body = mdutil.ReplaceImages(body)
 
 	key := mdCacheKey{body: body, width: width, bgColor: bgColor}
 	if cached, ok := m.mdCache[key]; ok {
