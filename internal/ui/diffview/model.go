@@ -168,7 +168,7 @@ var keys = KeyMap{
 	OpenInBrowser: key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "open in browser")),
 	Editor:        key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "open in editor")),
 	Back:          key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
-	Quit:          key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+	Quit:          key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 	Enter:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "action")),
 	Search:        key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 	NextSearch:    key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next match")),
@@ -189,7 +189,7 @@ var inlineKeys = struct {
 	OpenEditor key.Binding
 }{
 	Save:       key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "save")),
-	Cancel:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+	Cancel:     key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "cancel")),
 	ToggleMode: key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl+t", "toggle mode")),
 	OpenEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "open $EDITOR")),
 }
@@ -933,7 +933,7 @@ func (m Model) View() string {
 	} else if m.confirmQuit {
 		pendingCount := len(m.review.Comments) + len(m.comments.forgeComments)
 		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(styles.Warning).
-			Render(fmt.Sprintf("You have %d pending comment(s). Press q again to quit.", pendingCount)))
+			Render(fmt.Sprintf("You have %d pending comment(s). Press ctrl+c again to quit.", pendingCount)))
 	} else if !m.comments.inlineActive {
 		// Footer
 		var helpParts []string
@@ -1153,7 +1153,7 @@ func (m Model) renderHelpPopup() string {
 				{"w", "Open in browser"},
 				{"ctrl+e", "Open in $EDITOR"},
 				{"esc", "Back"},
-				{"q", "Quit"},
+				{"ctrl+c", "Quit (×2 force)"},
 			},
 		},
 	}

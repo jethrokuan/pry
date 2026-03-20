@@ -54,7 +54,7 @@ var keys = KeyMap{
 	Filter:     key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "filter")),
 	EditFilter: key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "edit filter")),
 	Refresh:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-	Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+	Quit:       key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 	Help:       key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 }
 
@@ -177,7 +177,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				}
 				m.loading = true
 				return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
-			case "esc":
+			case "esc", "ctrl+c":
 				m.editing = false
 				m.filterInput.Blur()
 				return m, nil
@@ -457,13 +457,13 @@ func (m Model) View() string {
 
 	if m.err != nil {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("Error: %v", m.err)))
-		b.WriteString("\n\nPress 'r' to retry or 'q' to quit")
+		b.WriteString("\n\nPress 'r' to retry or ctrl+c to quit")
 		return b.String()
 	}
 
 	if len(m.prs) == 0 {
 		b.WriteString("No PRs found for this filter.\n")
-		b.WriteString("\nPress 'f' to change filter or 'q' to quit")
+		b.WriteString("\nPress 'f' to change filter or ctrl+c to quit")
 		return b.String()
 	}
 
@@ -554,7 +554,7 @@ func (m Model) View() string {
 
 	// Footer
 	b.WriteString("\n")
-	help := "↑/k up  ↓/j down  enter select  f filter  / edit filter  r refresh  q quit"
+	help := "↑/k up  ↓/j down  enter select  f filter  / edit filter  r refresh  ctrl+c quit"
 	b.WriteString(styles.HelpStyle.Render(help))
 
 	return b.String()

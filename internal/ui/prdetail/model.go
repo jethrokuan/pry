@@ -44,7 +44,7 @@ var keys = KeyMap{
 	Checkout: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "checkout")),
 	Web:      key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "open in web")),
 	Back:     key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "back")),
-	Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
+	Quit:     key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 	Up:       key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "scroll up")),
 	Down:     key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "scroll down")),
 }
@@ -215,7 +215,7 @@ func (m Model) View() string {
 
 	// Footer
 	b.WriteString("\n")
-	help := "enter review  c checkout  w web  esc back  q quit"
+	help := "enter review  c checkout  w web  esc back  ctrl+c quit"
 	b.WriteString(styles.HelpStyle.Render(help))
 
 	return b.String()

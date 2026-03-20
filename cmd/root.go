@@ -3,6 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
 
 	"github.com/alecthomas/kong"
 	tea "github.com/charmbracelet/bubbletea"
@@ -66,6 +70,33 @@ func main() {
 	}
 
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+
+	// Force-quit handler: double Ctrl-C exits even if the TUI event loop is hung.
+	// This runs in a separate goroutine independent of Bubble Tea.
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT)
+
+		var mu sync.Mutex
+		var lastInterrupt time.Time
+		const window = 1 * time.Second
+
+		for range sigCh {
+			mu.Lock()
+			now := time.Now()
+			if now.Sub(lastInterrupt) <= window {
+				mu.Unlock()
+				// Second Ctrl-C within window: force exit
+				os.Exit(130) // 128 + SIGINT(2) — standard exit code
+			}
+			lastInterrupt = now
+			mu.Unlock()
+
+			// First Ctrl-C: forward to Bubble Tea as a key event so the
+			// normal quit flow (with unsaved-work confirmation) still works.
+			p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+		}
+	}()
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

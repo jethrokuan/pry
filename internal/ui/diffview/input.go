@@ -626,7 +626,7 @@ func (m Model) handleGotoKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.search.gotoActive = false
 		m.search.gotoInput = ""
 		return m, nil
-	case "esc":
+	case "esc", "ctrl+c":
 		m.search.gotoActive = false
 		m.search.gotoInput = ""
 		return m, nil
@@ -667,7 +667,7 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		m.updateDiffContent()
 		return m, cmd
-	case "esc":
+	case "esc", "ctrl+c":
 		m.search.active = false
 		m.search.input = ""
 		m.updateDiffContent()
@@ -734,7 +734,7 @@ func (m Model) handleNarrowRegexKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.filter.regexActive = false
 		m.applyFilters()
 		return m, nil
-	case "esc":
+	case "esc", "ctrl+c":
 		m.filter.regexActive = false
 		m.filter.regexInput = ""
 		return m, nil
@@ -817,7 +817,7 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.search.filterActive = false
 		m.search.filterInput = ""
 		return m, nil
-	case "esc":
+	case "esc", "ctrl+c":
 		m.search.filterActive = false
 		m.search.filterInput = ""
 		return m, nil
@@ -914,11 +914,9 @@ func (m Model) handleInlineKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) handlePRInfoKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "i", "q":
+	case "esc", "i", "ctrl+c":
 		m.prInfoActive = false
 		return m, nil
-	case "ctrl+c":
-		return m, tea.Quit
 	}
 
 	// Delegate scrolling to the viewport
@@ -931,11 +929,9 @@ func (m Model) handlePRInfoKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 func (m Model) handleCommentPopupKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "enter", "q":
+	case "esc", "enter", "ctrl+c":
 		m.comments.popupActive = false
 		return m, nil
-	case "ctrl+c":
-		return m, tea.Quit
 	}
 
 	// Delegate scrolling to the viewport (handles j/k, up/down, pgup/pgdn, etc.)
