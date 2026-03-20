@@ -549,6 +549,9 @@ func (m *Model) navigateCommentToFile(forward bool) tea.Cmd {
 	start := m.nav.fileCursor
 	oldIdx := m.nav.fileCursor
 	idx := cyclicSearch(start, nFiles, forward, func(i int) bool {
+		if !m.filter.isIncluded(i) {
+			return false
+		}
 		if !m.fileHasComments(m.files[i].Path) {
 			return false
 		}
@@ -673,11 +676,11 @@ func (m *Model) navigateHunkCrossFile(forward bool) tea.Cmd {
 		return nil
 	}
 	oldIdx := m.nav.fileCursor
-	var nextIdx int
-	if forward {
-		nextIdx = (m.nav.fileCursor + 1) % nFiles
-	} else {
-		nextIdx = (m.nav.fileCursor - 1 + nFiles) % nFiles
+	nextIdx := cyclicSearch(m.nav.fileCursor, nFiles, forward, func(i int) bool {
+		return m.filter.isIncluded(i)
+	})
+	if nextIdx < 0 {
+		return nil
 	}
 	m.nav.fileCursor = nextIdx
 	m.nav.buildDiffLines(m.files)
@@ -922,6 +925,10 @@ func (m Model) jumpForward() (Model, tea.Cmd) {
 
 // applyJumpPos moves the cursor to the given jump position.
 func (m *Model) applyJumpPos(pos jumpPos) {
+	// Skip jumps to files excluded by active filters.
+	if !m.filter.isIncluded(pos.fileCursor) {
+		return
+	}
 	if pos.fileCursor != m.nav.fileCursor {
 		oldIdx := m.nav.fileCursor
 		m.nav.fileCursor = pos.fileCursor

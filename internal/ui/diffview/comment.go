@@ -478,6 +478,9 @@ func (m *Model) navigateToNextUnviewed() {
 	// Search forward from current position
 	for i := 1; i < n; i++ {
 		idx := (m.nav.fileCursor + i) % n
+		if !m.filter.isIncluded(idx) {
+			continue
+		}
 		if !m.review.ViewedFiles[m.files[idx].Path] {
 			oldIdx := m.nav.fileCursor
 			m.nav.fileCursor = idx
