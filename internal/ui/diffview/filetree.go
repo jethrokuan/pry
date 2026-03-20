@@ -227,6 +227,12 @@ func (m Model) renderFileTree() string {
 	}
 	b.WriteString(title + "\n\n")
 
+	if m.filter.isActive() && m.filter.filteredCount == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).
+			Render("  No matching files."))
+		return b.String()
+	}
+
 	for i, row := range m.nav.treeRows {
 		connector := "├── "
 		if row.isLast {

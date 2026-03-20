@@ -834,6 +834,18 @@ func openBrowser(url string) tea.Cmd {
 func (m *Model) updateDiffContent() {
 	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
 		m.nav.diffViewport.SetContent("No files to display")
+		if m.treeDirty {
+			m.nav.treeViewport.SetContent(m.renderFileTree())
+			m.treeDirty = false
+		}
+		return
+	}
+	if m.filter.isActive() && m.filter.filteredCount == 0 {
+		m.nav.diffViewport.SetContent("No matching files.")
+		if m.treeDirty {
+			m.nav.treeViewport.SetContent(m.renderFileTree())
+			m.treeDirty = false
+		}
 		return
 	}
 	file := m.files[m.nav.fileCursor]
