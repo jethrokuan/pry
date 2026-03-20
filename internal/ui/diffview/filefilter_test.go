@@ -1,11 +1,14 @@
 package diffview
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
+	"github.com/jkuan/pr-review/internal/codeowners"
 	"github.com/jkuan/pr-review/internal/diff"
 )
 
@@ -90,6 +93,37 @@ var _ = ginkgo.Describe("FileFilter", func() {
 		})
 	})
 
+	ginkgo.Describe("toggleOwner", func() {
+		ginkgo.It("returns not-configured message when ownerPattern is empty", func() {
+			ff := FileFilter{}
+			label := ff.toggleOwner()
+			gomega.Expect(label).To(gomega.ContainSubstring("not configured"))
+			gomega.Expect(ff.ownerEnabled).To(gomega.BeFalse())
+		})
+
+		ginkgo.It("toggles off when currently enabled", func() {
+			ff := FileFilter{ownerEnabled: true, ownerPattern: "@team", codeowners: &codeowners.Codeowners{}}
+			label := ff.toggleOwner()
+			gomega.Expect(label).To(gomega.Equal("off"))
+			gomega.Expect(ff.ownerEnabled).To(gomega.BeFalse())
+		})
+
+		ginkgo.It("toggles on when codeowners is available", func() {
+			ff := FileFilter{ownerPattern: "@team", codeowners: &codeowners.Codeowners{}}
+			label := ff.toggleOwner()
+			gomega.Expect(label).To(gomega.Equal("@team"))
+			gomega.Expect(ff.ownerEnabled).To(gomega.BeTrue())
+		})
+
+		ginkgo.It("returns CODEOWNERS-not-found when codeowners is nil", func() {
+			ff := FileFilter{ownerPattern: "@team"}
+			// Note: codeowners is nil and loadCodeowners will fail in test env
+			label := ff.toggleOwner()
+			gomega.Expect(label).To(gomega.ContainSubstring("CODEOWNERS"))
+			gomega.Expect(ff.ownerEnabled).To(gomega.BeFalse())
+		})
+	})
+
 	ginkgo.Describe("clearAll", func() {
 		ginkgo.It("clears all filters", func() {
 			ff := FileFilter{}
@@ -128,6 +162,21 @@ var _ = ginkgo.Describe("FileFilter", func() {
 		})
 	})
 
+	ginkgo.Describe("matchesAll with owner filter", func() {
+		ginkgo.It("excludes all files when codeowners is nil", func() {
+			ff := FileFilter{ownerEnabled: true, ownerPattern: "@team"}
+			// codeowners is nil — cannot determine ownership
+			gomega.Expect(ff.matchesAll("src/main.go")).To(gomega.BeFalse())
+		})
+
+		ginkgo.It("filters by codeowners when available", func() {
+			co, _ := makeTempCodeowners("*.go @go-team\ndocs/ @docs-team\n")
+			ff := FileFilter{ownerEnabled: true, ownerPattern: "@go-team", codeowners: co}
+			gomega.Expect(ff.matchesAll("src/main.go")).To(gomega.BeTrue())
+			gomega.Expect(ff.matchesAll("docs/readme.md")).To(gomega.BeFalse())
+		})
+	})
+
 	ginkgo.Describe("buildTree with filter", func() {
 		ginkgo.It("builds tree with only included files", func() {
 			included := map[int]bool{0: true, 4: true} // main.go, handler.go
@@ -147,4 +196,15 @@ var _ = ginkgo.Describe("FileFilter", func() {
 func TestFileFilter(t *testing.T) {
 	// This is handled by the diffview_suite_test.go
 	// Just making sure it gets picked up by the suite runner
+}
+
+// makeTempCodeowners creates a Codeowners from a content string for testing.
+func makeTempCodeowners(content string) (*codeowners.Codeowners, error) {
+	tmpDir := os.TempDir()
+	path := filepath.Join(tmpDir, "CODEOWNERS_test")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return nil, err
+	}
+	defer os.Remove(path)
+	return codeowners.Parse(path)
 }

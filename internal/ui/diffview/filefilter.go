@@ -85,7 +85,10 @@ func (ff *FileFilter) matchesAll(path string) bool {
 			return false
 		}
 	}
-	if ff.ownerEnabled && ff.ownerPattern != "" && ff.codeowners != nil {
+	if ff.ownerEnabled && ff.ownerPattern != "" {
+		if ff.codeowners == nil {
+			return false // can't determine ownership without CODEOWNERS
+		}
 		if !ff.codeowners.OwnedBy(path, ff.ownerPattern) {
 			return false
 		}
@@ -114,16 +117,27 @@ func (ff *FileFilter) setRegex(pattern string) {
 	ff.regexCompiled = compiled
 }
 
-// toggleOwner toggles the owner filter on/off.
-func (ff *FileFilter) toggleOwner() {
+// toggleOwner toggles the owner filter on/off and returns a label for the
+// flash message. Errors (no config, missing CODEOWNERS) are communicated
+// through the returned label so the caller can show them.
+func (ff *FileFilter) toggleOwner() string {
 	if ff.ownerPattern == "" {
-		return // no owner configured
+		return "not configured (set file_tree.default_owner_filter)"
 	}
-	// Lazy-load CODEOWNERS if needed
+	// Toggling off is always allowed
+	if ff.ownerEnabled {
+		ff.ownerEnabled = false
+		return "off"
+	}
+	// Toggling on — need CODEOWNERS
 	if ff.codeowners == nil {
 		ff.codeowners = loadCodeowners()
 	}
-	ff.ownerEnabled = !ff.ownerEnabled
+	if ff.codeowners == nil {
+		return "CODEOWNERS file not found"
+	}
+	ff.ownerEnabled = true
+	return ff.ownerPattern
 }
 
 // clearAll removes all active filters.

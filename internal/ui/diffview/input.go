@@ -939,12 +939,8 @@ func (m Model) handleNarrowRegexKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 // toggleOwnerFilter toggles the CODEOWNERS-based owner filter.
 func (m Model) toggleOwnerFilter() (Model, tea.Cmd) {
-	m.filter.toggleOwner()
+	label := m.filter.toggleOwner()
 	m.applyFilters()
-	label := "off"
-	if m.filter.ownerEnabled {
-		label = m.filter.ownerPattern
-	}
 	cmd := m.setFlash(fmt.Sprintf("Owner filter: %s", label))
 	return m, cmd
 }
