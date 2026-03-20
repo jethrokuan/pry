@@ -163,6 +163,113 @@ func (m Model) toggleFoldAll() Model {
 	return m
 }
 
+// toggleFoldAtDiffCursor toggles folding based on what's at the cursor in the diff view.
+// If the cursor is on a collapsed hunk placeholder, expand it.
+// If the cursor line has comments, toggle comment fold.
+// Otherwise, collapse the current hunk.
+func (m Model) toggleFoldAtDiffCursor() Model {
+	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+		return m
+	}
+	if m.nav.diffCursor >= len(m.nav.diffLines) {
+		return m
+	}
+
+	dl := m.nav.diffLines[m.nav.diffCursor]
+	path := m.files[m.nav.fileCursor].Path
+
+	// If it's a collapsed hunk placeholder, expand it
+	if dl.collapsed {
+		hk := hunkKey(path, dl.hunkIdx)
+		delete(m.nav.collapsedHunks, hk)
+		m.nav.buildDiffLines(m.files)
+		m.updateDiffContent()
+		return m
+	}
+
+	// If cursor line has comments, toggle comment fold
+	if m.lineHasComments(path, dl) {
+		return m.toggleCommentAtCursor()
+	}
+
+	// Otherwise, collapse the current hunk
+	hk := hunkKey(path, dl.hunkIdx)
+	m.nav.collapsedHunks[hk] = true
+	m.nav.buildDiffLines(m.files)
+	// Clamp cursor if it's now past the end
+	if m.nav.diffCursor >= len(m.nav.diffLines) {
+		m.nav.diffCursor = len(m.nav.diffLines) - 1
+	}
+	m.updateDiffContent()
+	return m
+}
+
+// toggleAllFolds toggles all comment folds and hunk folds for the current file.
+func (m Model) toggleAllFolds() Model {
+	m.comments.cursor = -1
+
+	// Check if anything is expanded (comments or hunks)
+	anyCommentExpanded := false
+	for _, v := range m.comments.expanded {
+		if v {
+			anyCommentExpanded = true
+			break
+		}
+	}
+
+	anyHunkExpanded := false
+	if len(m.files) > 0 && m.nav.fileCursor < len(m.files) {
+		file := m.files[m.nav.fileCursor]
+		for hi := range file.Hunks {
+			hk := hunkKey(file.Path, hi)
+			if !m.nav.collapsedHunks[hk] {
+				anyHunkExpanded = true
+				break
+			}
+		}
+	}
+
+	anyExpanded := anyCommentExpanded || anyHunkExpanded
+
+	// Toggle all comments
+	allCommentKeys := make(map[string]bool)
+	for _, c := range m.comments.existing {
+		allCommentKeys[commentKey(c.Path, c.Line)] = true
+	}
+	for _, c := range m.comments.forgeComments {
+		allCommentKeys[commentKey(c.Path, c.Line)] = true
+	}
+	for _, c := range m.review.Comments {
+		allCommentKeys[commentKey(c.Path, c.Line)] = true
+	}
+	for ck := range allCommentKeys {
+		m.comments.expanded[ck] = !anyExpanded
+	}
+
+	// Toggle all hunks for current file
+	if len(m.files) > 0 && m.nav.fileCursor < len(m.files) {
+		file := m.files[m.nav.fileCursor]
+		for hi := range file.Hunks {
+			hk := hunkKey(file.Path, hi)
+			if anyExpanded {
+				m.nav.collapsedHunks[hk] = true
+			} else {
+				delete(m.nav.collapsedHunks, hk)
+			}
+		}
+	}
+
+	m.nav.buildDiffLines(m.files)
+	if m.nav.diffCursor >= len(m.nav.diffLines) {
+		m.nav.diffCursor = len(m.nav.diffLines) - 1
+	}
+	if m.nav.diffCursor < 0 {
+		m.nav.diffCursor = 0
+	}
+	m.updateDiffContent()
+	return m
+}
+
 // moveToNextFile moves treeCursor to the next file row (skipping folders).
 // Wraps around to the first file when at the end.
 func (m *Model) moveToNextFile() tea.Cmd {

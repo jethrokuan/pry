@@ -100,9 +100,15 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 
 	hunkIndex := 0
 	for _, hunk := range file.Hunks {
+		hk := hunkKey(file.Path, hunkIndex)
+		isCollapsed := m.nav.collapsedHunks[hk]
+
 		header := fmt.Sprintf("@@ -%d,%d +%d,%d @@", hunk.OldStart, hunk.OldLines, hunk.NewStart, hunk.NewLines)
 		if hunk.Header != "" {
 			header += " " + hunk.Header
+		}
+		if isCollapsed {
+			header += fmt.Sprintf("  ▸ %d lines", len(hunk.Lines))
 		}
 		isActiveHunk := hunkIndex == activeHunkIdx && styles.Current.BgActiveHunk != ""
 		hs := hunkStyle
@@ -114,6 +120,27 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 			renderedHeader += hs.Render(strings.Repeat(" ", m.nav.diffViewport.Width-w))
 		}
 		b.WriteString(renderedHeader + "\n")
+
+		if isCollapsed {
+			// Render a single selectable placeholder line for the collapsed hunk
+			isCurrent := m.nav.focus == FocusDiff && lineIdx == m.nav.diffCursor
+			summary := fmt.Sprintf("  ⋯ %d lines hidden [tab to expand]", len(hunk.Lines))
+			if isCurrent {
+				foldBg := lipgloss.NewStyle().Background(cursorBg)
+				foldText := foldBg.Render(summary)
+				w := lipgloss.Width(foldText)
+				if w < m.nav.diffViewport.Width {
+					foldText += foldBg.Render(strings.Repeat(" ", m.nav.diffViewport.Width-w))
+				}
+				b.WriteString(foldText + "\n")
+			} else {
+				b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(summary) + "\n")
+			}
+			lineIdx++
+			b.WriteString("\n")
+			hunkIndex++
+			continue
+		}
 
 		for _, line := range hunk.Lines {
 			isCurrent := m.nav.focus == FocusDiff && lineIdx == m.nav.diffCursor

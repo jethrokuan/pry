@@ -191,13 +191,13 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if m.nav.focus == FocusFileTree {
 			return m.toggleFoldAtCursor(), nil
 		}
-		return m.toggleCommentAtCursor(), nil
+		return m.toggleFoldAtDiffCursor(), nil
 
 	case key.Matches(msg, keys.FoldComment):
 		if m.nav.focus == FocusFileTree {
 			return m.toggleFoldAll(), nil
 		}
-		return m.toggleAllComments(), nil
+		return m.toggleAllFolds(), nil
 
 	case key.Matches(msg, keys.MarkViewed):
 		if m.nav.focus == FocusFileTree {

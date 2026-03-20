@@ -167,8 +167,8 @@ var keys = KeyMap{
 	Reply:         key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reply")),
 	SelectLine:    key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "select")),
 	Submit:        key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "submit review")),
-	ToggleComment: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle comments")),
-	FoldComment:   key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("S-tab", "toggle all comments")),
+	ToggleComment: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle fold")),
+	FoldComment:   key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("S-tab", "toggle all folds")),
 	MarkViewed:    key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mark viewed")),
 	OpenInBrowser: key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "open in browser")),
 	Editor:        key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "open in editor")),
@@ -235,13 +235,14 @@ type Model struct {
 }
 
 type diffLineInfo struct {
-	fileIdx  int
-	hunkIdx  int
-	lineIdx  int
-	newLine  int
-	oldLine  int
-	lineType diff.LineType
-	content  string
+	fileIdx   int
+	hunkIdx   int
+	lineIdx   int
+	newLine   int
+	oldLine   int
+	lineType  diff.LineType
+	content   string
+	collapsed bool // true for collapsed hunk placeholder lines
 }
 
 // --- Constructor ---
@@ -291,10 +292,11 @@ func New(svc review.Service, pr review.PullRequest, rev *review.PendingReview, o
 		mdCache: make(map[mdCacheKey]string),
 		treeDirty:         true,
 		nav: DiffNav{
-			showTree:      true,
-			focus:         FocusDiff,
-			collapsedDirs: make(map[string]bool),
-			activeCycler:  'h',
+			showTree:       true,
+			focus:          FocusDiff,
+			collapsedDirs:  make(map[string]bool),
+			collapsedHunks: make(map[string]bool),
+			activeCycler:   'h',
 		},
 		comments: CommentPanel{
 			expanded: make(map[string]bool),

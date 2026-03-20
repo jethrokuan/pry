@@ -1,6 +1,8 @@
 package diffview
 
 import (
+	"strconv"
+
 	"github.com/charmbracelet/bubbles/viewport"
 
 	"github.com/jkuan/pr-review/internal/diff"
@@ -22,6 +24,9 @@ type DiffNav struct {
 	treeCursor    int
 	collapsedDirs map[string]bool
 
+	// Hunk folding (key: "filePath:hunkIdx")
+	collapsedHunks map[string]bool
+
 	// Visual selection
 	visualMode  bool
 	visualStart int
@@ -36,6 +41,7 @@ type DiffNav struct {
 }
 
 // buildDiffLines flattens the hunks of the current file into a flat diffLines slice.
+// Collapsed hunks are represented by a single placeholder entry.
 func (n *DiffNav) buildDiffLines(files []diff.DiffFile) {
 	n.diffLines = nil
 	if len(files) == 0 || n.fileCursor >= len(files) {
@@ -43,6 +49,17 @@ func (n *DiffNav) buildDiffLines(files []diff.DiffFile) {
 	}
 	file := files[n.fileCursor]
 	for hi, hunk := range file.Hunks {
+		hk := hunkKey(file.Path, hi)
+		if n.collapsedHunks[hk] {
+			// Single placeholder for the collapsed hunk
+			n.diffLines = append(n.diffLines, diffLineInfo{
+				fileIdx:   n.fileCursor,
+				hunkIdx:   hi,
+				lineIdx:   0,
+				collapsed: true,
+			})
+			continue
+		}
 		for li, line := range hunk.Lines {
 			n.diffLines = append(n.diffLines, diffLineInfo{
 				fileIdx:  n.fileCursor,
@@ -55,6 +72,11 @@ func (n *DiffNav) buildDiffLines(files []diff.DiffFile) {
 			})
 		}
 	}
+}
+
+// hunkKey returns a map key for hunk collapse state.
+func hunkKey(filePath string, hunkIdx int) string {
+	return filePath + ":" + strconv.Itoa(hunkIdx)
 }
 
 // rebuildTreeRows flattens the cached tree with current collapse state.
