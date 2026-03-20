@@ -204,7 +204,7 @@ PROMPT
 
   # shellcheck disable=SC2086
   zellij run --name "$ws_name" -- \
-    bash -c "claude -p --verbose --output-format stream-json --worktree \"$ws_name\" --dangerously-skip-permissions $model_flag \"\$1\" | claude-pretty-printer --layout compact; echo \${PIPESTATUS[0]} > \"$STATE_DIR/${issue_id}.exit\"" -- "$prompt"
+    bash -c "trap '' INT TSTP QUIT; exec < /dev/null; claude -p --verbose --output-format stream-json --worktree \"$ws_name\" --dangerously-skip-permissions $model_flag \"\$1\" | claude-pretty-printer --layout compact; echo \${PIPESTATUS[0]} > \"$STATE_DIR/${issue_id}.exit\"" -- "$prompt"
 
   # Restore focus to the bd-patrol pane
   zellij action focus-previous-pane
