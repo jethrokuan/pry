@@ -14,8 +14,6 @@ const (
 	modeSearch
 	modeFilter
 	modeNarrowRegex
-	modePendingG
-	modePendingD
 	modeHelp
 	modePRInfo
 	modeCommentPopup
@@ -35,10 +33,6 @@ func (m Model) activeMode() inputMode {
 		return modeFilter
 	case m.filter.regexActive:
 		return modeNarrowRegex
-	case m.nav.pendingG:
-		return modePendingG
-	case m.nav.pendingD:
-		return modePendingD
 	case m.showHelp:
 		return modeHelp
 	case m.prInfoActive:
@@ -66,10 +60,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.handleFilterKey(msg)
 	case modeNarrowRegex:
 		return m.handleNarrowRegexKey(msg)
-	case modePendingG:
-		return m.handlePendingG(msg)
-	case modePendingD:
-		return m.handlePendingD(msg)
 	case modeHelp:
 		m.showHelp = false
 		return m, nil
@@ -117,6 +107,9 @@ func (m Model) handleCommentSelectKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	case key.Matches(msg, keys.Back):
 		m.comments.cursor = -1
 		m.updateDiffContent()
+		return m, nil, true
+	case key.Matches(msg, keys.Enter):
+		m.openCommentPopup()
 		return m, nil, true
 	}
 
@@ -236,6 +229,16 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Submit):
 		return m, func() tea.Msg { return SubmitReviewMsg{} }
+
+	// Dedicated navigation keys (work in both tree and diff focus)
+	case key.Matches(msg, keys.NextFile):
+		m.nav.activeCycler = 'f'
+		cmd := m.navigateFile(true, false)
+		return m, cmd
+	case key.Matches(msg, keys.PrevFile):
+		m.nav.activeCycler = 'f'
+		cmd := m.navigateFile(false, false)
+		return m, cmd
 	}
 
 	if m.nav.focus == FocusFileTree {

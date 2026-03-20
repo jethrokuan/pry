@@ -109,12 +109,18 @@ const (
 // --- Keys ---
 
 type KeyMap struct {
-	Up            key.Binding
-	Down          key.Binding
-	PageUp        key.Binding
-	PageDown      key.Binding
-	ToggleTree    key.Binding
-	Comment       key.Binding
+	Up          key.Binding
+	Down        key.Binding
+	PageUp      key.Binding
+	PageDown    key.Binding
+	ToggleTree  key.Binding
+	NextFile    key.Binding
+	PrevFile    key.Binding
+	NextHunk    key.Binding
+	PrevHunk    key.Binding
+	NextComment key.Binding
+	PrevComment key.Binding
+	// DeleteComment and EditComment are only active in comment-select mode
 	DeleteComment key.Binding
 	EditComment   key.Binding
 	Reply         key.Binding
@@ -129,13 +135,11 @@ type KeyMap struct {
 	Quit          key.Binding
 	Enter         key.Binding
 	Search        key.Binding
+	NextSearch    key.Binding
+	PrevSearch    key.Binding
 	FilterFile    key.Binding
 	Help          key.Binding
 	Info          key.Binding
-	GotoPrefix    key.Binding
-	GotoEnd       key.Binding
-	NextMatch     key.Binding
-	PrevMatch     key.Binding
 	NarrowRegex   key.Binding
 	NarrowOwner   key.Binding
 	NarrowClear   key.Binding
@@ -147,7 +151,12 @@ var keys = KeyMap{
 	PageUp:        key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "page up")),
 	PageDown:      key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "page down")),
 	ToggleTree:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "toggle tree")),
-	Comment:       key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "comment")),
+	NextFile:      key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "next file")),
+	PrevFile:      key.NewBinding(key.WithKeys("F"), key.WithHelp("F", "prev file")),
+	NextHunk:      key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "next hunk")),
+	PrevHunk:      key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "prev hunk")),
+	NextComment:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "next comment")),
+	PrevComment:   key.NewBinding(key.WithKeys("C"), key.WithHelp("C", "prev comment")),
 	DeleteComment: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete comment")),
 	EditComment:   key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit comment")),
 	Reply:         key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reply")),
@@ -160,15 +169,13 @@ var keys = KeyMap{
 	Editor:        key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "open in editor")),
 	Back:          key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	Quit:          key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
-	Enter:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select file")),
+	Enter:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "action")),
 	Search:        key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+	NextSearch:    key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next match")),
+	PrevSearch:    key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev match")),
 	FilterFile:    key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "filter files")),
 	Help:          key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	Info:          key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "PR info")),
-	GotoPrefix:    key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "go to...")),
-	GotoEnd:       key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "go to end")),
-	NextMatch:     key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next match")),
-	PrevMatch:     key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "prev match")),
 	NarrowRegex:   key.NewBinding(key.WithKeys("ctrl+f"), key.WithHelp("ctrl+f", "regex filter")),
 	NarrowOwner:   key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "owner filter")),
 	NarrowClear:   key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "clear filters")),
@@ -910,16 +917,6 @@ func (m Model) View() string {
 	} else if m.filter.regexActive {
 		prompt := lipgloss.NewStyle().Bold(true).Render("Narrow (regex): ")
 		b.WriteString(prompt + m.filter.regexInput + "█")
-	} else if m.nav.pendingG {
-		// Show g-prefix legend while waiting for second key
-		keyStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
-		b.WriteString(styles.HelpStyle.Render("g ") +
-			keyStyle.Render("h") + styles.HelpStyle.Render(" hunk  ") +
-			keyStyle.Render("f") + styles.HelpStyle.Render(" file  ") +
-			keyStyle.Render("F") + styles.HelpStyle.Render(" unviewed  ") +
-			keyStyle.Render("c") + styles.HelpStyle.Render(" comment  ") +
-			keyStyle.Render("C") + styles.HelpStyle.Render(" commented file  ") +
-			keyStyle.Render("0-9") + styles.HelpStyle.Render(" line"))
 	} else if m.comments.cursor >= 0 && m.nav.focus == FocusDiff {
 		// Comment selection mode footer
 		refs := m.commentRefsAtCursor()
@@ -945,7 +942,7 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "enter select")
 			helpParts = append(helpParts, "tab fold")
 			helpParts = append(helpParts, "S-tab fold all")
-			helpParts = append(helpParts, "gf file")
+			helpParts = append(helpParts, "f/F file")
 			helpParts = append(helpParts, "/ filter")
 			helpParts = append(helpParts, "^f narrow")
 			if m.filter.ownerPattern != "" {
@@ -961,34 +958,32 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "? help")
 		} else {
 			helpParts = append(helpParts, "j/k scroll")
-			helpParts = append(helpParts, "g… go to")
-			helpParts = append(helpParts, "G bottom")
+			helpParts = append(helpParts, "f/F file")
+			helpParts = append(helpParts, "h/H hunk")
+			helpParts = append(helpParts, "c/C comment")
 			helpParts = append(helpParts, "/ search")
-			helpParts = append(helpParts, "n/p next/prev")
-			helpParts = append(helpParts, "c comment")
+			helpParts = append(helpParts, "enter comment")
 			helpParts = append(helpParts, "e tree")
 			helpParts = append(helpParts, "m viewed")
 			if m.nav.visualMode {
 				helpParts = append(helpParts, "(SELECT)")
 			}
 			if m.search.query != "" {
-				helpParts = append(helpParts, fmt.Sprintf("[/%s]", m.search.query))
+				helpParts = append(helpParts, fmt.Sprintf("[/%s n/N]", m.search.query))
 			}
 			helpParts = append(helpParts, "i info")
 			helpParts = append(helpParts, "ctrl+s submit")
 			helpParts = append(helpParts, "? help")
 		}
 
-		// Show active cycler indicator with position
-		if m.nav.activeCycler != 0 {
-			label := cyclerLabel(m.nav.activeCycler)
-			cyclerText := fmt.Sprintf("[n/N: %s", label)
-			if m.nav.cyclerTotal > 0 {
-				cyclerText += fmt.Sprintf(" %d/%d", m.nav.cyclerIndex, m.nav.cyclerTotal)
+		// Always show position counter for the active object type
+		{
+			label, idx, total := m.currentPosition()
+			if total > 0 {
+				cyclerText := fmt.Sprintf("[%s %d/%d]", label, idx, total)
+				helpParts = append(helpParts,
+					lipgloss.NewStyle().Foreground(styles.Warning).Render(cyclerText))
 			}
-			cyclerText += "]"
-			helpParts = append(helpParts,
-				lipgloss.NewStyle().Foreground(styles.Warning).Render(cyclerText))
 		}
 
 		// Show flash message if active
@@ -1016,23 +1011,74 @@ func (m Model) View() string {
 	return result
 }
 
-// cyclerLabel returns a human-readable label for the active cycler.
-func cyclerLabel(c rune) string {
-	switch c {
+// currentPosition dynamically computes the position counter for the active navigation type.
+func (m Model) currentPosition() (label string, index int, total int) {
+	switch m.nav.activeCycler {
 	case 'f':
-		return "file"
+		return "File", m.nav.fileCursor + 1, len(m.files)
 	case 'F':
-		return "unviewed"
+		t, p := 0, 0
+		for i, f := range m.files {
+			if !m.review.ViewedFiles[f.Path] {
+				t++
+				if i == m.nav.fileCursor {
+					p = t
+				}
+			}
+		}
+		return "Unviewed", p, t
 	case 'c':
-		return "comment"
+		if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+			return "Comment", 0, 0
+		}
+		path := m.files[m.nav.fileCursor].Path
+		t, p := 0, 0
+		for i, dl := range m.nav.diffLines {
+			if m.lineHasComments(path, dl) {
+				t++
+				if i == m.nav.diffCursor {
+					p = t
+				}
+			}
+		}
+		return "Comment", p, t
 	case 'C':
-		return "commented file"
-	case 'h':
-		return "hunk"
+		t, p := 0, 0
+		for i, f := range m.files {
+			if m.fileHasComments(f.Path) {
+				t++
+				if i == m.nav.fileCursor {
+					p = t
+				}
+			}
+		}
+		return "Commented", p, t
 	case '/':
-		return "search"
+		if m.search.query == "" {
+			return "Match", 0, 0
+		}
+		query := strings.ToLower(m.search.query)
+		t, p := 0, 0
+		for i, dl := range m.nav.diffLines {
+			if strings.Contains(strings.ToLower(dl.content), query) {
+				t++
+				if i == m.nav.diffCursor {
+					p = t
+				}
+			}
+		}
+		return "Match", p, t
 	default:
-		return ""
+		// Default: show hunk position
+		if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+			return "Hunk", 0, 0
+		}
+		file := m.files[m.nav.fileCursor]
+		hunkIdx := 0
+		if len(m.nav.diffLines) > 0 && m.nav.diffCursor < len(m.nav.diffLines) {
+			hunkIdx = m.nav.diffLines[m.nav.diffCursor].hunkIdx + 1
+		}
+		return "Hunk", hunkIdx, len(file.Hunks)
 	}
 }
 
@@ -1062,25 +1108,16 @@ func (m Model) renderHelpPopup() string {
 			bindings: []binding{
 				{"j / k", "Scroll down / up"},
 				{"ctrl+d / ctrl+u", "Page down / up"},
-				{"G", "Bottom of file"},
-				{"n / p", "Next / prev in active cycler"},
-			},
-		},
-		{
-			title: "Go to (g prefix)",
-			bindings: []binding{
-				{"gh", "Next hunk (then n/p cycle hunks)"},
-				{"gf", "Next file (then n/p cycle files)"},
-				{"gF", "Next unviewed file"},
-				{"gc", "Next comment (expand + select)"},
-				{"gC", "Next file with comments"},
-				{"g<number>", "Go to line number"},
+				{"f / F", "Next / prev file"},
+				{"h / H", "Next / prev hunk"},
+				{"c / C", "Next / prev comment"},
 			},
 		},
 		{
 			title: "Search & Filter",
 			bindings: []binding{
-				{"/ (text)", "Search in file (then n/p cycle matches)"},
+				{"/ (text)", "Search in file"},
+				{"n / N", "Next / prev search match"},
 				{"ctrl+p", "Filter files (jump to file)"},
 				{"ctrl+f", "Narrow tree by regex path filter"},
 				{"ctrl+o", "Toggle CODEOWNERS team filter"},
@@ -1090,10 +1127,7 @@ func (m Model) renderHelpPopup() string {
 		{
 			title: "Review",
 			bindings: []binding{
-				{"c", "Add comment"},
-				{"enter", "View comments in popup"},
-				{"dd", "Delete pending comment"},
-				{"de", "Edit pending comment"},
+				{"enter", "New comment / open comments"},
 				{"space", "Start visual selection"},
 				{"m", "Toggle mark as viewed"},
 				{"tab / S-tab", "Toggle / toggle all comments"},

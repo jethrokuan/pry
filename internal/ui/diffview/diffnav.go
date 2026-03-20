@@ -30,14 +30,9 @@ type DiffNav struct {
 	// Diff line mapping
 	diffLines []diffLineInfo
 
-	// Multi-key state
-	pendingG     bool
-	pendingD     bool
-	activeCycler rune // 'h' = hunk (default); 'f','F','c','C' = go-to motion; '/' = search
-
-	// Cycler position tracking
-	cyclerIndex int // 1-based current position in cycle
-	cyclerTotal int // total items in cycle
+	// Active navigation type for the always-visible position counter.
+	// 'h' = hunk (default); 'f','F' = file/unviewed; 'c','C' = comment; '/' = search
+	activeCycler rune
 }
 
 // buildDiffLines flattens the hunks of the current file into a flat diffLines slice.

@@ -31,15 +31,6 @@ func (m Model) handleTreeKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.search.filterFiles = m.allFileIndices()
 		m.search.filterCursor = 0
 		return m, nil
-	case key.Matches(msg, keys.GotoPrefix):
-		m.nav.pendingG = true
-		return m, nil
-	case key.Matches(msg, keys.NextMatch):
-		cmd := m.repeatCycler(true)
-		return m, cmd
-	case key.Matches(msg, keys.PrevMatch):
-		cmd := m.repeatCycler(false)
-		return m, cmd
 	case key.Matches(msg, keys.Help):
 		m.showHelp = true
 		return m, nil
@@ -182,7 +173,6 @@ func (m *Model) moveToNextFile() tea.Cmd {
 		if m.nav.treeRows[idx].node.fileIdx >= 0 {
 			m.nav.treeCursor = idx
 			m.onTreeCursorChanged()
-			m.updateFileCyclerPosition(false)
 			if idx <= start {
 				return m.setFlash("Wrapped to first file")
 			}
@@ -202,7 +192,6 @@ func (m *Model) moveToPrevFile() tea.Cmd {
 		if m.nav.treeRows[idx].node.fileIdx >= 0 {
 			m.nav.treeCursor = idx
 			m.onTreeCursorChanged()
-			m.updateFileCyclerPosition(false)
 			if idx >= start {
 				return m.setFlash("Wrapped to last file")
 			}
@@ -267,8 +256,8 @@ func (m Model) handleDiffKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.nav.visualEnd = m.nav.diffCursor
 		}
 		m.syncViewportToCursor()
-	case key.Matches(msg, keys.Comment):
-		return m, m.startComment()
+
+	// Context-dependent Enter: create comment on empty line, open popup on commented line
 	case key.Matches(msg, keys.Enter):
 		if len(m.files) > 0 && m.nav.diffCursor < len(m.nav.diffLines) {
 			path := m.files[m.nav.fileCursor].Path
@@ -278,28 +267,43 @@ func (m Model) handleDiffKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-	case key.Matches(msg, keys.NextMatch):
-		cmd := m.repeatCycler(true)
+		// No comments on this line — create a new comment
+		return m, m.startComment()
+
+	// Dedicated navigation keys
+	case key.Matches(msg, keys.NextHunk):
+		m.nav.activeCycler = 'h'
+		cmd := m.navigateHunk(true)
 		return m, cmd
-	case key.Matches(msg, keys.PrevMatch):
-		cmd := m.repeatCycler(false)
+	case key.Matches(msg, keys.PrevHunk):
+		m.nav.activeCycler = 'h'
+		cmd := m.navigateHunk(false)
 		return m, cmd
-	case key.Matches(msg, keys.DeleteComment):
-		m.nav.pendingD = true
-		return m, nil
-	case key.Matches(msg, keys.GotoPrefix):
-		m.nav.pendingG = true
-		return m, nil
-	case key.Matches(msg, keys.GotoEnd):
-		if len(m.nav.diffLines) > 0 {
-			m.nav.diffCursor = len(m.nav.diffLines) - 1
-			m.syncViewportToCursor()
-		}
-		return m, nil
+	case key.Matches(msg, keys.NextComment):
+		m.nav.activeCycler = 'c'
+		cmd := m.navigateComment(true, false)
+		return m, cmd
+	case key.Matches(msg, keys.PrevComment):
+		m.nav.activeCycler = 'C'
+		cmd := m.navigateComment(false, false)
+		return m, cmd
+
+	// Search
 	case key.Matches(msg, keys.Search):
 		m.search.active = true
 		m.search.input = ""
 		return m, nil
+	case key.Matches(msg, keys.NextSearch):
+		if m.search.query != "" {
+			m.nav.activeCycler = '/'
+			return m, m.jumpToNextSearchMatch()
+		}
+	case key.Matches(msg, keys.PrevSearch):
+		if m.search.query != "" {
+			m.nav.activeCycler = '/'
+			return m, m.jumpToPrevSearchMatch()
+		}
+
 	case key.Matches(msg, keys.FilterFile):
 		m.search.filterActive = true
 		m.search.filterInput = ""
@@ -312,90 +316,6 @@ func (m Model) handleDiffKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	}
 
 	return m, nil
-}
-
-// --- Pending g key (for gg) ---
-
-func (m Model) handlePendingG(msg tea.KeyMsg) (Model, tea.Cmd) {
-	m.nav.pendingG = false
-	s := msg.String()
-
-	var cmd tea.Cmd
-	// Reset cycler position before switching modes so stale counts
-	// don't persist if the new mode finds no items.
-	m.nav.cyclerIndex = 0
-	m.nav.cyclerTotal = 0
-	switch s {
-	case "h":
-		m.nav.activeCycler = 'h'
-		cmd = m.navigateHunk(true)
-	case "f":
-		m.nav.activeCycler = 'f'
-		cmd = m.navigateFile(true, false)
-	case "F":
-		m.nav.activeCycler = 'F'
-		cmd = m.navigateFile(true, true)
-	case "c":
-		m.nav.activeCycler = 'c'
-		cmd = m.navigateComment(true, false)
-	case "C":
-		m.nav.activeCycler = 'C'
-		cmd = m.navigateComment(true, true)
-	case "g":
-		// gg = go to top
-		m.nav.diffCursor = 0
-		m.nav.diffViewport.GotoTop()
-		m.updateDiffContent()
-	default:
-		// Check for digit → enter goto-line mode
-		if len(s) == 1 && s[0] >= '0' && s[0] <= '9' {
-			m.search.gotoActive = true
-			m.search.gotoInput = s
-			return m, nil
-		}
-		// Unknown key — ignore
-	}
-	return m, cmd
-}
-
-// --- Pending d key (for dd delete, de edit) ---
-
-func (m Model) handlePendingD(msg tea.KeyMsg) (Model, tea.Cmd) {
-	m.nav.pendingD = false
-	switch msg.String() {
-	case "d":
-		return m.deleteCommentAtCursor()
-	case "e":
-		return m.editCommentAtCursor()
-	}
-	return m, nil
-}
-
-// repeatCycler repeats the last go-to motion in the active cycler direction.
-// Returns a tea.Cmd for flash messages (e.g., wrap-around notification).
-func (m *Model) repeatCycler(forward bool) tea.Cmd {
-	switch m.nav.activeCycler {
-	case 'f':
-		return m.navigateFile(forward, false)
-	case 'F':
-		return m.navigateFile(forward, true)
-	case 'c':
-		return m.navigateComment(forward, false)
-	case 'C':
-		return m.navigateComment(forward, true)
-	case '/':
-		if m.search.query != "" {
-			if forward {
-				return m.jumpToNextSearchMatch()
-			}
-			return m.jumpToPrevSearchMatch()
-		}
-		return nil
-	case 'h':
-		fallthrough
-	default:
-		return m.navigateHunk(forward)
-	}
 }
 
 // navigateFile moves to the next/prev file. If unviewedOnly, skip viewed files.
@@ -433,8 +353,6 @@ func (m *Model) navigateFile(forward, unviewedOnly bool) tea.Cmd {
 	m.updateDiffContent()
 	m.autoFollowFile(oldIdx, m.nav.fileCursor)
 
-	// Compute cycler position and detect wrap
-	m.updateFileCyclerPosition(unviewedOnly)
 	wrapped := (forward && idx <= start) || (!forward && idx >= start)
 	if wrapped {
 		label := "file"
@@ -465,7 +383,6 @@ func (m *Model) moveToUnviewedFileInTree(forward bool) tea.Cmd {
 	}
 	m.nav.treeCursor = idx
 	m.onTreeCursorChanged()
-	m.updateFileCyclerPosition(true)
 	wrapped := (forward && idx <= start) || (!forward && idx >= start)
 	if wrapped {
 		if forward {
@@ -496,7 +413,6 @@ func (m *Model) navigateComment(forward, crossFile bool) tea.Cmd {
 		m.nav.diffCursor = idx
 		m.expandAndSelectComment(idx)
 		m.syncViewportToCursorWithComments()
-		m.updateCommentCyclerPosition(crossFile)
 		wrapped := (forward && idx <= start) || (!forward && idx >= start)
 		if wrapped {
 			if forward {
@@ -545,7 +461,6 @@ func (m *Model) navigateCommentToFile(forward bool) tea.Cmd {
 	m.updateDiffContent()
 	m.autoFollowFile(oldIdx, m.nav.fileCursor)
 	m.syncViewportToCursorWithComments()
-	m.updateCommentCyclerPosition(true)
 	wrapped := (forward && idx <= start) || (!forward && idx >= start)
 	if wrapped {
 		if forward {
@@ -604,7 +519,6 @@ func (m *Model) navigateHunk(forward bool) tea.Cmd {
 			if m.nav.diffLines[i].hunkIdx != currentHunk {
 				m.nav.diffCursor = i
 				m.syncViewportToCursor()
-				m.updateHunkCyclerPosition()
 				return nil
 			}
 		}
@@ -621,7 +535,6 @@ func (m *Model) navigateHunk(forward bool) tea.Cmd {
 		// We weren't at the start — go there
 		m.nav.diffCursor = startOfCurrent
 		m.syncViewportToCursor()
-		m.updateHunkCyclerPosition()
 		return nil
 	}
 	// Already at start — go to start of previous hunk
@@ -631,7 +544,6 @@ func (m *Model) navigateHunk(forward bool) tea.Cmd {
 			if i == 0 || m.nav.diffLines[i-1].hunkIdx != prevHunk {
 				m.nav.diffCursor = i
 				m.syncViewportToCursor()
-				m.updateHunkCyclerPosition()
 				return nil
 			}
 		}
@@ -674,7 +586,6 @@ func (m *Model) navigateHunkCrossFile(forward bool) tea.Cmd {
 	m.updateDiffContent()
 	m.autoFollowFile(oldIdx, m.nav.fileCursor)
 	m.syncViewportToCursor()
-	m.updateHunkCyclerPosition()
 	wrapped := (forward && nextIdx <= oldIdx) || (!forward && nextIdx >= oldIdx)
 	if wrapped {
 		if forward {
@@ -699,82 +610,6 @@ func (m *Model) lineHasComments(path string, dl diffLineInfo) bool {
 // fileHasComments returns true if any comments exist for the given file path.
 func (m *Model) fileHasComments(path string) bool {
 	return m.comments.fileCommentIndex[path]
-}
-
-// --- Cycler position helpers ---
-
-// updateFileCyclerPosition computes the current position and total count for file cycling.
-func (m *Model) updateFileCyclerPosition(unviewedOnly bool) {
-	if unviewedOnly {
-		total := 0
-		pos := 0
-		for i, f := range m.files {
-			if !m.review.ViewedFiles[f.Path] {
-				total++
-				if i == m.nav.fileCursor {
-					pos = total
-				}
-			}
-		}
-		m.nav.cyclerTotal = total
-		m.nav.cyclerIndex = pos
-	} else {
-		m.nav.cyclerTotal = len(m.files)
-		m.nav.cyclerIndex = m.nav.fileCursor + 1
-	}
-}
-
-// updateHunkCyclerPosition computes the current hunk position and total hunks in the file.
-func (m *Model) updateHunkCyclerPosition() {
-	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
-		m.nav.cyclerIndex = 0
-		m.nav.cyclerTotal = 0
-		return
-	}
-	file := m.files[m.nav.fileCursor]
-	m.nav.cyclerTotal = len(file.Hunks)
-	if len(m.nav.diffLines) > 0 && m.nav.diffCursor < len(m.nav.diffLines) {
-		m.nav.cyclerIndex = m.nav.diffLines[m.nav.diffCursor].hunkIdx + 1
-	} else {
-		m.nav.cyclerIndex = 0
-	}
-}
-
-// updateCommentCyclerPosition computes comment position for the cycler indicator.
-func (m *Model) updateCommentCyclerPosition(crossFile bool) {
-	if crossFile {
-		// Count files with comments
-		total := 0
-		pos := 0
-		for i, f := range m.files {
-			if m.fileHasComments(f.Path) {
-				total++
-				if i == m.nav.fileCursor {
-					pos = total
-				}
-			}
-		}
-		m.nav.cyclerTotal = total
-		m.nav.cyclerIndex = pos
-	} else {
-		// Count commented lines in current file
-		if len(m.files) == 0 {
-			return
-		}
-		path := m.files[m.nav.fileCursor].Path
-		total := 0
-		pos := 0
-		for i, dl := range m.nav.diffLines {
-			if m.lineHasComments(path, dl) {
-				total++
-				if i == m.nav.diffCursor {
-					pos = total
-				}
-			}
-		}
-		m.nav.cyclerTotal = total
-		m.nav.cyclerIndex = pos
-	}
 }
 
 // --- Goto line handling ---
@@ -856,7 +691,6 @@ func (m *Model) jumpToNextSearchMatch() tea.Cmd {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.diffCursor = i
 			m.syncViewportToCursor()
-			m.updateSearchCyclerPosition()
 			return nil
 		}
 	}
@@ -865,7 +699,6 @@ func (m *Model) jumpToNextSearchMatch() tea.Cmd {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.diffCursor = i
 			m.syncViewportToCursor()
-			m.updateSearchCyclerPosition()
 			return m.setFlash("Wrapped to first match")
 		}
 	}
@@ -878,7 +711,6 @@ func (m *Model) jumpToPrevSearchMatch() tea.Cmd {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.diffCursor = i
 			m.syncViewportToCursor()
-			m.updateSearchCyclerPosition()
 			return nil
 		}
 	}
@@ -887,28 +719,10 @@ func (m *Model) jumpToPrevSearchMatch() tea.Cmd {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.diffCursor = i
 			m.syncViewportToCursor()
-			m.updateSearchCyclerPosition()
 			return m.setFlash("Wrapped to last match")
 		}
 	}
 	return nil
-}
-
-// updateSearchCyclerPosition computes the current search match position and total.
-func (m *Model) updateSearchCyclerPosition() {
-	query := strings.ToLower(m.search.query)
-	total := 0
-	pos := 0
-	for i, dl := range m.nav.diffLines {
-		if strings.Contains(strings.ToLower(dl.content), query) {
-			total++
-			if i == m.nav.diffCursor {
-				pos = total
-			}
-		}
-	}
-	m.nav.cyclerTotal = total
-	m.nav.cyclerIndex = pos
 }
 
 // --- Narrow regex filter handling ---
