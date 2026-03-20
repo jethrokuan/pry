@@ -1001,6 +1001,7 @@ func (m Model) View() string {
 			if m.filter.isActive() {
 				helpParts = append(helpParts, "^x clear")
 			}
+			helpParts = append(helpParts, "T filter")
 			helpParts = append(helpParts, "m viewed")
 			helpParts = append(helpParts, "t tree")
 			helpParts = append(helpParts, "i info")
@@ -1012,6 +1013,7 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "h/H hunk")
 			helpParts = append(helpParts, "c/C comment")
 			helpParts = append(helpParts, "/ search")
+			helpParts = append(helpParts, "T filter")
 			helpParts = append(helpParts, "enter comment")
 			helpParts = append(helpParts, "t tree")
 			helpParts = append(helpParts, "m viewed")
@@ -1165,11 +1167,16 @@ func (m Model) renderHelpPopup() string {
 			},
 		},
 		{
-			title: "Search & Filter",
+			title: "Search",
 			bindings: []binding{
 				{"/ (text)", "Search in file"},
 				{"n / N", "Next / prev search match"},
 				{"ctrl+p", "Filter files (jump to file)"},
+			},
+		},
+		{
+			title: "Filter",
+			bindings: []binding{
 				{"Tf", "Narrow tree by regex path filter"},
 				{"To", "Toggle CODEOWNERS team filter"},
 				{"Tx", "Clear all narrowing filters"},
