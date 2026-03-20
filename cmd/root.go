@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
-	"strconv"
 
+	"github.com/alecthomas/kong"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/jkuan/pr-review/internal/app"
@@ -14,9 +14,28 @@ import (
 	"github.com/jkuan/pr-review/internal/ui/styles"
 )
 
+// CLI defines the command-line interface for pr-review.
+type CLI struct {
+	PRNumber int    `arg:"" optional:"" help:"PR number to open directly."`
+	Config   string `short:"c" help:"Path to config file." type:"path"`
+	Verbose  bool   `short:"v" help:"Enable verbose output."`
+}
+
 func main() {
+	var cli CLI
+	kong.Parse(&cli,
+		kong.Name("pr-review"),
+		kong.Description("Terminal UI for reviewing GitHub pull requests."),
+		kong.UsageOnError(),
+	)
+
 	// Load config and apply theme
-	cfg := config.Load()
+	var cfg config.Config
+	if cli.Config != "" {
+		cfg = config.LoadFrom(cli.Config)
+	} else {
+		cfg = config.Load()
+	}
 	styles.Apply(config.ResolveTheme(cfg))
 
 	// Detect repo context
@@ -40,13 +59,8 @@ func main() {
 
 	// Create the app — optionally jump to a specific PR
 	var model app.Model
-	if len(os.Args) > 1 {
-		prNumber, err := strconv.Atoi(os.Args[1])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Usage: pr-review [PR_NUMBER]\n")
-			os.Exit(1)
-		}
-		model = app.NewWithPR(svc, cfg, prNumber, filters, columns)
+	if cli.PRNumber > 0 {
+		model = app.NewWithPR(svc, cfg, cli.PRNumber, filters, columns)
 	} else {
 		model = app.New(svc, cfg, filters, columns)
 	}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -54,6 +55,17 @@ func Default() Config {
 		PageSize: 50,
 		Theme:    "default",
 	}
+}
+
+// LoadFrom reads config from the given path.
+// Falls back to defaults for missing values.
+func LoadFrom(path string) Config {
+	cfg := Default()
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not read config %s: %v\n", path, err)
+		return Default()
+	}
+	return cfg
 }
 
 // Load reads config from ~/.config/pr-review/config.toml.
