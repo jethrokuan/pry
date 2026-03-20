@@ -308,7 +308,7 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 					s = s.Background(bg)
 				}
 				text := "+" + line.Content
-				if searchQuery != "" && !hasBg {
+				if searchQuery != "" {
 					text = highlightMatches(text, searchQuery, s, searchBg)
 					lineContent = text
 				} else {
@@ -320,7 +320,7 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 					s = s.Background(bg)
 				}
 				text := "-" + line.Content
-				if searchQuery != "" && !hasBg {
+				if searchQuery != "" {
 					text = highlightMatches(text, searchQuery, s, searchBg)
 					lineContent = text
 				} else {
@@ -328,10 +328,14 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 				}
 			default:
 				text := " " + line.Content
-				if hasBg {
+				if searchQuery != "" {
+					s := lipgloss.NewStyle()
+					if hasBg {
+						s = s.Background(bg)
+					}
+					lineContent = highlightMatches(text, searchQuery, s, searchBg)
+				} else if hasBg {
 					lineContent = lipgloss.NewStyle().Background(bg).Render(text)
-				} else if searchQuery != "" {
-					lineContent = highlightMatches(text, searchQuery, lipgloss.NewStyle(), searchBg)
 				} else {
 					lineContent = text
 				}
