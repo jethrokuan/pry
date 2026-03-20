@@ -452,7 +452,7 @@ func (m *Model) navigateCommentToFile(forward bool) tea.Cmd {
 		return true
 	})
 	if idx < 0 {
-		return nil
+		return m.setFlash("No comments found")
 	}
 	// m.nav.fileCursor and diffLines are already set to the found file by the match function
 	m.nav.diffCursor = m.findCommentedDiffLine(m.files[idx].Path, forward)
