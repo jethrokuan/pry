@@ -46,9 +46,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Usage: pr-review [PR_NUMBER]\n")
 			os.Exit(1)
 		}
-		model = app.NewWithPR(svc, prNumber, filters, columns)
+		model = app.NewWithPR(svc, cfg, prNumber, filters, columns)
 	} else {
-		model = app.New(svc, filters, columns)
+		model = app.New(svc, cfg, filters, columns)
 	}
 
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())

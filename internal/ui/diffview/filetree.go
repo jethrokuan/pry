@@ -28,9 +28,13 @@ type treeRow struct {
 }
 
 // buildTree groups files by directory into a tree structure.
-func buildTree(files []diff.DiffFile) *treeNode {
+// If included is non-nil, only files whose index is in the set are added.
+func buildTree(files []diff.DiffFile, included map[int]bool) *treeNode {
 	root := &treeNode{fileIdx: -1}
 	for i, file := range files {
+		if included != nil && !included[i] {
+			continue
+		}
 		parts := strings.Split(file.Path, "/")
 		node := root
 		for j, part := range parts {
@@ -206,10 +210,19 @@ func (m Model) renderFileTree() string {
 	var b strings.Builder
 
 	viewedCount := len(m.review.ViewedFiles)
-	title := styles.Title.Render(fmt.Sprintf("Files (%d)", len(m.files)))
+	fileCount := len(m.files)
+	titleStr := fmt.Sprintf("Files (%d)", fileCount)
+	if m.filter.isActive() {
+		titleStr = fmt.Sprintf("Files (%d/%d)", m.filter.filteredCount, m.filter.totalFiles)
+	}
+	title := styles.Title.Render(titleStr)
 	if viewedCount > 0 {
 		title += lipgloss.NewStyle().Foreground(styles.Success).
-			Render(fmt.Sprintf(" %d/%d viewed", viewedCount, len(m.files)))
+			Render(fmt.Sprintf(" %d/%d viewed", viewedCount, fileCount))
+	}
+	if filterStatus := m.filter.statusText(); filterStatus != "" {
+		title += "\n" + lipgloss.NewStyle().Foreground(styles.Warning).Italic(true).
+			Render("  ⚡ " + filterStatus)
 	}
 	b.WriteString(title + "\n\n")
 

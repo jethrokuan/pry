@@ -13,6 +13,7 @@ const (
 	modeGoto
 	modeSearch
 	modeFilter
+	modeNarrowRegex
 	modePendingG
 	modePendingD
 	modeHelp
@@ -32,6 +33,8 @@ func (m Model) activeMode() inputMode {
 		return modeSearch
 	case m.search.filterActive:
 		return modeFilter
+	case m.filter.regexActive:
+		return modeNarrowRegex
 	case m.nav.pendingG:
 		return modePendingG
 	case m.nav.pendingD:
@@ -61,6 +64,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m.handleSearchKey(msg)
 	case modeFilter:
 		return m.handleFilterKey(msg)
+	case modeNarrowRegex:
+		return m.handleNarrowRegexKey(msg)
 	case modePendingG:
 		return m.handlePendingG(msg)
 	case modePendingD:
@@ -217,6 +222,17 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.Info):
 		m.openPRInfoPopup()
 		return m, nil
+
+	case key.Matches(msg, keys.NarrowRegex):
+		m.filter.regexActive = true
+		m.filter.regexInput = m.filter.regexPattern
+		return m, nil
+
+	case key.Matches(msg, keys.NarrowOwner):
+		return m.toggleOwnerFilter()
+
+	case key.Matches(msg, keys.NarrowClear):
+		return m.clearAllFilters()
 
 	case key.Matches(msg, keys.Submit):
 		return m, func() tea.Msg { return SubmitReviewMsg{} }

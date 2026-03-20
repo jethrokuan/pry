@@ -911,6 +911,85 @@ func (m *Model) updateSearchCyclerPosition() {
 	m.nav.cyclerIndex = pos
 }
 
+// --- Narrow regex filter handling ---
+
+func (m Model) handleNarrowRegexKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.filter.setRegex(m.filter.regexInput)
+		m.filter.regexActive = false
+		m.applyFilters()
+		return m, nil
+	case "esc":
+		m.filter.regexActive = false
+		m.filter.regexInput = ""
+		return m, nil
+	case "backspace":
+		if len(m.filter.regexInput) > 0 {
+			m.filter.regexInput = m.filter.regexInput[:len(m.filter.regexInput)-1]
+		}
+		return m, nil
+	default:
+		if len(msg.Runes) > 0 {
+			m.filter.regexInput += string(msg.Runes)
+		}
+		return m, nil
+	}
+}
+
+// toggleOwnerFilter toggles the CODEOWNERS-based owner filter.
+func (m Model) toggleOwnerFilter() (Model, tea.Cmd) {
+	m.filter.toggleOwner()
+	m.applyFilters()
+	label := "off"
+	if m.filter.ownerEnabled {
+		label = m.filter.ownerPattern
+	}
+	cmd := m.setFlash(fmt.Sprintf("Owner filter: %s", label))
+	return m, cmd
+}
+
+// clearAllFilters removes all narrowing filters.
+func (m Model) clearAllFilters() (Model, tea.Cmd) {
+	if !m.filter.isActive() {
+		return m, nil
+	}
+	m.filter.clearAll()
+	m.applyFilters()
+	cmd := m.setFlash("Filters cleared")
+	return m, cmd
+}
+
+// applyFilters recomputes the file filter and rebuilds the tree.
+func (m *Model) applyFilters() {
+	m.filter.recompute(m.files)
+	m.nav.cachedTree = buildTree(m.files, m.filter.includedFiles)
+	m.nav.rebuildTreeRows()
+
+	// Ensure fileCursor points to an included file
+	if !m.filter.isIncluded(m.nav.fileCursor) {
+		// Find the first included file
+		found := false
+		for i := range m.files {
+			if m.filter.isIncluded(i) {
+				m.nav.fileCursor = i
+				found = true
+				break
+			}
+		}
+		if !found {
+			m.nav.fileCursor = 0
+		}
+		m.nav.buildDiffLines(m.files)
+		m.nav.diffCursor = 0
+	}
+
+	m.nav.syncTreeCursorToFileCursor()
+	m.treeDirty = true
+	m.updateViewports()
+	m.updateDiffContent()
+}
+
 // --- File filter handling ---
 
 func (m Model) handleFilterKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -962,6 +1041,10 @@ func (m *Model) updateFilteredFiles() {
 	m.search.filterCursor = 0
 	query := strings.ToLower(m.search.filterInput)
 	for i, f := range m.files {
+		// Respect active narrowing filters
+		if !m.filter.isIncluded(i) {
+			continue
+		}
 		if query == "" || strings.Contains(strings.ToLower(f.Path), query) {
 			m.search.filterFiles = append(m.search.filterFiles, i)
 		}
@@ -969,9 +1052,11 @@ func (m *Model) updateFilteredFiles() {
 }
 
 func (m Model) allFileIndices() []int {
-	indices := make([]int, len(m.files))
+	var indices []int
 	for i := range m.files {
-		indices[i] = i
+		if m.filter.isIncluded(i) {
+			indices = append(indices, i)
+		}
 	}
 	return indices
 }

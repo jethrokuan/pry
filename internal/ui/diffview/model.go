@@ -135,6 +135,9 @@ type KeyMap struct {
 	GotoEnd       key.Binding
 	NextMatch     key.Binding
 	PrevMatch     key.Binding
+	NarrowRegex   key.Binding
+	NarrowOwner   key.Binding
+	NarrowClear   key.Binding
 }
 
 var keys = KeyMap{
@@ -165,6 +168,9 @@ var keys = KeyMap{
 	GotoEnd:       key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "go to end")),
 	NextMatch:     key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next match")),
 	PrevMatch:     key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "prev match")),
+	NarrowRegex:   key.NewBinding(key.WithKeys("ctrl+f"), key.WithHelp("ctrl+f", "regex filter")),
+	NarrowOwner:   key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "owner filter")),
+	NarrowClear:   key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "clear filters")),
 }
 
 // Inline comment key bindings (when textarea is active)
@@ -191,6 +197,7 @@ type Model struct {
 	nav      DiffNav
 	comments CommentPanel
 	search   SearchBar
+	filter   FileFilter
 
 	width    int
 	height   int
@@ -226,11 +233,21 @@ type diffLineInfo struct {
 
 // --- Constructor ---
 
-func New(svc review.Service, pr review.PullRequest, rev *review.PendingReview) Model {
+// Option configures the Model at construction time.
+type Option func(*Model)
+
+// WithDefaultOwnerFilter sets the default CODEOWNERS owner filter.
+func WithDefaultOwnerFilter(owner string) Option {
+	return func(m *Model) {
+		m.filter = initFileFilter(owner)
+	}
+}
+
+func New(svc review.Service, pr review.PullRequest, rev *review.PendingReview, opts ...Option) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
-	return Model{
+	m := Model{
 		svc:               svc,
 		pr:                pr,
 		review:            rev,
@@ -250,6 +267,12 @@ func New(svc review.Service, pr review.PullRequest, rev *review.PendingReview) M
 			cursor:   -1,
 		},
 	}
+
+	for _, opt := range opts {
+		opt(&m)
+	}
+
+	return m
 }
 
 // --- Init ---
@@ -371,7 +394,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.errors.set(errCatLoad, 0, msg.err)
 		} else {
 			m.files = msg.files
-			m.nav.cachedTree = buildTree(m.files)
+			m.filter.recompute(m.files)
+			m.nav.cachedTree = buildTree(m.files, m.filter.includedFiles)
 			m.nav.rebuildTreeRows()
 			m.nav.buildDiffLines(m.files)
 			m.treeDirty = true
@@ -893,6 +917,9 @@ func (m Model) View() string {
 			}
 			b.WriteString(cursor + m.files[idx].Path + "\n")
 		}
+	} else if m.filter.regexActive {
+		prompt := lipgloss.NewStyle().Bold(true).Render("Narrow (regex): ")
+		b.WriteString(prompt + m.filter.regexInput + "█")
 	} else if m.nav.pendingG {
 		// Show g-prefix legend while waiting for second key
 		keyStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
@@ -930,6 +957,13 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "S-tab fold all")
 			helpParts = append(helpParts, "gf file")
 			helpParts = append(helpParts, "/ filter")
+			helpParts = append(helpParts, "^f narrow")
+			if m.filter.ownerPattern != "" {
+				helpParts = append(helpParts, "^o owner")
+			}
+			if m.filter.isActive() {
+				helpParts = append(helpParts, "^x clear")
+			}
 			helpParts = append(helpParts, "m viewed")
 			helpParts = append(helpParts, "e tree")
 			helpParts = append(helpParts, "i info")
@@ -1054,10 +1088,13 @@ func (m Model) renderHelpPopup() string {
 			},
 		},
 		{
-			title: "Search",
+			title: "Search & Filter",
 			bindings: []binding{
 				{"/ (text)", "Search in file (then n/p cycle matches)"},
-				{"ctrl+p", "Filter files"},
+				{"ctrl+p", "Filter files (jump to file)"},
+				{"ctrl+f", "Narrow tree by regex path filter"},
+				{"ctrl+o", "Toggle CODEOWNERS team filter"},
+				{"ctrl+x", "Clear all narrowing filters"},
 			},
 		},
 		{

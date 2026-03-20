@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/jkuan/pr-review/internal/config"
 	gitpkg "github.com/jkuan/pr-review/internal/git"
 	"github.com/jkuan/pr-review/internal/review"
 	"github.com/jkuan/pr-review/internal/ui/diffview"
@@ -26,6 +27,7 @@ const (
 // Model is the top-level application model.
 type Model struct {
 	svc     review.Service
+	cfg     config.Config
 	filters []review.PRFilter
 	columns []string
 	screen  Screen
@@ -45,9 +47,10 @@ type Model struct {
 }
 
 // New creates the application model.
-func New(svc review.Service, filters []review.PRFilter, columns []string) Model {
+func New(svc review.Service, cfg config.Config, filters []review.PRFilter, columns []string) Model {
 	return Model{
 		svc:     svc,
+		cfg:     cfg,
 		filters: filters,
 		columns: columns,
 		screen:  ScreenPRList,
@@ -56,19 +59,29 @@ func New(svc review.Service, filters []review.PRFilter, columns []string) Model 
 }
 
 // NewWithPR creates the application model starting at a specific PR.
-func NewWithPR(svc review.Service, prNumber int, filters []review.PRFilter, columns []string) Model {
+func NewWithPR(svc review.Service, cfg config.Config, prNumber int, filters []review.PRFilter, columns []string) Model {
 	pr := review.PullRequest{Number: prNumber}
 	rev := review.NewPendingReview(prNumber, "", "")
 	return Model{
 		svc:       svc,
+		cfg:       cfg,
 		filters:   filters,
 		columns:   columns,
 		screen:    ScreenDiffView,
 		prList:    prlist.New(svc, filters, columns),
-		diffView:  diffview.New(svc, pr, rev),
+		diffView:  diffview.New(svc, pr, rev, diffviewOpts(cfg)...),
 		review:    rev,
 		initialPR: prNumber,
 	}
+}
+
+// diffviewOpts converts config to diffview options.
+func diffviewOpts(cfg config.Config) []diffview.Option {
+	var opts []diffview.Option
+	if cfg.FileTree.DefaultOwnerFilter != "" {
+		opts = append(opts, diffview.WithDefaultOwnerFilter(cfg.FileTree.DefaultOwnerFilter))
+	}
+	return opts
 }
 
 // Init starts the application.
@@ -127,7 +140,7 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selectedPR = &msg.PR
 		pr := msg.PR
 		m.review = review.NewPendingReview(pr.Number, pr.NodeID, pr.HeadSHA)
-		m.diffView = diffview.New(m.svc, pr, m.review)
+		m.diffView = diffview.New(m.svc, pr, m.review, diffviewOpts(m.cfg)...)
 		m.screen = ScreenDiffView
 		return m, tea.Batch(
 			m.diffView.Init(),

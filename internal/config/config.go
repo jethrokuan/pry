@@ -16,6 +16,11 @@ type FilterConfig struct {
 	Qualifier string `toml:"qualifier"`
 }
 
+// FileTreeConfig holds file tree display settings.
+type FileTreeConfig struct {
+	DefaultOwnerFilter string `toml:"default_owner_filter"`
+}
+
 // Config holds user configuration for the tool.
 type Config struct {
 	Editor   string         `toml:"editor"`
@@ -25,6 +30,7 @@ type Config struct {
 	Colors   styles.Theme   `toml:"colors"`
 	Filters  []FilterConfig `toml:"filters"`
 	Columns  []string       `toml:"columns"`
+	FileTree FileTreeConfig `toml:"file_tree"`
 }
 
 // DefaultColumns returns the default PR list columns.
