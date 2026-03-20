@@ -145,9 +145,9 @@ type KeyMap struct {
 	FilterFile    key.Binding
 	Help          key.Binding
 	Info          key.Binding
-	NarrowRegex   key.Binding
-	NarrowOwner   key.Binding
-	NarrowClear   key.Binding
+	NarrowPrefix  key.Binding
+	JumpBack      key.Binding
+	JumpForward   key.Binding
 }
 
 var keys = KeyMap{
@@ -181,9 +181,9 @@ var keys = KeyMap{
 	FilterFile:    key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "filter files")),
 	Help:          key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	Info:          key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "PR info")),
-	NarrowRegex:   key.NewBinding(key.WithKeys("ctrl+f"), key.WithHelp("ctrl+f", "regex filter")),
-	NarrowOwner:   key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "owner filter")),
-	NarrowClear:   key.NewBinding(key.WithKeys("ctrl+x"), key.WithHelp("ctrl+x", "clear filters")),
+	NarrowPrefix:  key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "filter prefix")),
+	JumpBack:      key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "jump back")),
+	JumpForward:   key.NewBinding(key.WithKeys("ctrl+i"), key.WithHelp("ctrl+i", "jump forward")),
 }
 
 // Inline comment key bindings (when textarea is active)
@@ -220,7 +220,8 @@ type Model struct {
 
 	errors errorStore // unified error tracking for all async operations
 
-	confirmQuit bool // true when waiting for second quit key to confirm
+	confirmQuit        bool // true when waiting for second quit key to confirm
+	narrowPrefixActive bool // true when waiting for second key after 'T'
 
 	// PR info popup
 	prInfoActive   bool
@@ -1160,6 +1161,7 @@ func (m Model) renderHelpPopup() string {
 				{"f / F", "Next / prev file"},
 				{"h / H", "Next / prev hunk"},
 				{"c / C", "Next / prev comment"},
+				{"ctrl+o / ctrl+i", "Jump back / forward"},
 			},
 		},
 		{
@@ -1168,9 +1170,9 @@ func (m Model) renderHelpPopup() string {
 				{"/ (text)", "Search in file"},
 				{"n / N", "Next / prev search match"},
 				{"ctrl+p", "Filter files (jump to file)"},
-				{"ctrl+f", "Narrow tree by regex path filter"},
-				{"ctrl+o", "Toggle CODEOWNERS team filter"},
-				{"ctrl+x", "Clear all narrowing filters"},
+				{"Tf", "Narrow tree by regex path filter"},
+				{"To", "Toggle CODEOWNERS team filter"},
+				{"Tx", "Clear all narrowing filters"},
 			},
 		},
 		{

@@ -38,6 +38,16 @@ type DiffNav struct {
 	// Active navigation type for the always-visible position counter.
 	// 'h' = hunk (default); 'f','F' = file/unviewed; 'c','C' = comment; '/' = search
 	activeCycler rune
+
+	// Jump list for Ctrl-o / Ctrl-i navigation
+	jumpList    []jumpPos
+	jumpCursor  int // points to current position in jumpList (-1 = at head)
+}
+
+// jumpPos records a cursor position for the jump list.
+type jumpPos struct {
+	fileCursor int
+	diffCursor int
 }
 
 // buildDiffLines flattens the hunks of the current file into a flat diffLines slice.
@@ -127,4 +137,53 @@ func (n *DiffNav) syncTreeViewportToCursor() {
 	} else if visibleRow >= n.treeViewport.YOffset()+n.treeViewport.Height() {
 		n.treeViewport.SetYOffset(visibleRow - n.treeViewport.Height() + 1)
 	}
+}
+
+// pushJump records the current position in the jump list before a navigation jump.
+// Truncates any forward history if we're not at the head.
+func (n *DiffNav) pushJump() {
+	pos := jumpPos{fileCursor: n.fileCursor, diffCursor: n.diffCursor}
+
+	// If we have forward history, truncate it
+	if n.jumpCursor >= 0 && n.jumpCursor < len(n.jumpList)-1 {
+		n.jumpList = n.jumpList[:n.jumpCursor+1]
+	}
+
+	// Deduplicate: don't push if identical to the last entry
+	if len(n.jumpList) > 0 {
+		last := n.jumpList[len(n.jumpList)-1]
+		if last.fileCursor == pos.fileCursor && last.diffCursor == pos.diffCursor {
+			n.jumpCursor = len(n.jumpList) - 1
+			return
+		}
+	}
+
+	// Cap the jump list at 100 entries
+	const maxJumps = 100
+	if len(n.jumpList) >= maxJumps {
+		n.jumpList = n.jumpList[1:]
+	}
+
+	n.jumpList = append(n.jumpList, pos)
+	n.jumpCursor = len(n.jumpList) - 1
+}
+
+// jumpBack moves to the previous position in the jump list.
+// Returns the position and true if a jump occurred.
+func (n *DiffNav) jumpBack() (jumpPos, bool) {
+	if len(n.jumpList) == 0 || n.jumpCursor <= 0 {
+		return jumpPos{}, false
+	}
+	n.jumpCursor--
+	return n.jumpList[n.jumpCursor], true
+}
+
+// jumpForward moves to the next position in the jump list.
+// Returns the position and true if a jump occurred.
+func (n *DiffNav) jumpForward() (jumpPos, bool) {
+	if n.jumpCursor >= len(n.jumpList)-1 {
+		return jumpPos{}, false
+	}
+	n.jumpCursor++
+	return n.jumpList[n.jumpCursor], true
 }

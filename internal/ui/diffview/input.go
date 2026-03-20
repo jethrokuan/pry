@@ -432,6 +432,7 @@ func (m *Model) navigateFile(forward, unviewedOnly bool) tea.Cmd {
 	if n == 0 {
 		return nil
 	}
+	m.nav.pushJump()
 
 	if m.nav.focus == FocusFileTree {
 		// In tree view, delegate to tree navigation
@@ -503,6 +504,7 @@ func (m *Model) moveToUnviewedFileInTree(forward bool) tea.Cmd {
 // navigateComment moves to the next/prev comment. If crossFile, jump to next file with comments.
 // When landing on a comment, expands the comment block and selects the first comment.
 func (m *Model) navigateComment(forward, crossFile bool) tea.Cmd {
+	m.nav.pushJump()
 	if crossFile {
 		return m.navigateCommentToFile(forward)
 	}
@@ -616,6 +618,7 @@ func (m *Model) findCommentedDiffLine(path string, forward bool) int {
 // navigateHunk moves to the first line of the next/prev hunk.
 // Crosses file boundaries when at the last/first hunk.
 func (m *Model) navigateHunk(forward bool) tea.Cmd {
+	m.nav.pushJump()
 	if len(m.nav.diffLines) == 0 {
 		return m.navigateHunkCrossFile(forward)
 	}
@@ -751,6 +754,7 @@ func (m Model) handleGotoKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 }
 
 func (m *Model) jumpToLine(lineNum int) {
+	m.nav.pushJump()
 	for i, dl := range m.nav.diffLines {
 		if dl.newLine == lineNum || dl.oldLine == lineNum {
 			m.nav.diffCursor = i
@@ -793,6 +797,7 @@ func (m Model) handleSearchKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 }
 
 func (m *Model) jumpToNextSearchMatch() tea.Cmd {
+	m.nav.pushJump()
 	query := strings.ToLower(m.search.query)
 	for i := m.nav.diffCursor + 1; i < len(m.nav.diffLines); i++ {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
@@ -813,6 +818,7 @@ func (m *Model) jumpToNextSearchMatch() tea.Cmd {
 }
 
 func (m *Model) jumpToPrevSearchMatch() tea.Cmd {
+	m.nav.pushJump()
 	query := strings.ToLower(m.search.query)
 	for i := m.nav.diffCursor - 1; i >= 0; i-- {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
@@ -858,12 +864,76 @@ func (m Model) handleNarrowRegexKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	}
 }
 
+// --- Narrow prefix (T) handling ---
+
+// handleNarrowPrefixKey handles the second key after pressing 'T' for filter commands.
+func (m Model) handleNarrowPrefixKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	m.narrowPrefixActive = false
+	switch msg.String() {
+	case "o":
+		return m.toggleOwnerFilter()
+	case "f":
+		m.filter.regexActive = true
+		m.filter.regexInput = m.filter.regexPattern
+		return m, nil
+	case "x":
+		return m.clearAllFilters()
+	default:
+		return m, nil
+	}
+}
+
 // toggleOwnerFilter toggles the CODEOWNERS-based owner filter.
 func (m Model) toggleOwnerFilter() (Model, tea.Cmd) {
 	label := m.filter.toggleOwner()
 	m.applyFilters()
 	cmd := m.setFlash(fmt.Sprintf("Owner filter: %s", label))
 	return m, cmd
+}
+
+// --- Jump list navigation ---
+
+// jumpBack navigates to the previous position in the jump list.
+func (m Model) jumpBack() (Model, tea.Cmd) {
+	// Before first jump back, save current position so we can return to it
+	if m.nav.jumpCursor == len(m.nav.jumpList)-1 || len(m.nav.jumpList) == 0 {
+		m.nav.pushJump()
+	}
+	pos, ok := m.nav.jumpBack()
+	if !ok {
+		return m, m.setFlash("Already at oldest position")
+	}
+	m.applyJumpPos(pos)
+	return m, nil
+}
+
+// jumpForward navigates to the next position in the jump list.
+func (m Model) jumpForward() (Model, tea.Cmd) {
+	pos, ok := m.nav.jumpForward()
+	if !ok {
+		return m, m.setFlash("Already at newest position")
+	}
+	m.applyJumpPos(pos)
+	return m, nil
+}
+
+// applyJumpPos moves the cursor to the given jump position.
+func (m *Model) applyJumpPos(pos jumpPos) {
+	if pos.fileCursor != m.nav.fileCursor {
+		oldIdx := m.nav.fileCursor
+		m.nav.fileCursor = pos.fileCursor
+		m.nav.buildDiffLines(m.files)
+		m.autoFollowFile(oldIdx, m.nav.fileCursor)
+	}
+	m.nav.diffCursor = pos.diffCursor
+	if m.nav.diffCursor >= len(m.nav.diffLines) {
+		m.nav.diffCursor = len(m.nav.diffLines) - 1
+	}
+	if m.nav.diffCursor < 0 {
+		m.nav.diffCursor = 0
+	}
+	m.updateDiffContent()
+	m.syncViewportToCursor()
 }
 
 // clearAllFilters removes all narrowing filters.

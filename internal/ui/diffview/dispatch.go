@@ -14,6 +14,7 @@ const (
 	modeSearch
 	modeFilter
 	modeNarrowRegex
+	modeNarrowPrefix
 	modeHelp
 	modePRInfo
 	modeCommentPopup
@@ -33,6 +34,8 @@ func (m Model) activeMode() inputMode {
 		return modeFilter
 	case m.filter.regexActive:
 		return modeNarrowRegex
+	case m.narrowPrefixActive:
+		return modeNarrowPrefix
 	case m.showHelp:
 		return modeHelp
 	case m.prInfoActive:
@@ -60,6 +63,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.handleFilterKey(msg)
 	case modeNarrowRegex:
 		return m.handleNarrowRegexKey(msg)
+	case modeNarrowPrefix:
+		return m.handleNarrowPrefixKey(msg)
 	case modeHelp:
 		m.showHelp = false
 		return m, nil
@@ -216,16 +221,16 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.openPRInfoPopup()
 		return m, nil
 
-	case key.Matches(msg, keys.NarrowRegex):
-		m.filter.regexActive = true
-		m.filter.regexInput = m.filter.regexPattern
+	case key.Matches(msg, keys.NarrowPrefix):
+		m.narrowPrefixActive = true
+		m.flashMsg = "T: [o]wner [f]ilter [x]clear"
 		return m, nil
 
-	case key.Matches(msg, keys.NarrowOwner):
-		return m.toggleOwnerFilter()
+	case key.Matches(msg, keys.JumpBack):
+		return m.jumpBack()
 
-	case key.Matches(msg, keys.NarrowClear):
-		return m.clearAllFilters()
+	case key.Matches(msg, keys.JumpForward):
+		return m.jumpForward()
 
 	case key.Matches(msg, keys.Submit):
 		return m, func() tea.Msg { return SubmitReviewMsg{} }
