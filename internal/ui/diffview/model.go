@@ -1000,7 +1000,7 @@ func (m Model) View() string {
 				helpParts = append(helpParts, "^x clear")
 			}
 			helpParts = append(helpParts, "m viewed")
-			helpParts = append(helpParts, "e tree")
+			helpParts = append(helpParts, "t tree")
 			helpParts = append(helpParts, "i info")
 			helpParts = append(helpParts, "ctrl+s submit")
 			helpParts = append(helpParts, "? help")
@@ -1011,7 +1011,7 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "c/C comment")
 			helpParts = append(helpParts, "/ search")
 			helpParts = append(helpParts, "enter comment")
-			helpParts = append(helpParts, "e tree")
+			helpParts = append(helpParts, "t tree")
 			helpParts = append(helpParts, "m viewed")
 			if m.nav.visualMode {
 				helpParts = append(helpParts, "(SELECT)")
