@@ -204,17 +204,7 @@ PROMPT
 
   # shellcheck disable=SC2086
   zellij run --name "$ws_name" -- \
-    bash -c "claude -p --verbose --output-format stream-json --worktree \"$ws_name\" --dangerously-skip-permissions $model_flag \"\$1\" | jq -rj '
-      if .type == \"assistant\" then
-        (.message.content[]? |
-          if .type == \"text\" then .text + \"\\n\"
-          elif .type == \"tool_use\" then \"→ \" + .name + \" \" + (.input | tostring | .[0:120]) + \"\\n\"
-          elif .type == \"tool_result\" then \"  \" + (.content // \"\" | tostring | .[0:200]) + \"\\n\"
-          else empty end)
-      elif .type == \"result\" then
-        \"\\n✓ Done\\n\"
-      else empty end
-    '; echo \$? > \"$STATE_DIR/${issue_id}.exit\"" -- "$prompt"
+    bash -c "claude -p --verbose --output-format stream-json --worktree \"$ws_name\" --dangerously-skip-permissions $model_flag \"\$1\" | claude-pretty-printer --layout compact; echo \${PIPESTATUS[0]} > \"$STATE_DIR/${issue_id}.exit\"" -- "$prompt"
 
   # Restore focus to the bd-patrol pane
   zellij action focus-previous-pane
