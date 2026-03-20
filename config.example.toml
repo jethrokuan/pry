@@ -1,0 +1,102 @@
+# pr-review configuration
+# Copy to ~/.config/pr-review/config.toml and customize.
+
+# ---------------------------------------------------------------------------
+# General
+# ---------------------------------------------------------------------------
+
+# External editor for composing review comments (e.g. "nvim", "code --wait").
+# Leave empty to use $EDITOR / $VISUAL.
+# editor = ""
+
+# Use delta (https://dandavison.github.io/delta/) for syntax-highlighted diffs.
+# Requires delta to be installed. Falls back to built-in rendering if missing.
+# use_delta = true
+
+# Number of PRs to fetch per page in the PR list.
+# page_size = 50
+
+# ---------------------------------------------------------------------------
+# Theme
+# ---------------------------------------------------------------------------
+
+# Built-in themes:
+#   default            (inherits terminal ANSI palette)
+#   solarized-dark     solarized-light
+#   catppuccin-mocha   catppuccin-latte
+#   gruvbox-dark       gruvbox-light
+#   dracula            nord            tokyo-night
+#
+# theme = "default"
+
+# Override individual colors on top of the chosen theme.
+# Values: ANSI number ("4"), 256-color ("237"), or hex ("#282828").
+# Any field left unset inherits from the theme.
+#
+# [colors]
+# fg              = ""          # Main foreground
+# fg_muted        = ""          # De-emphasized text (help, timestamps)
+# fg_emphasis     = ""          # Emphasized/highlighted text
+# bg              = ""          # Main background
+# bg_surface      = ""          # Raised surface (cards, panels)
+# bg_overlay      = ""          # Overlay/modal background
+# bg_cursor       = ""          # Cursor/selection highlight
+# bg_search       = ""          # Search match highlight
+# accent_primary  = ""          # Primary accent (titles, active borders)
+# accent_secondary = ""         # Secondary accent (authors, tags)
+# accent_info     = ""          # Informational (PR numbers, hunk headers)
+# accent_success  = ""          # Success / additions
+# accent_warning  = ""          # Warnings / comment borders
+# accent_danger   = ""          # Errors / deletions
+# diff_context    = ""          # Unchanged diff lines
+# bg_diff_add     = ""          # Background for added lines
+# bg_diff_delete  = ""          # Background for deleted lines
+# bg_hunk_header  = ""          # Hunk header background
+# bg_active_hunk  = ""          # Currently-selected hunk background
+# label_fg        = ""          # Foreground for label badges
+
+# ---------------------------------------------------------------------------
+# PR List Filters
+# ---------------------------------------------------------------------------
+
+# Custom filter presets for the PR list. Replaces built-in filters when set.
+# Uses GitHub search qualifiers (https://docs.github.com/en/search-github).
+#
+# Default filters (used when none are configured):
+#   "Needs My Review"           review-requested:@me
+#   "My Team Pending"           team-review-requested:@my-teams
+#   "Reviewed, Not Approved"    reviewed-by:@me -review:approved
+#   "Awaiting My Review"        -reviewed-by:@me -review:approved review:required
+#   "All Open"                  (empty qualifier)
+#   "Authored by Me"            author:@me
+#
+# [[filters]]
+# name      = "Needs My Review"
+# qualifier = "review-requested:@me"
+#
+# [[filters]]
+# name      = "My Team Pending"
+# qualifier = "team-review-requested:@my-teams"
+#
+# [[filters]]
+# name      = "All Open"
+# qualifier = ""
+
+# ---------------------------------------------------------------------------
+# PR List Columns
+# ---------------------------------------------------------------------------
+
+# Columns to display in the PR list and their order.
+# Available: "number", "title", "author", "changes", "my_review",
+#            "my_teams", "updated"
+#
+# columns = ["number", "title", "author", "changes", "my_review", "my_teams", "updated"]
+
+# ---------------------------------------------------------------------------
+# File Tree
+# ---------------------------------------------------------------------------
+
+# [file_tree]
+# Enable CODEOWNERS-based owner filter in the diff file tree.
+# true = always on, false = always off, omit = auto (on when identity available).
+# owner_filter = true
