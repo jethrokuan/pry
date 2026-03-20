@@ -262,32 +262,51 @@ func (m Model) renderFileTree() string {
 			nameStr := row.node.name
 			changes := fmt.Sprintf("+%d/-%d", file.Additions, file.Deletions)
 
-			status := statusStyle.Render(file.Status.String())
 			var line string
-			if isViewed {
-				viewedStyle := lipgloss.NewStyle().Foreground(styles.Success)
-				line = fmt.Sprintf("%s%s%s%s %s %s", cursor, row.prefix, connector, status, viewedStyle.Render(nameStr), styles.Subtitle.Render(changes))
-			} else {
-				line = fmt.Sprintf("%s%s%s%s %s %s", cursor, row.prefix, connector, status, nameStr, styles.Subtitle.Render(changes))
-			}
+			if isCursorRow || isActiveFile {
+				// Apply background to each segment individually so inner
+				// ANSI resets don't break the row background.
+				var bg lipgloss.Color
+				if isCursorRow {
+					bg = lipgloss.Color(styles.Current.BgCursor)
+				} else {
+					bg = lipgloss.Color(styles.Current.BgSurface)
+				}
 
-			if isCursorRow {
-				activeBg := lipgloss.Color(styles.Current.BgSurface)
+				plain := lipgloss.NewStyle().Background(bg)
+				if isCursorRow {
+					plain = plain.Bold(true)
+				}
+
+				statusBg := statusStyle.Background(bg)
+				subtitleBg := styles.Subtitle.Background(bg)
+
+				statusStr := statusBg.Render(file.Status.String())
+				changesStr := subtitleBg.Render(changes)
+
+				var nameRendered string
+				if isViewed {
+					nameRendered = lipgloss.NewStyle().Foreground(styles.Success).Background(bg).Render(nameStr)
+				} else {
+					nameRendered = plain.Render(nameStr)
+				}
+
+				line = plain.Render(cursor+row.prefix+connector) + statusStr + plain.Render(" ") + nameRendered + plain.Render(" ") + changesStr
+
+				// Pad to full width
 				visWidth := lipgloss.Width(line)
 				treeWidth := m.nav.treeViewport.Width
 				if visWidth < treeWidth {
-					line += strings.Repeat(" ", treeWidth-visWidth)
+					line += plain.Render(strings.Repeat(" ", treeWidth-visWidth))
 				}
-				line = lipgloss.NewStyle().Bold(true).Background(activeBg).Render(line)
-			} else if isActiveFile {
-				// Highlight the active file with a background
-				activeBg := lipgloss.Color(styles.Current.BgSurface)
-				visWidth := lipgloss.Width(line)
-				treeWidth := m.nav.treeViewport.Width
-				if visWidth < treeWidth {
-					line += strings.Repeat(" ", treeWidth-visWidth)
+			} else {
+				status := statusStyle.Render(file.Status.String())
+				if isViewed {
+					viewedStyle := lipgloss.NewStyle().Foreground(styles.Success)
+					line = fmt.Sprintf("%s%s%s%s %s %s", cursor, row.prefix, connector, status, viewedStyle.Render(nameStr), styles.Subtitle.Render(changes))
+				} else {
+					line = fmt.Sprintf("%s%s%s%s %s %s", cursor, row.prefix, connector, status, nameStr, styles.Subtitle.Render(changes))
 				}
-				line = lipgloss.NewStyle().Background(activeBg).Render(line)
 			}
 
 			b.WriteString(line + "\n")
@@ -314,22 +333,36 @@ func (m Model) renderFileTree() string {
 				dirStyle = dirStyle.Foreground(styles.Primary)
 			}
 
-			viewedInfo := ""
-			if totalDesc > 0 {
-				viewedInfo = lipgloss.NewStyle().Foreground(styles.Muted).
-					Render(fmt.Sprintf(" (%d/%d viewed)", viewedDesc, totalDesc))
-			}
-
-			line := fmt.Sprintf("%s%s%s%s%s/%s", cursor, row.prefix, connector, indicator, dirStyle.Render(row.node.name), viewedInfo)
-
+			var line string
 			if isCursorRow {
-				activeBg := lipgloss.Color(styles.Current.BgSurface)
+				// Apply background to each segment individually so inner
+				// ANSI resets don't break the row background.
+				bg := lipgloss.Color(styles.Current.BgCursor)
+				plain := lipgloss.NewStyle().Background(bg).Bold(true)
+				dirStyleBg := dirStyle.Background(bg)
+
+				viewedInfoStr := ""
+				if totalDesc > 0 {
+					viewedInfoStr = lipgloss.NewStyle().Foreground(styles.Muted).Background(bg).
+						Render(fmt.Sprintf(" (%d/%d viewed)", viewedDesc, totalDesc))
+				}
+
+				line = plain.Render(cursor+row.prefix+connector+indicator) + dirStyleBg.Render(row.node.name) + plain.Render("/") + viewedInfoStr
+
+				// Pad to full width
 				visWidth := lipgloss.Width(line)
 				treeWidth := m.nav.treeViewport.Width
 				if visWidth < treeWidth {
-					line += strings.Repeat(" ", treeWidth-visWidth)
+					line += plain.Render(strings.Repeat(" ", treeWidth-visWidth))
 				}
-				line = lipgloss.NewStyle().Bold(true).Background(activeBg).Render(line)
+			} else {
+				viewedInfo := ""
+				if totalDesc > 0 {
+					viewedInfo = lipgloss.NewStyle().Foreground(styles.Muted).
+						Render(fmt.Sprintf(" (%d/%d viewed)", viewedDesc, totalDesc))
+				}
+
+				line = fmt.Sprintf("%s%s%s%s%s/%s", cursor, row.prefix, connector, indicator, dirStyle.Render(row.node.name), viewedInfo)
 			}
 
 			b.WriteString(line + "\n")
