@@ -163,6 +163,9 @@ func (m Model) View() string {
 
 	// Header
 	title := styles.Title.Render(fmt.Sprintf("PR #%d: %s", m.pr.Number, m.pr.Title))
+	if m.pr.Draft {
+		title += " " + styles.PRDraft.Render("[draft]")
+	}
 	b.WriteString(title + "\n")
 
 	meta := fmt.Sprintf("%s → %s  |  +%d/-%d  |  %d files",
