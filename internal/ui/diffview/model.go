@@ -150,7 +150,7 @@ var keys = KeyMap{
 	Down:          key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
 	PageUp:        key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "page up")),
 	PageDown:      key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "page down")),
-	ToggleTree:    key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "toggle tree")),
+	ToggleTree:    key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "toggle tree")),
 	NextFile:      key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "next file")),
 	PrevFile:      key.NewBinding(key.WithKeys("F"), key.WithHelp("F", "prev file")),
 	NextHunk:      key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "next hunk")),
@@ -1148,7 +1148,7 @@ func (m Model) renderHelpPopup() string {
 		{
 			title: "Other",
 			bindings: []binding{
-				{"e", "Toggle file tree"},
+				{"t", "Toggle file tree"},
 				{"i", "Toggle PR info popup"},
 				{"w", "Open in browser"},
 				{"ctrl+e", "Open in $EDITOR"},
