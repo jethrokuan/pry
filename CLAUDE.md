@@ -77,6 +77,21 @@ internal/app/      ← wires review.Service to screens
 
 `review.PendingReview` (created in `app.go` when entering review) accumulates `InlineComment`s as the user comments. On submit, all pending comments are sent with the review via the `Service` interface.
 
+## Configuration
+
+User configuration lives at `~/.config/pr-review/config.toml`. An annotated example is at `config.example.toml` in the repo root.
+
+**Currently configurable:** theme selection (10 built-in themes), per-color overrides, editor command, delta toggle, page size, PR list filters, PR list columns, file tree owner filter.
+
+**Not yet configurable (hardcoded):** keybindings, paddings/margins, border styles, comment height caps.
+
+### Guidelines for contributors
+
+- **Prefer configurability over hardcoding.** When adding new UI behavior, colors, or layout choices, expose them in `internal/config/config.go` with sensible defaults rather than hardcoding values.
+- **Always update `config.example.toml`** when adding or changing a config option. The example file is the primary user-facing documentation for configuration.
+- **Use semantic color names** from the Theme struct (e.g., `AccentPrimary`, `FgMuted`) rather than raw color literals in UI code.
+- **Config loading** is in `internal/config/config.go`. Theme resolution is in `internal/ui/styles/theme.go`.
+
 ## Dependencies
 
 - **Bubble Tea / Lip Gloss / Bubbles / Glamour** — TUI framework, styling, components, markdown rendering (all from Charm)
