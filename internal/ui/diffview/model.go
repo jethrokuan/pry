@@ -408,8 +408,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.err != nil {
 			m.errors.set(errCatLoad, 0, fmt.Errorf("comments: %w", msg.err))
 		} else {
-			m.comments.existing = msg.comments
-			m.rebuildCommentIndex()
+			m.setExistingComments(msg.comments)
 			m.updateDiffContent()
 		}
 
@@ -420,18 +419,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.review.ReviewID = msg.reviewID
 			m.review.ReviewNodeID = msg.reviewNodeID
 			// Restore comments from forge (crash recovery)
-			for _, ec := range msg.comments {
-				m.review.AddCommentDirect(review.InlineComment{
-					Path:       ec.Path,
-					Line:       ec.Line,
-					Side:       ec.Side,
-					Body:       ec.Body,
-					ForgeID:   ec.ID,
-					SyncStatus: review.SyncComplete,
-				})
-			}
-			m.comments.forgeComments = msg.comments
-			m.rebuildCommentIndex()
+			m.restoreForgeComments(msg.comments, msg.comments)
 			m.updateDiffContent()
 		} else {
 			// No existing pending review — create one on the forge
@@ -458,19 +446,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case commentSyncedMsg:
-		if c := m.review.FindByLocalID(msg.localID); c != nil {
-			if msg.err != nil {
+		if msg.err != nil {
+			m.updateLocalComment(msg.localID, func(c *review.InlineComment) {
 				c.SyncStatus = review.SyncFailed
 				c.SyncError = msg.err
-				m.errors.set(errCatCommentSync, msg.localID, msg.err)
-			} else {
+			})
+			m.errors.set(errCatCommentSync, msg.localID, msg.err)
+		} else {
+			m.updateLocalComment(msg.localID, func(c *review.InlineComment) {
 				c.SyncStatus = review.SyncComplete
 				c.ForgeID = msg.forgeID
-				m.errors.clear(errCatCommentSync, msg.localID)
-			}
-			m.rebuildCommentIndex()
-			m.updateDiffContent()
+			})
+			m.errors.clear(errCatCommentSync, msg.localID)
 		}
+		m.updateDiffContent()
 
 	case commentDeletedMsg:
 		if msg.err != nil {
@@ -478,7 +467,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.errors.clear(errCatCommentSync, msg.localID)
 		}
-		m.rebuildCommentIndex()
 		m.updateDiffContent()
 
 	case commentEditedMsg:
@@ -487,11 +475,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.errors.clear(errCatCommentSync, msg.localID)
 			// Update the local comment body
-			if c := m.review.FindByLocalID(msg.localID); c != nil {
+			m.updateLocalComment(msg.localID, func(c *review.InlineComment) {
 				c.Body = msg.body
-			}
+			})
 		}
-		m.rebuildCommentIndex()
 		m.updateDiffContent()
 
 	case viewedFilesMsg:

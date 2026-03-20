@@ -120,9 +120,8 @@ func (m Model) deleteSelectedComment() (Model, tea.Cmd) {
 	localID := c.LocalID
 	forgeID := c.ForgeID
 
-	m.review.RemoveCommentByLocalID(localID)
+	m.removeLocalComment(localID)
 	m.comments.cursor = -1
-	m.rebuildCommentIndex()
 	m.updateDiffContent()
 
 	return m, m.deleteCommentCmd(localID, forgeID)
@@ -230,9 +229,68 @@ func commentIndexKey(path string, line int, side string) string {
 	return fmt.Sprintf("%s:%d:%s", path, line, side)
 }
 
+// --- Comment mutation methods ---
+// All comment data mutations go through these methods, which automatically
+// rebuild the comment index. This eliminates the need to manually call
+// rebuildCommentIndex() at each mutation site.
+
+// setExistingComments replaces the existing comments and rebuilds the index.
+func (m *Model) setExistingComments(comments []review.ExistingComment) {
+	m.comments.existing = comments
+	m.rebuildCommentIndex()
+}
+
+// setForgeComments replaces the forge comments and rebuilds the index.
+func (m *Model) setForgeComments(comments []review.ExistingComment) {
+	m.comments.forgeComments = comments
+	m.rebuildCommentIndex()
+}
+
+// addLocalComment adds a new local pending comment and rebuilds the index.
+// Returns the assigned LocalID.
+func (m *Model) addLocalComment(c review.InlineComment) int {
+	id := m.review.AddCommentDirect(c)
+	m.rebuildCommentIndex()
+	return id
+}
+
+// removeLocalComment removes a local pending comment by LocalID and rebuilds
+// the index. Returns the removed comment's ForgeID.
+func (m *Model) removeLocalComment(localID int) int {
+	forgeID := m.review.RemoveCommentByLocalID(localID)
+	m.rebuildCommentIndex()
+	return forgeID
+}
+
+// updateLocalComment finds a comment by LocalID and applies the given mutation,
+// then rebuilds the index.
+func (m *Model) updateLocalComment(localID int, fn func(*review.InlineComment)) {
+	if c := m.review.FindByLocalID(localID); c != nil {
+		fn(c)
+		m.rebuildCommentIndex()
+	}
+}
+
+// restoreForgeComments batch-adds comments from the forge (crash recovery)
+// and sets forgeComments, rebuilding the index once at the end.
+func (m *Model) restoreForgeComments(pendingComments []review.ExistingComment, forgeComments []review.ExistingComment) {
+	for _, ec := range pendingComments {
+		m.review.AddCommentDirect(review.InlineComment{
+			Path:       ec.Path,
+			Line:       ec.Line,
+			Side:       ec.Side,
+			Body:       ec.Body,
+			ForgeID:    ec.ID,
+			SyncStatus: review.SyncComplete,
+		})
+	}
+	m.comments.forgeComments = forgeComments
+	m.rebuildCommentIndex()
+}
+
 // rebuildCommentIndex rebuilds the existingIndex and localPendingIndex maps
-// from the current comment data. Call this after any mutation to existing,
-// forgeComments, or review.Comments.
+// from the current comment data. It is called automatically by mutation methods
+// and should not normally be called directly.
 func (m *Model) rebuildCommentIndex() {
 	m.comments.existingIndex = make(map[string][]review.ExistingComment)
 	m.comments.fileCommentIndex = make(map[string]bool)
@@ -566,8 +624,9 @@ func (m Model) saveInlineComment() (Model, tea.Cmd) {
 		if c != nil {
 			localID := c.LocalID
 			forgeID := c.ForgeID
-			c.Body = body
-			m.rebuildCommentIndex()
+			m.updateLocalComment(localID, func(c *review.InlineComment) {
+				c.Body = body
+			})
 			m.closeInlineComment()
 			return m, m.editCommentCmd(localID, forgeID, body)
 		}
@@ -580,26 +639,24 @@ func (m Model) saveInlineComment() (Model, tea.Cmd) {
 		side = "RIGHT"
 	}
 
+	syncStatus := review.SyncPending
+	if m.review.ReviewNodeID != "" {
+		syncStatus = review.SyncInFlight
+	}
+
 	newComment := review.InlineComment{
 		Path:       m.comments.inlinePath,
 		Line:       m.comments.inlineLine,
 		StartLine:  m.comments.inlineStartLine,
 		Side:       side,
 		Body:       body,
-		SyncStatus: review.SyncPending,
+		SyncStatus: syncStatus,
 	}
-	m.review.AddCommentDirect(newComment)
+	m.addLocalComment(newComment)
 
 	// Get the comment back with its assigned LocalID
 	added := m.review.Comments[len(m.review.Comments)-1]
 
-	// Mark as in-flight and fire background sync
-	if m.review.ReviewNodeID != "" {
-		m.review.Comments[len(m.review.Comments)-1].SyncStatus = review.SyncInFlight
-		added = m.review.Comments[len(m.review.Comments)-1]
-	}
-
-	m.rebuildCommentIndex()
 	m.closeInlineComment()
 	return m, m.syncCommentCmd(added)
 }
@@ -679,8 +736,7 @@ func (m Model) deleteCommentAtCursor() (Model, tea.Cmd) {
 	localID := c.LocalID
 	forgeID := c.ForgeID
 
-	m.review.RemoveCommentByLocalID(localID)
-	m.rebuildCommentIndex()
+	m.removeLocalComment(localID)
 	m.updateDiffContent()
 
 	return m, m.deleteCommentCmd(localID, forgeID)
