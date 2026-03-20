@@ -325,6 +325,9 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) loadViewedFiles() tea.Cmd {
+	if m.review.PRNodeID == "" {
+		return nil
+	}
 	return func() tea.Msg {
 		viewed, err := m.svc.FetchViewedFiles(context.Background(), m.review.PRNodeID)
 		return viewedFilesMsg{viewed: viewed, err: err}
@@ -566,6 +569,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.pr = *msg.PR
 			if m.prInfoActive {
 				m.openPRInfoPopup()
+			}
+			// Viewed files may not have been loaded yet if PRNodeID was
+			// empty at Init time (e.g. CLI launch with just a PR number).
+			// Now that app.go has backfilled the node ID, try again.
+			if len(m.review.ViewedFiles) == 0 && m.review.PRNodeID != "" {
+				return m, m.loadViewedFiles()
 			}
 		}
 
