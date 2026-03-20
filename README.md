@@ -63,10 +63,11 @@ PR List → PR Detail → Diff View → Submit Review
 |-----|--------|
 | `j` / `k` | Navigate up/down |
 | `enter` | Select PR |
-| `f` | Cycle filter (needs review → all open → authored) |
+| `f` | Toggle filter picker |
+| `/` | Edit filter text |
 | `r` | Refresh |
-| `w` | Open in browser |
-| `q` | Quit |
+| `?` | Show help |
+| `ctrl+c` | Quit |
 
 ### PR Detail
 
@@ -76,7 +77,8 @@ PR List → PR Detail → Diff View → Submit Review
 | `enter` | Start review (open diffs) |
 | `c` | Checkout PR locally |
 | `w` | Open in browser |
-| `esc` | Back to list |
+| `esc` / `backspace` | Back to list |
+| `ctrl+c` | Quit |
 
 ### Diff View
 
@@ -84,17 +86,42 @@ PR List → PR Detail → Diff View → Submit Review
 |-----|--------|
 | `j` / `k` | Scroll diff |
 | `ctrl+d` / `ctrl+u` | Page down/up |
-| `n` / `p` | Next/previous file |
-| `e` | Toggle file tree |
-| `c` | Comment on current line |
-| `S` | Suggest edit on current line |
-| `v` | Visual select (multi-line comment/suggestion) |
+| `f` / `F` | Next/previous file |
+| `h` / `H` | Next/previous hunk |
+| `c` / `C` | Next/previous comment |
+| `t` | Toggle file tree |
+| `enter` | New comment / open comments |
+| `space` | Start visual selection |
+| `r` | Reply to comment |
+| `tab` | Toggle fold (comments/hunks) |
+| `shift+tab` | Toggle all folds |
 | `m` | Mark/unmark current file as viewed |
-| `tab` | Expand inline comments on current line |
-| `shift+tab` | Fold inline comments on current line |
+| `/` | Search in file |
+| `n` / `N` | Next/previous search match |
+| `ctrl+p` | Filter files (jump to file) |
+| `T` then `o` | Toggle CODEOWNERS team filter |
+| `T` then `f` | Narrow tree by regex path filter |
+| `T` then `x` | Clear all filters |
+| `ctrl+o` / `ctrl+i` | Jump back/forward in history |
+| `i` | Toggle PR info popup |
+| `w` | Open PR in browser |
 | `ctrl+e` | Open file in `$EDITOR` at current line |
 | `ctrl+s` | Submit review |
+| `?` | Show help |
 | `esc` | Back to PR detail |
+
+#### Comment Selection Mode
+
+When a comment is selected:
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Navigate between comments |
+| `enter` | Open comment popup |
+| `r` | Reply to comment |
+| `e` | Edit comment (pending only) |
+| `d` | Delete comment (pending only) |
+| `esc` | Deselect comment |
 
 ### Comment Editor
 
@@ -116,7 +143,7 @@ PR List → PR Detail → Diff View → Submit Review
 
 ## Code Suggestions
 
-When you press `S` on a diff line (or visual-select multiple lines then `S`), the comment editor opens pre-filled with the selected code. Edit the code to what it should be — on submission it gets wrapped in a GitHub suggestion block:
+Press `enter` on a diff line to open the comment editor, then `ctrl+t` to switch to suggestion mode. For multi-line suggestions, use `space` to start a visual selection first. The editor opens pre-filled with the selected code. Edit the code to what it should be — on submission it gets wrapped in a GitHub suggestion block:
 
 ````markdown
 ```suggestion
