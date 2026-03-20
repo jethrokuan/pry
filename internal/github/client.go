@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 
 	ghAPI "github.com/cli/go-gh/v2/pkg/api"
@@ -41,14 +42,17 @@ type Client struct {
 // Implements review.Service. Results are cached after the first call.
 func (c *Client) CurrentUser(_ context.Context) (string, error) {
 	c.user.once.Do(func() {
+		slog.Debug("fetching current user")
 		var resp struct {
 			Login string `json:"login"`
 		}
 		if err := c.rest.Get("user", &resp); err != nil {
 			c.user.err = fmt.Errorf("failed to fetch current user: %w", err)
+			slog.Error("failed to fetch current user", "error", err)
 			return
 		}
 		c.user.login = resp.Login
+		slog.Debug("fetched current user", "login", resp.Login)
 	})
 	return c.user.login, c.user.err
 }

@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -124,13 +125,16 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 		}
 	}`
 
+	slog.Debug("searching PRs", "query", query)
 	var resp graphqlPRResponse
 	err := c.graphql.Do(graphqlQuery, map[string]interface{}{
 		"query": query,
 	}, &resp)
 	if err != nil {
+		slog.Error("failed to fetch PRs", "query", query, "error", err)
 		return nil, fmt.Errorf("failed to fetch PRs: %w", err)
 	}
+	slog.Debug("fetched PRs", "count", len(resp.Search.Nodes))
 
 	viewer := resp.Viewer.Login
 	var prs []review.PullRequest
@@ -276,15 +280,18 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 		}
 	}`
 
+	slog.Debug("fetching PR", "owner", c.owner, "repo", c.repo, "number", number)
 	err := c.graphql.Do(query, map[string]interface{}{
 		"owner":  c.owner,
 		"repo":   c.repo,
 		"number": number,
 	}, &resp)
 	if err != nil {
+		slog.Error("failed to fetch PR", "number", number, "error", err)
 		return nil, fmt.Errorf("failed to fetch PR #%d: %w", number, err)
 	}
 
 	pr := nodeToPR(resp.Repository.PullRequest, "")
+	slog.Debug("fetched PR", "number", pr.Number, "nodeID", pr.NodeID, "title", pr.Title)
 	return &pr, nil
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/jkuan/pr-review/internal/config"
 	gitpkg "github.com/jkuan/pr-review/internal/git"
 	gh "github.com/jkuan/pr-review/internal/github"
+	"github.com/jkuan/pr-review/internal/logging"
 	"github.com/jkuan/pr-review/internal/ui/styles"
 )
 
@@ -32,6 +33,14 @@ func main() {
 		kong.Description("Terminal UI for reviewing GitHub pull requests."),
 		kong.UsageOnError(),
 	)
+
+	// Set up file-based logging (writes to ~/.config/pr-review/debug.log)
+	logCleanup, err := logging.Setup(cli.Verbose)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not set up logging: %v\n", err)
+	} else {
+		defer logCleanup()
+	}
 
 	// Load config and apply theme
 	var cfg config.Config

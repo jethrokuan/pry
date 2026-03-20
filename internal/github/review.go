@@ -42,12 +42,15 @@ type apiComment struct {
 // Returns the review ID, node ID (0/"" if none found) and any pre-existing comments on it.
 func (c *Client) FetchPendingReview(_ context.Context, prNumber int) (int, string, []review.ExistingComment, error) {
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews?per_page=100", c.owner, c.repo, prNumber)
+	slog.Debug("fetching pending review", "endpoint", endpoint, "prNumber", prNumber)
 
 	var reviews []apiReview
 	err := c.rest.Get(endpoint, &reviews)
 	if err != nil {
+		slog.Error("failed to fetch reviews", "endpoint", endpoint, "error", err)
 		return 0, "", nil, fmt.Errorf("failed to fetch reviews: %w", err)
 	}
+	slog.Debug("fetched reviews", "count", len(reviews), "prNumber", prNumber)
 
 	// Find the PENDING review (there can be at most one per user)
 	for _, r := range reviews {
@@ -104,8 +107,10 @@ func (c *Client) CreatePendingReview(_ context.Context, prNumber int) (int, stri
 	var result apiReview
 	err = c.rest.Do(http.MethodPost, endpoint, bytes.NewReader(body), &result)
 	if err != nil {
+		slog.Error("failed to create pending review", "endpoint", endpoint, "error", err)
 		return 0, "", fmt.Errorf("failed to create pending review: %w", err)
 	}
+	slog.Debug("created pending review", "reviewID", result.ID, "nodeID", result.NodeID)
 	return result.ID, result.NodeID, nil
 }
 
@@ -158,23 +163,29 @@ func (c *Client) AddReviewComment(_ context.Context, reviewNodeID string, commen
 		} `json:"addPullRequestReviewThread"`
 	}
 
+	slog.Debug("adding review comment", "reviewNodeID", reviewNodeID, "path", comment.Path, "line", comment.Line, "side", comment.Side)
 	err := c.graphql.Do(mutation, vars, &resp)
 	if err != nil {
+		slog.Error("failed to add review comment", "reviewNodeID", reviewNodeID, "path", comment.Path, "line", comment.Line, "error", err)
 		return 0, fmt.Errorf("failed to add comment to pending review: %w", err)
 	}
 
 	nodes := resp.AddPullRequestReviewThread.Thread.Comments.Nodes
 	if len(nodes) == 0 {
+		slog.Error("no comment returned from addPullRequestReviewThread", "reviewNodeID", reviewNodeID)
 		return 0, fmt.Errorf("no comment returned from addPullRequestReviewThread")
 	}
+	slog.Debug("added review comment", "commentID", nodes[0].DatabaseId)
 	return nodes[0].DatabaseId, nil
 }
 
 // DeleteReviewComment deletes a pending review comment by its database ID.
 func (c *Client) DeleteReviewComment(_ context.Context, prNumber, commentID int) error {
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/comments/%d", c.owner, c.repo, commentID)
+	slog.Debug("deleting review comment", "commentID", commentID, "endpoint", endpoint)
 	err := c.rest.Do(http.MethodDelete, endpoint, nil, nil)
 	if err != nil {
+		slog.Error("failed to delete review comment", "commentID", commentID, "error", err)
 		return fmt.Errorf("failed to delete review comment: %w", err)
 	}
 	return nil
@@ -190,8 +201,10 @@ func (c *Client) EditReviewComment(_ context.Context, prNumber, commentID int, b
 	}
 	err = c.rest.Do(http.MethodPatch, endpoint, bytes.NewReader(payload), nil)
 	if err != nil {
+		slog.Error("failed to edit review comment", "commentID", commentID, "error", err)
 		return fmt.Errorf("failed to edit review comment: %w", err)
 	}
+	slog.Debug("edited review comment", "commentID", commentID)
 	return nil
 }
 
@@ -221,10 +234,13 @@ func (c *Client) submitExistingReview(rev *review.PendingReview) error {
 		slog.Error("failed to marshal review submission payload", "reviewID", rev.ReviewID, "error", err)
 		return fmt.Errorf("failed to marshal review submission payload: %w", err)
 	}
+	slog.Debug("submitting existing review", "reviewID", rev.ReviewID, "event", rev.Event)
 	err = c.rest.Do(http.MethodPost, endpoint, bytes.NewReader(body), nil)
 	if err != nil {
+		slog.Error("failed to submit review", "reviewID", rev.ReviewID, "event", rev.Event, "error", err)
 		return fmt.Errorf("failed to submit review: %w", err)
 	}
+	slog.Info("review submitted", "reviewID", rev.ReviewID, "event", rev.Event)
 	return nil
 }
 
@@ -269,10 +285,13 @@ func (c *Client) createAndSubmitReview(rev *review.PendingReview) error {
 		return fmt.Errorf("failed to marshal review: %w", err)
 	}
 
+	slog.Debug("creating and submitting review", "prNumber", rev.PRNumber, "event", rev.Event, "commentCount", len(rev.Comments))
 	err = c.rest.Do(http.MethodPost, endpoint, bytes.NewReader(body), nil)
 	if err != nil {
+		slog.Error("failed to create and submit review", "prNumber", rev.PRNumber, "event", rev.Event, "error", err)
 		return fmt.Errorf("failed to submit review: %w", err)
 	}
+	slog.Info("review created and submitted", "prNumber", rev.PRNumber, "event", rev.Event)
 
 	return nil
 }
@@ -325,6 +344,7 @@ func (c *Client) FetchViewedFiles(_ context.Context, prNodeID string) (map[strin
 
 		err := c.graphql.Do(query, vars, &resp)
 		if err != nil {
+			slog.Error("failed to fetch viewed files", "prNodeID", prNodeID, "error", err)
 			return nil, fmt.Errorf("failed to fetch viewed files: %w", err)
 		}
 
@@ -352,11 +372,13 @@ func (c *Client) MarkFileAsViewed(_ context.Context, prNodeID, path string) erro
 		}
 	}`
 
+	slog.Debug("marking file as viewed", "prNodeID", prNodeID, "path", path)
 	err := c.graphql.Do(mutation, map[string]interface{}{
 		"prID": prNodeID,
 		"path": path,
 	}, nil)
 	if err != nil {
+		slog.Error("failed to mark file as viewed", "prNodeID", prNodeID, "path", path, "error", err)
 		return fmt.Errorf("failed to mark file as viewed: %w", err)
 	}
 	return nil
@@ -388,11 +410,14 @@ func (c *Client) UnmarkFileAsViewed(_ context.Context, prNodeID, path string) er
 func (c *Client) FetchExistingComments(_ context.Context, prNumber int) ([]review.ExistingComment, error) {
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/comments?per_page=100&page=%%d",
 		c.owner, c.repo, prNumber)
+	slog.Debug("fetching existing comments", "prNumber", prNumber)
 
 	batch, err := paginateREST[apiComment](c.rest, endpoint)
 	if err != nil {
+		slog.Error("failed to fetch existing comments", "prNumber", prNumber, "error", err)
 		return nil, fmt.Errorf("failed to fetch comments: %w", err)
 	}
+	slog.Debug("fetched existing comments", "prNumber", prNumber, "count", len(batch))
 
 	comments := make([]review.ExistingComment, len(batch))
 	for i, ac := range batch {

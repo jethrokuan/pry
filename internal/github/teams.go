@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 )
@@ -40,8 +41,10 @@ func (c *Client) getUserTeams() ([]string, error) {
 // fetchUserTeams fetches all teams the authenticated user belongs to,
 // filtered to the current repo's org.
 func (c *Client) fetchUserTeams() ([]string, error) {
+	slog.Debug("fetching user teams", "org", c.owner)
 	allTeams, err := paginateREST[team](c.rest, "user/teams?per_page=100&page=%d")
 	if err != nil {
+		slog.Error("failed to fetch user teams", "error", err)
 		return nil, fmt.Errorf("failed to fetch user teams: %w", err)
 	}
 
@@ -52,5 +55,6 @@ func (c *Client) fetchUserTeams() ([]string, error) {
 		}
 	}
 
+	slog.Debug("fetched user teams", "total", len(allTeams), "orgFiltered", len(filtered))
 	return filtered, nil
 }

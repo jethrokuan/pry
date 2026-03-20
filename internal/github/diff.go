@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jkuan/pr-review/internal/diff"
 )
@@ -25,10 +26,13 @@ func (c *Client) FetchDiffFiles(_ context.Context, number int) ([]diff.DiffFile,
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/files?per_page=100&page=%%d",
 		c.owner, c.repo, number)
 
+	slog.Debug("fetching diff files", "prNumber", number, "endpoint", endpoint)
 	allFiles, err := paginateREST[prFile](c.rest, endpoint)
 	if err != nil {
+		slog.Error("failed to fetch PR files", "prNumber", number, "error", err)
 		return nil, fmt.Errorf("failed to fetch PR files: %w", err)
 	}
+	slog.Debug("fetched diff files", "prNumber", number, "fileCount", len(allFiles))
 
 	patches := make([]diff.FilePatch, len(allFiles))
 	for i, f := range allFiles {
