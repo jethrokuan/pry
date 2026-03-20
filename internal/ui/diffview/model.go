@@ -88,6 +88,11 @@ type editorFinishedMsg struct {
 
 type flashExpiredMsg struct{}
 
+// UserIdentityMsg carries the resolved user identity from the app layer.
+type UserIdentityMsg struct {
+	Identity *review.UserIdentity
+}
+
 // --- Inline comment mode ---
 
 type commentMode int
@@ -244,10 +249,31 @@ type diffLineInfo struct {
 // Option configures the Model at construction time.
 type Option func(*Model)
 
-// WithDefaultOwnerFilter sets the default CODEOWNERS owner filter.
-func WithDefaultOwnerFilter(owner string) Option {
+// WithUserIdentity sets the owner filter identities from a resolved user identity.
+// When provided, the owner filter defaults to on (loading CODEOWNERS lazily).
+func WithUserIdentity(id *review.UserIdentity) Option {
 	return func(m *Model) {
-		m.filter = initFileFilter(owner)
+		if id == nil {
+			return
+		}
+		m.filter.ownerIdentities = make([]string, 0, 1+len(id.Teams))
+		m.filter.ownerIdentities = append(m.filter.ownerIdentities, "@"+id.Login)
+		for _, t := range id.Teams {
+			m.filter.ownerIdentities = append(m.filter.ownerIdentities, "@"+t)
+		}
+		m.filter.ownerEnabled = true
+		m.filter.codeowners = loadCodeowners()
+		if m.filter.codeowners == nil {
+			// No CODEOWNERS file — disable owner filter silently
+			m.filter.ownerEnabled = false
+		}
+	}
+}
+
+// WithOwnerFilterDisabled explicitly disables the owner filter regardless of identity.
+func WithOwnerFilterDisabled() Option {
+	return func(m *Model) {
+		m.filter.ownerEnabled = false
 	}
 }
 
@@ -512,6 +538,25 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if len(m.files) > 0 {
 			m.nav.treeViewport.SetContent(m.renderFileTree())
 			m.treeDirty = false
+		}
+
+	case UserIdentityMsg:
+		if msg.Identity != nil && len(m.filter.ownerIdentities) == 0 {
+			m.filter.ownerIdentities = make([]string, 0, 1+len(msg.Identity.Teams))
+			m.filter.ownerIdentities = append(m.filter.ownerIdentities, "@"+msg.Identity.Login)
+			for _, t := range msg.Identity.Teams {
+				m.filter.ownerIdentities = append(m.filter.ownerIdentities, "@"+t)
+			}
+			m.filter.ownerEnabled = true
+			if m.filter.codeowners == nil {
+				m.filter.codeowners = loadCodeowners()
+			}
+			if m.filter.codeowners == nil {
+				m.filter.ownerEnabled = false
+			}
+			if m.filter.ownerEnabled && len(m.files) > 0 {
+				m.applyFilters()
+			}
 		}
 
 	case PRBodyLoadedMsg:
@@ -945,7 +990,7 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "f/F file")
 			helpParts = append(helpParts, "/ filter")
 			helpParts = append(helpParts, "^f narrow")
-			if m.filter.ownerPattern != "" {
+			if len(m.filter.ownerIdentities) > 0 {
 				helpParts = append(helpParts, "^o owner")
 			}
 			if m.filter.isActive() {

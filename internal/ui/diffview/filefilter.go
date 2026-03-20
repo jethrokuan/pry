@@ -18,26 +18,14 @@ type FileFilter struct {
 	regexInput    string         // current input while typing
 
 	// Owner filter (CODEOWNERS-based)
-	ownerPattern string                // e.g. "@org/my-team" (empty = disabled)
-	ownerEnabled bool                  // whether owner filter is active
-	codeowners   *codeowners.Codeowners // parsed CODEOWNERS (nil if not found)
+	ownerIdentities []string              // e.g. ["@username", "@org/team1"] (empty = not configured)
+	ownerEnabled    bool                  // whether owner filter is active
+	codeowners      *codeowners.Codeowners // parsed CODEOWNERS (nil if not found)
 
 	// Computed state
 	includedFiles map[int]bool // set of file indices that pass all filters
 	totalFiles    int          // total file count (for display)
 	filteredCount int          // number of files passing filters
-}
-
-// initFileFilter creates a FileFilter, optionally loading CODEOWNERS and applying
-// a default owner filter from config.
-func initFileFilter(defaultOwner string) FileFilter {
-	ff := FileFilter{}
-	if defaultOwner != "" {
-		ff.ownerPattern = defaultOwner
-		ff.ownerEnabled = true
-		ff.codeowners = loadCodeowners()
-	}
-	return ff
 }
 
 // loadCodeowners finds and parses the CODEOWNERS file from the git repo root.
@@ -85,11 +73,11 @@ func (ff *FileFilter) matchesAll(path string) bool {
 			return false
 		}
 	}
-	if ff.ownerEnabled && ff.ownerPattern != "" {
+	if ff.ownerEnabled && len(ff.ownerIdentities) > 0 {
 		if ff.codeowners == nil {
 			return false // can't determine ownership without CODEOWNERS
 		}
-		if !ff.codeowners.OwnedBy(path, ff.ownerPattern) {
+		if !ff.codeowners.OwnedByAny(path, ff.ownerIdentities) {
 			return false
 		}
 	}
@@ -98,7 +86,7 @@ func (ff *FileFilter) matchesAll(path string) bool {
 
 // isActive returns true if any filter is currently narrowing the file tree.
 func (ff *FileFilter) isActive() bool {
-	return ff.regexCompiled != nil || (ff.ownerEnabled && ff.ownerPattern != "")
+	return ff.regexCompiled != nil || (ff.ownerEnabled && len(ff.ownerIdentities) > 0)
 }
 
 // setRegex sets and compiles a regex pattern. Empty string disables the filter.
@@ -121,8 +109,8 @@ func (ff *FileFilter) setRegex(pattern string) {
 // flash message. Errors (no config, missing CODEOWNERS) are communicated
 // through the returned label so the caller can show them.
 func (ff *FileFilter) toggleOwner() string {
-	if ff.ownerPattern == "" {
-		return "not configured (set file_tree.default_owner_filter)"
+	if len(ff.ownerIdentities) == 0 {
+		return "not available (user identity not loaded)"
 	}
 	// Toggling off is always allowed
 	if ff.ownerEnabled {
@@ -137,7 +125,7 @@ func (ff *FileFilter) toggleOwner() string {
 		return "CODEOWNERS file not found"
 	}
 	ff.ownerEnabled = true
-	return ff.ownerPattern
+	return strings.Join(ff.ownerIdentities, ", ")
 }
 
 // clearAll removes all active filters.
@@ -153,8 +141,8 @@ func (ff *FileFilter) statusText() string {
 	if ff.regexCompiled != nil {
 		parts = append(parts, "regex:"+ff.regexPattern)
 	}
-	if ff.ownerEnabled && ff.ownerPattern != "" {
-		parts = append(parts, "owner:"+ff.ownerPattern)
+	if ff.ownerEnabled && len(ff.ownerIdentities) > 0 {
+		parts = append(parts, "owner:"+ff.ownerIdentities[0])
 	}
 	if len(parts) == 0 {
 		return ""

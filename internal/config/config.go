@@ -19,7 +19,9 @@ type FilterConfig struct {
 
 // FileTreeConfig holds file tree display settings.
 type FileTreeConfig struct {
-	DefaultOwnerFilter string `toml:"default_owner_filter"`
+	// OwnerFilter controls whether the CODEOWNERS-based owner filter is enabled
+	// by default. nil = default (on when identity is available), true = on, false = off.
+	OwnerFilter *bool `toml:"owner_filter"`
 }
 
 // Config holds user configuration for the tool.

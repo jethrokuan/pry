@@ -41,9 +41,10 @@ type Model struct {
 	submit   submit.Model
 
 	// State
-	selectedPR *review.PullRequest
-	review     *review.PendingReview
-	initialPR  int // PR number passed via CLI argument (0 = none)
+	selectedPR   *review.PullRequest
+	review       *review.PendingReview
+	initialPR    int // PR number passed via CLI argument (0 = none)
+	userIdentity *review.UserIdentity
 }
 
 // New creates the application model.
@@ -62,26 +63,57 @@ func New(svc review.Service, cfg config.Config, filters []review.PRFilter, colum
 func NewWithPR(svc review.Service, cfg config.Config, prNumber int, filters []review.PRFilter, columns []string) Model {
 	pr := review.PullRequest{Number: prNumber}
 	rev := review.NewPendingReview(prNumber, "", "")
-	return Model{
+	m := Model{
 		svc:       svc,
 		cfg:       cfg,
 		filters:   filters,
 		columns:   columns,
 		screen:    ScreenDiffView,
 		prList:    prlist.New(svc, filters, columns),
-		diffView:  diffview.New(svc, pr, rev, diffviewOpts(cfg)...),
 		review:    rev,
 		initialPR: prNumber,
 	}
+	m.diffView = diffview.New(svc, pr, rev, m.diffviewOpts()...)
+	return m
 }
 
-// diffviewOpts converts config to diffview options.
-func diffviewOpts(cfg config.Config) []diffview.Option {
+// diffviewOpts converts config and app state to diffview options.
+func (m Model) diffviewOpts() []diffview.Option {
 	var opts []diffview.Option
-	if cfg.FileTree.DefaultOwnerFilter != "" {
-		opts = append(opts, diffview.WithDefaultOwnerFilter(cfg.FileTree.DefaultOwnerFilter))
+	if m.userIdentity != nil {
+		opts = append(opts, diffview.WithUserIdentity(m.userIdentity))
+	}
+	if m.cfg.FileTree.OwnerFilter != nil && !*m.cfg.FileTree.OwnerFilter {
+		opts = append(opts, diffview.WithOwnerFilterDisabled())
 	}
 	return opts
+}
+
+// userIdentityMsg carries the result of the async user identity fetch.
+type userIdentityMsg struct {
+	identity *review.UserIdentity
+	err      error
+}
+
+// loadUserIdentity fetches the current user's login and teams.
+func (m Model) loadUserIdentity() tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		login, err := m.svc.CurrentUser(ctx)
+		if err != nil {
+			return userIdentityMsg{err: err}
+		}
+		teams, err := m.svc.UserTeams(ctx)
+		if err != nil {
+			return userIdentityMsg{err: err}
+		}
+		return userIdentityMsg{
+			identity: &review.UserIdentity{
+				Login: login,
+				Teams: teams,
+			},
+		}
+	}
 }
 
 // Init starts the application.
@@ -91,13 +123,17 @@ func (m Model) Init() tea.Cmd {
 		return tea.Batch(
 			m.diffView.Init(),
 			tea.WindowSize(),
+			m.loadUserIdentity(),
 			func() tea.Msg {
 				full, err := m.svc.GetPR(context.Background(), prNumber)
 				return prBodyLoadedMsg{pr: full, err: err}
 			},
 		)
 	}
-	return m.prList.Init()
+	return tea.Batch(
+		m.prList.Init(),
+		m.loadUserIdentity(),
+	)
 }
 
 // Update handles all messages, routing to the active screen.
@@ -107,6 +143,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+	case userIdentityMsg:
+		if msg.err == nil && msg.identity != nil {
+			m.userIdentity = msg.identity
+			// Forward to diffview if it's active
+			if m.screen == ScreenDiffView {
+				var cmd tea.Cmd
+				m.diffView, cmd = m.diffView.Update(diffview.UserIdentityMsg{Identity: msg.identity})
+				return m, cmd
+			}
+		}
+		return m, nil
 	}
 
 	switch m.screen {
@@ -140,7 +187,7 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selectedPR = &msg.PR
 		pr := msg.PR
 		m.review = review.NewPendingReview(pr.Number, pr.NodeID, pr.HeadSHA)
-		m.diffView = diffview.New(m.svc, pr, m.review, diffviewOpts(m.cfg)...)
+		m.diffView = diffview.New(m.svc, pr, m.review, m.diffviewOpts()...)
 		m.screen = ScreenDiffView
 		return m, tea.Batch(
 			m.diffView.Init(),
@@ -171,7 +218,7 @@ func (m Model) updatePRDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case prdetail.StartReviewMsg:
 		m.review = review.NewPendingReview(msg.PR.Number, msg.PR.NodeID, msg.PR.HeadSHA)
-		m.diffView = diffview.New(m.svc, msg.PR, m.review)
+		m.diffView = diffview.New(m.svc, msg.PR, m.review, m.diffviewOpts()...)
 		m.screen = ScreenDiffView
 		return m, tea.Batch(
 			m.diffView.Init(),

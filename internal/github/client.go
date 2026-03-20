@@ -1,8 +1,10 @@
 package github
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	ghAPI "github.com/cli/go-gh/v2/pkg/api"
 )
@@ -18,6 +20,13 @@ type graphqlClient interface {
 	Do(query string, variables map[string]interface{}, response interface{}) error
 }
 
+// currentUserCache holds cached user login.
+type currentUserCache struct {
+	once  sync.Once
+	login string
+	err   error
+}
+
 // Client wraps the go-gh REST and GraphQL clients.
 type Client struct {
 	rest    restClient
@@ -25,6 +34,23 @@ type Client struct {
 	owner   string
 	repo    string
 	teams   userTeamsCache
+	user    currentUserCache
+}
+
+// CurrentUser returns the authenticated user's login.
+// Implements review.Service. Results are cached after the first call.
+func (c *Client) CurrentUser(_ context.Context) (string, error) {
+	c.user.once.Do(func() {
+		var resp struct {
+			Login string `json:"login"`
+		}
+		if err := c.rest.Get("user", &resp); err != nil {
+			c.user.err = fmt.Errorf("failed to fetch current user: %w", err)
+			return
+		}
+		c.user.login = resp.Login
+	})
+	return c.user.login, c.user.err
 }
 
 // NewClient creates a new GitHub client for the given repository.

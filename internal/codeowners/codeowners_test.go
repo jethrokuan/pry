@@ -103,6 +103,33 @@ var _ = Describe("Codeowners", func() {
 		})
 	})
 
+	Describe("OwnedByAny", func() {
+		It("returns true when any candidate matches", func() {
+			writeFile("*.go @go-team @backup-team\ndocs/ @docs-team\n")
+			co, err := codeowners.Parse(coFile)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(co.OwnedByAny("main.go", []string{"@go-team"})).To(BeTrue())
+			Expect(co.OwnedByAny("main.go", []string{"@other", "@backup-team"})).To(BeTrue())
+			Expect(co.OwnedByAny("main.go", []string{"@docs-team"})).To(BeFalse())
+		})
+
+		It("matches case-insensitively", func() {
+			writeFile("*.go @Org/Go-Team\n")
+			co, err := codeowners.Parse(coFile)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(co.OwnedByAny("main.go", []string{"@org/go-team"})).To(BeTrue())
+		})
+
+		It("returns false when owners or candidates are empty", func() {
+			writeFile("*.go @go-team\n")
+			co, err := codeowners.Parse(coFile)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(co.OwnedByAny("main.go", nil)).To(BeFalse())
+			Expect(co.OwnedByAny("main.go", []string{})).To(BeFalse())
+			Expect(co.OwnedByAny("unmatched.txt", []string{"@go-team"})).To(BeFalse())
+		})
+	})
+
 	Describe("Find", func() {
 		It("finds .github/CODEOWNERS", func() {
 			ghDir := filepath.Join(tmpDir, ".github")

@@ -6,6 +6,12 @@ import (
 	"github.com/jkuan/pr-review/internal/diff"
 )
 
+// UserIdentity holds the authenticated user's login and team memberships.
+type UserIdentity struct {
+	Login string   // e.g. "@username"
+	Teams []string // e.g. ["@org/team1", "@org/team2"]
+}
+
 // Service defines what the application needs from a code review platform.
 // Implementations adapt forge-specific APIs (GitHub, GitLab, etc.) to this interface.
 type Service interface {
@@ -13,6 +19,8 @@ type Service interface {
 	RepoOwner() string
 	// RepoName returns the repository name.
 	RepoName() string
+	// CurrentUser returns the authenticated user's login (e.g. "octocat").
+	CurrentUser(ctx context.Context) (string, error)
 	// UserTeams returns the team slugs ("org/team") the authenticated user
 	// belongs to in the current repo's org. Results may be cached.
 	UserTeams(ctx context.Context) ([]string, error)

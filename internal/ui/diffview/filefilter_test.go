@@ -88,35 +88,35 @@ var _ = ginkgo.Describe("FileFilter", func() {
 		})
 
 		ginkgo.It("returns true when owner filter is enabled", func() {
-			ff := FileFilter{ownerEnabled: true, ownerPattern: "@team"}
+			ff := FileFilter{ownerEnabled: true, ownerIdentities: []string{"@team"}}
 			gomega.Expect(ff.isActive()).To(gomega.BeTrue())
 		})
 	})
 
 	ginkgo.Describe("toggleOwner", func() {
-		ginkgo.It("returns not-configured message when ownerPattern is empty", func() {
+		ginkgo.It("returns not-available message when ownerIdentities is empty", func() {
 			ff := FileFilter{}
 			label := ff.toggleOwner()
-			gomega.Expect(label).To(gomega.ContainSubstring("not configured"))
+			gomega.Expect(label).To(gomega.ContainSubstring("not available"))
 			gomega.Expect(ff.ownerEnabled).To(gomega.BeFalse())
 		})
 
 		ginkgo.It("toggles off when currently enabled", func() {
-			ff := FileFilter{ownerEnabled: true, ownerPattern: "@team", codeowners: &codeowners.Codeowners{}}
+			ff := FileFilter{ownerEnabled: true, ownerIdentities: []string{"@team"}, codeowners: &codeowners.Codeowners{}}
 			label := ff.toggleOwner()
 			gomega.Expect(label).To(gomega.Equal("off"))
 			gomega.Expect(ff.ownerEnabled).To(gomega.BeFalse())
 		})
 
 		ginkgo.It("toggles on when codeowners is available", func() {
-			ff := FileFilter{ownerPattern: "@team", codeowners: &codeowners.Codeowners{}}
+			ff := FileFilter{ownerIdentities: []string{"@team"}, codeowners: &codeowners.Codeowners{}}
 			label := ff.toggleOwner()
 			gomega.Expect(label).To(gomega.Equal("@team"))
 			gomega.Expect(ff.ownerEnabled).To(gomega.BeTrue())
 		})
 
 		ginkgo.It("returns CODEOWNERS-not-found when codeowners is nil", func() {
-			ff := FileFilter{ownerPattern: "@team"}
+			ff := FileFilter{ownerIdentities: []string{"@team"}}
 			// Note: codeowners is nil and loadCodeowners will fail in test env
 			label := ff.toggleOwner()
 			gomega.Expect(label).To(gomega.ContainSubstring("CODEOWNERS"))
@@ -129,7 +129,7 @@ var _ = ginkgo.Describe("FileFilter", func() {
 			ff := FileFilter{}
 			ff.setRegex("test")
 			ff.ownerEnabled = true
-			ff.ownerPattern = "@team"
+			ff.ownerIdentities = []string{"@team"}
 			ff.clearAll()
 			gomega.Expect(ff.isActive()).To(gomega.BeFalse())
 			gomega.Expect(ff.regexPattern).To(gomega.BeEmpty())
@@ -151,12 +151,12 @@ var _ = ginkgo.Describe("FileFilter", func() {
 		})
 
 		ginkgo.It("shows owner pattern", func() {
-			ff := FileFilter{ownerEnabled: true, ownerPattern: "@org/team"}
+			ff := FileFilter{ownerEnabled: true, ownerIdentities: []string{"@org/team"}}
 			gomega.Expect(ff.statusText()).To(gomega.Equal("owner:@org/team"))
 		})
 
 		ginkgo.It("shows both when stacked", func() {
-			ff := FileFilter{ownerEnabled: true, ownerPattern: "@org/team"}
+			ff := FileFilter{ownerEnabled: true, ownerIdentities: []string{"@org/team"}}
 			ff.setRegex("src/")
 			gomega.Expect(ff.statusText()).To(gomega.Equal("regex:src/ + owner:@org/team"))
 		})
@@ -164,16 +164,23 @@ var _ = ginkgo.Describe("FileFilter", func() {
 
 	ginkgo.Describe("matchesAll with owner filter", func() {
 		ginkgo.It("excludes all files when codeowners is nil", func() {
-			ff := FileFilter{ownerEnabled: true, ownerPattern: "@team"}
+			ff := FileFilter{ownerEnabled: true, ownerIdentities: []string{"@team"}}
 			// codeowners is nil — cannot determine ownership
 			gomega.Expect(ff.matchesAll("src/main.go")).To(gomega.BeFalse())
 		})
 
 		ginkgo.It("filters by codeowners when available", func() {
 			co, _ := makeTempCodeowners("*.go @go-team\ndocs/ @docs-team\n")
-			ff := FileFilter{ownerEnabled: true, ownerPattern: "@go-team", codeowners: co}
+			ff := FileFilter{ownerEnabled: true, ownerIdentities: []string{"@go-team"}, codeowners: co}
 			gomega.Expect(ff.matchesAll("src/main.go")).To(gomega.BeTrue())
 			gomega.Expect(ff.matchesAll("docs/readme.md")).To(gomega.BeFalse())
+		})
+
+		ginkgo.It("matches when any owner identity matches", func() {
+			co, _ := makeTempCodeowners("*.go @go-team\ndocs/ @docs-team\n")
+			ff := FileFilter{ownerEnabled: true, ownerIdentities: []string{"@me", "@docs-team"}, codeowners: co}
+			gomega.Expect(ff.matchesAll("docs/readme.md")).To(gomega.BeTrue())
+			gomega.Expect(ff.matchesAll("src/main.go")).To(gomega.BeFalse()) // owned by @go-team, not @me or @docs-team
 		})
 	})
 

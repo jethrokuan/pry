@@ -92,6 +92,24 @@ func (c *Codeowners) OwnedBy(path, owner string) bool {
 	return false
 }
 
+// OwnedByAny returns true if the file path is owned by any of the given owners.
+// Each owner is compared case-insensitively.
+func (c *Codeowners) OwnedByAny(path string, candidates []string) bool {
+	owners := c.Owners(path)
+	if len(owners) == 0 || len(candidates) == 0 {
+		return false
+	}
+	for _, o := range owners {
+		lower := strings.ToLower(o)
+		for _, candidate := range candidates {
+			if strings.ToLower(candidate) == lower {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // matchPattern matches a CODEOWNERS pattern against a file path.
 // Supports: *, ?, **, directory patterns (trailing /).
 func matchPattern(pattern, path string) bool {
