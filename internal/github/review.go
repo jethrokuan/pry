@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/jkuan/pr-review/internal/review"
@@ -94,10 +95,14 @@ func (c *Client) CreatePendingReview(_ context.Context, prNumber int) (int, stri
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", c.owner, c.repo, prNumber)
 
 	payload := map[string]interface{}{}
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		slog.Error("failed to marshal pending review payload", "error", err)
+		return 0, "", fmt.Errorf("failed to marshal pending review payload: %w", err)
+	}
 
 	var result apiReview
-	err := c.rest.Do(http.MethodPost, endpoint, bytes.NewReader(body), &result)
+	err = c.rest.Do(http.MethodPost, endpoint, bytes.NewReader(body), &result)
 	if err != nil {
 		return 0, "", fmt.Errorf("failed to create pending review: %w", err)
 	}
@@ -178,8 +183,12 @@ func (c *Client) DeleteReviewComment(_ context.Context, prNumber, commentID int)
 // EditReviewComment updates the body of a review comment by its database ID.
 func (c *Client) EditReviewComment(_ context.Context, prNumber, commentID int, body string) error {
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/comments/%d", c.owner, c.repo, commentID)
-	payload, _ := json.Marshal(map[string]string{"body": body})
-	err := c.rest.Do(http.MethodPatch, endpoint, bytes.NewReader(payload), nil)
+	payload, err := json.Marshal(map[string]string{"body": body})
+	if err != nil {
+		slog.Error("failed to marshal edit comment payload", "commentID", commentID, "error", err)
+		return fmt.Errorf("failed to marshal edit comment payload: %w", err)
+	}
+	err = c.rest.Do(http.MethodPatch, endpoint, bytes.NewReader(payload), nil)
 	if err != nil {
 		return fmt.Errorf("failed to edit review comment: %w", err)
 	}
@@ -207,8 +216,12 @@ func (c *Client) submitExistingReview(rev *review.PendingReview) error {
 		payload["body"] = rev.Body
 	}
 
-	body, _ := json.Marshal(payload)
-	err := c.rest.Do(http.MethodPost, endpoint, bytes.NewReader(body), nil)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		slog.Error("failed to marshal review submission payload", "reviewID", rev.ReviewID, "error", err)
+		return fmt.Errorf("failed to marshal review submission payload: %w", err)
+	}
+	err = c.rest.Do(http.MethodPost, endpoint, bytes.NewReader(body), nil)
 	if err != nil {
 		return fmt.Errorf("failed to submit review: %w", err)
 	}

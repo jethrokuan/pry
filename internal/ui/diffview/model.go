@@ -3,6 +3,7 @@ package diffview
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -770,7 +771,9 @@ func openBrowser(url string) tea.Cmd {
 		default:
 			cmd = exec.Command("xdg-open", url)
 		}
-		_ = cmd.Start()
+		if err := cmd.Start(); err != nil {
+			slog.Warn("failed to open URL in browser", "url", url, "error", err)
+		}
 		return nil
 	}
 }

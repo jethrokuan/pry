@@ -3,6 +3,7 @@ package diff
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	godiff "github.com/sourcegraph/go-diff/diff"
@@ -68,6 +69,8 @@ func ParseFromPatches(prFiles []FilePatch) []DiffFile {
 		hunks, err := parseHunks([]byte(pf.Patch))
 		if err == nil {
 			df.Hunks = hunks
+		} else {
+			slog.Warn("failed to parse hunks from patch", "file", pf.Filename, "error", err)
 		}
 
 		files = append(files, df)

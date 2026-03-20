@@ -3,6 +3,7 @@ package prlist
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -110,7 +111,10 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) fetchUserTeams() tea.Cmd {
 	return func() tea.Msg {
-		teams, _ := m.svc.UserTeams(context.Background())
+		teams, err := m.svc.UserTeams(context.Background())
+		if err != nil {
+			slog.Warn("failed to fetch user teams", "error", err)
+		}
 		return userTeamsLoadedMsg{teams: teams}
 	}
 }
