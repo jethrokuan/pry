@@ -158,10 +158,7 @@ Binary files a/image.png and b/image.png differ
 		It("returns empty for empty input", func() {
 			files, err := diff.Parse("")
 			Expect(err).NotTo(HaveOccurred())
-			// Parser produces a stub file from empty input
-			Expect(files).To(HaveLen(1))
-			Expect(files[0].Path).To(Equal(""))
-			Expect(files[0].Hunks).To(BeNil())
+			Expect(files).To(BeNil())
 		})
 	})
 

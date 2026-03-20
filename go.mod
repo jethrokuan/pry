@@ -3,6 +3,7 @@ module github.com/jkuan/pr-review
 go 1.25.0
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v1.0.0
@@ -10,10 +11,10 @@ require (
 	github.com/cli/go-gh/v2 v2.13.0
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
+	github.com/sourcegraph/go-diff v0.7.0
 )
 
 require (
-	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/alecthomas/chroma/v2 v2.20.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect

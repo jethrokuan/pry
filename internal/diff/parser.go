@@ -1,24 +1,39 @@
 package diff
 
 import (
+	"bytes"
 	"fmt"
-	"strconv"
 	"strings"
+
+	godiff "github.com/sourcegraph/go-diff/diff"
 )
 
 // Parse parses a unified diff string into structured DiffFiles.
 func Parse(raw string) ([]DiffFile, error) {
-	var files []DiffFile
-	chunks := splitDiffByFile(raw)
-
-	for _, chunk := range chunks {
-		file, err := parseFileChunk(chunk)
-		if err != nil {
-			continue // skip unparseable chunks
-		}
-		files = append(files, *file)
+	if raw == "" {
+		return nil, nil
 	}
 
+	// Pre-process to extract binary file diffs that go-diff cannot parse.
+	// Binary diffs look like:
+	//   diff --git a/file b/file
+	//   Binary files a/file and b/file differ
+	var binaryFiles []DiffFile
+	cleaned := preprocessBinaryDiffs(raw, &binaryFiles)
+
+	var files []DiffFile
+	if strings.TrimSpace(cleaned) != "" {
+		fileDiffs, err := godiff.ParseMultiFileDiff([]byte(cleaned))
+		if err != nil {
+			return nil, fmt.Errorf("parsing diff: %w", err)
+		}
+		files = make([]DiffFile, 0, len(fileDiffs)+len(binaryFiles))
+		for _, fd := range fileDiffs {
+			files = append(files, convertFileDiff(fd))
+		}
+	}
+
+	files = append(files, binaryFiles...)
 	return files, nil
 }
 
@@ -50,7 +65,7 @@ func ParseFromPatches(prFiles []FilePatch) []DiffFile {
 			continue
 		}
 
-		hunks, err := parseHunks(pf.Patch)
+		hunks, err := parseHunks([]byte(pf.Patch))
 		if err == nil {
 			df.Hunks = hunks
 		}
@@ -95,228 +110,173 @@ func BuildPositionMap(files []DiffFile) map[string]map[int]int {
 	return result
 }
 
-func splitDiffByFile(raw string) []string {
+// preprocessBinaryDiffs extracts binary file diffs from the raw diff text,
+// appends them to binaryFiles, and returns the remaining diff text.
+func preprocessBinaryDiffs(raw string, binaryFiles *[]DiffFile) string {
+	var cleaned strings.Builder
 	lines := strings.Split(raw, "\n")
-	var chunks []string
-	var current []string
 
-	for _, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		if strings.HasPrefix(line, "diff --git") {
-			if len(current) > 0 {
-				chunks = append(chunks, strings.Join(current, "\n"))
+			// Check if the next non-empty line is "Binary files ... differ"
+			j := i + 1
+			for j < len(lines) && lines[j] == "" {
+				j++
 			}
-			current = []string{line}
-		} else {
-			current = append(current, line)
-		}
-	}
-	if len(current) > 0 {
-		chunks = append(chunks, strings.Join(current, "\n"))
-	}
-
-	return chunks
-}
-
-func parseFileChunk(chunk string) (*DiffFile, error) {
-	lines := strings.Split(chunk, "\n")
-	if len(lines) == 0 {
-		return nil, fmt.Errorf("empty chunk")
-	}
-
-	file := &DiffFile{}
-
-	// Parse header
-	for i, line := range lines {
-		if strings.HasPrefix(line, "diff --git") {
-			parts := strings.Fields(line)
-			if len(parts) >= 4 {
-				file.Path = strings.TrimPrefix(parts[3], "b/")
-			}
-		} else if strings.HasPrefix(line, "rename from") {
-			file.OldPath = strings.TrimPrefix(line, "rename from ")
-			file.Status = StatusRenamed
-		} else if strings.HasPrefix(line, "new file") {
-			file.Status = StatusAdded
-		} else if strings.HasPrefix(line, "deleted file") {
-			file.Status = StatusDeleted
-		} else if strings.HasPrefix(line, "Binary files") {
-			file.IsBinary = true
-			return file, nil
-		} else if strings.HasPrefix(line, "--- ") {
-			// Start of actual diff content
-			if file.Status == 0 && !strings.HasPrefix(line, "--- /dev/null") {
-				file.Status = StatusModified
-			}
-		} else if strings.HasPrefix(line, "+++ ") {
-			newPath := strings.TrimPrefix(line, "+++ ")
-			newPath = strings.TrimPrefix(newPath, "b/")
-			if newPath != "/dev/null" {
-				file.Path = newPath
-			}
-		} else if strings.HasPrefix(line, "@@") {
-			// Parse hunks from here
-			hunkContent := strings.Join(lines[i:], "\n")
-			hunks, err := parseHunks(hunkContent)
-			if err == nil {
-				file.Hunks = hunks
-				for _, h := range hunks {
-					for _, l := range h.Lines {
-						switch l.Type {
-						case LineAddition:
-							file.Additions++
-						case LineDeletion:
-							file.Deletions++
-						}
-					}
+			if j < len(lines) && strings.HasPrefix(lines[j], "Binary files") {
+				// Extract path from diff --git header.
+				parts := strings.Fields(line)
+				path := ""
+				if len(parts) >= 4 {
+					path = strings.TrimPrefix(parts[3], "b/")
 				}
-			}
-			break
-		}
-	}
-
-	return file, nil
-}
-
-func parseHunks(content string) ([]Hunk, error) {
-	lines := strings.Split(content, "\n")
-	var hunks []Hunk
-	var currentHunk *Hunk
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "@@") {
-			if currentHunk != nil {
-				hunks = append(hunks, *currentHunk)
-			}
-			hunk, err := parseHunkHeader(line)
-			if err != nil {
+				*binaryFiles = append(*binaryFiles, DiffFile{
+					Path:     path,
+					IsBinary: true,
+				})
+				i = j // skip past the "Binary files" line
 				continue
 			}
-			currentHunk = hunk
-			continue
 		}
+		cleaned.WriteString(line)
+		cleaned.WriteString("\n")
+	}
+	return cleaned.String()
+}
 
-		if currentHunk == nil {
-			continue
-		}
+// convertFileDiff converts a go-diff FileDiff to our DiffFile type.
+func convertFileDiff(fd *godiff.FileDiff) DiffFile {
+	file := DiffFile{}
 
-		dl := parseDiffLine(line, currentHunk)
-		if dl != nil {
-			currentHunk.Lines = append(currentHunk.Lines, *dl)
+	origName := strings.TrimPrefix(fd.OrigName, "a/")
+	newName := strings.TrimPrefix(fd.NewName, "b/")
+
+	// Determine status and paths from extended headers and file names.
+	for _, ext := range fd.Extended {
+		switch {
+		case strings.HasPrefix(ext, "rename from "):
+			file.OldPath = strings.TrimPrefix(ext, "rename from ")
+			file.Status = StatusRenamed
+		case strings.HasPrefix(ext, "new file"):
+			file.Status = StatusAdded
+		case strings.HasPrefix(ext, "deleted file"):
+			file.Status = StatusDeleted
+		case strings.Contains(ext, "Binary"):
+			file.IsBinary = true
 		}
 	}
 
-	if currentHunk != nil {
-		hunks = append(hunks, *currentHunk)
+	// Set path from new name (or orig for deleted files).
+	if newName != "" && newName != "/dev/null" {
+		file.Path = newName
+	} else if origName != "" && origName != "/dev/null" {
+		file.Path = origName
 	}
 
+	if file.Status == 0 && !file.IsBinary {
+		file.Status = StatusModified
+	}
+
+	if file.IsBinary {
+		return file
+	}
+
+	// Convert hunks.
+	for _, h := range fd.Hunks {
+		hunk := convertHunk(h)
+		for _, l := range hunk.Lines {
+			switch l.Type {
+			case LineAddition:
+				file.Additions++
+			case LineDeletion:
+				file.Deletions++
+			}
+		}
+		file.Hunks = append(file.Hunks, hunk)
+	}
+
+	return file
+}
+
+// convertHunk converts a go-diff Hunk to our Hunk type.
+func convertHunk(h *godiff.Hunk) Hunk {
+	hunk := Hunk{
+		OldStart: int(h.OrigStartLine),
+		OldLines: int(h.OrigLines),
+		NewStart: int(h.NewStartLine),
+		NewLines: int(h.NewLines),
+		Header:   h.Section,
+	}
+
+	oldNum := int(h.OrigStartLine)
+	newNum := int(h.NewStartLine)
+
+	lines := bytes.Split(h.Body, []byte("\n"))
+	// The trailing newline from Body produces an empty final element; drop it.
+	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
+		lines = lines[:len(lines)-1]
+	}
+	for _, line := range lines {
+		if len(line) == 0 {
+			// Empty context line (missing space prefix).
+			hunk.Lines = append(hunk.Lines, DiffLine{
+				Type:   LineContext,
+				OldNum: oldNum,
+				NewNum: newNum,
+			})
+			oldNum++
+			newNum++
+			continue
+		}
+
+		switch line[0] {
+		case '+':
+			hunk.Lines = append(hunk.Lines, DiffLine{
+				Type:    LineAddition,
+				Content: string(line[1:]),
+				NewNum:  newNum,
+			})
+			newNum++
+		case '-':
+			hunk.Lines = append(hunk.Lines, DiffLine{
+				Type:    LineDeletion,
+				Content: string(line[1:]),
+				OldNum:  oldNum,
+			})
+			oldNum++
+		case '\\':
+			// "\ No newline at end of file" — skip
+		default:
+			// Context line (prefixed with space).
+			content := string(line)
+			if len(line) > 0 && line[0] == ' ' {
+				content = string(line[1:])
+			}
+			hunk.Lines = append(hunk.Lines, DiffLine{
+				Type:    LineContext,
+				Content: content,
+				OldNum:  oldNum,
+				NewNum:  newNum,
+			})
+			oldNum++
+			newNum++
+		}
+	}
+
+	return hunk
+}
+
+// parseHunks parses hunk content (without file headers) into our Hunk type.
+func parseHunks(content []byte) ([]Hunk, error) {
+	parsed, err := godiff.ParseHunks(content)
+	if err != nil {
+		return nil, err
+	}
+
+	hunks := make([]Hunk, 0, len(parsed))
+	for _, h := range parsed {
+		hunks = append(hunks, convertHunk(h))
+	}
 	return hunks, nil
-}
-
-func parseHunkHeader(line string) (*Hunk, error) {
-	// Format: @@ -oldStart,oldLines +newStart,newLines @@ optional header
-	hunk := &Hunk{Header: line}
-
-	// Find the range info between @@ markers
-	parts := strings.SplitN(line, "@@", 3)
-	if len(parts) < 2 {
-		return nil, fmt.Errorf("invalid hunk header: %s", line)
-	}
-
-	rangePart := strings.TrimSpace(parts[1])
-	ranges := strings.Fields(rangePart)
-
-	for _, r := range ranges {
-		if strings.HasPrefix(r, "-") {
-			nums := strings.SplitN(strings.TrimPrefix(r, "-"), ",", 2)
-			hunk.OldStart, _ = strconv.Atoi(nums[0])
-			if len(nums) > 1 {
-				hunk.OldLines, _ = strconv.Atoi(nums[1])
-			} else {
-				hunk.OldLines = 1
-			}
-		} else if strings.HasPrefix(r, "+") {
-			nums := strings.SplitN(strings.TrimPrefix(r, "+"), ",", 2)
-			hunk.NewStart, _ = strconv.Atoi(nums[0])
-			if len(nums) > 1 {
-				hunk.NewLines, _ = strconv.Atoi(nums[1])
-			} else {
-				hunk.NewLines = 1
-			}
-		}
-	}
-
-	if len(parts) >= 3 {
-		hunk.Header = strings.TrimSpace(parts[2])
-	}
-
-	return hunk, nil
-}
-
-func parseDiffLine(line string, hunk *Hunk) *DiffLine {
-	if len(line) == 0 {
-		// Empty context line
-		dl := &DiffLine{Type: LineContext, Content: ""}
-		dl.OldNum = nextOldLine(hunk)
-		dl.NewNum = nextNewLine(hunk)
-		return dl
-	}
-
-	switch line[0] {
-	case '+':
-		dl := &DiffLine{
-			Type:    LineAddition,
-			Content: line[1:],
-			NewNum:  nextNewLine(hunk),
-		}
-		return dl
-	case '-':
-		dl := &DiffLine{
-			Type:    LineDeletion,
-			Content: line[1:],
-			OldNum:  nextOldLine(hunk),
-		}
-		return dl
-	case '\\':
-		// "\ No newline at end of file"
-		return nil
-	default:
-		// Context line (starts with space)
-		content := line
-		if len(line) > 0 && line[0] == ' ' {
-			content = line[1:]
-		}
-		dl := &DiffLine{
-			Type:    LineContext,
-			Content: content,
-			OldNum:  nextOldLine(hunk),
-			NewNum:  nextNewLine(hunk),
-		}
-		return dl
-	}
-}
-
-func nextOldLine(hunk *Hunk) int {
-	num := hunk.OldStart
-	for _, l := range hunk.Lines {
-		if l.Type != LineAddition {
-			num = l.OldNum + 1
-		}
-	}
-	if len(hunk.Lines) == 0 {
-		return hunk.OldStart
-	}
-	return num
-}
-
-func nextNewLine(hunk *Hunk) int {
-	num := hunk.NewStart
-	for _, l := range hunk.Lines {
-		if l.Type != LineDeletion {
-			num = l.NewNum + 1
-		}
-	}
-	if len(hunk.Lines) == 0 {
-		return hunk.NewStart
-	}
-	return num
 }
