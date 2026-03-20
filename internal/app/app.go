@@ -265,7 +265,8 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.review = nil
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		return m, nil
+		m.prList = prlist.New(m.svc, m.filters, m.columns)
+		return m, tea.Batch(m.prList.Init(), m.windowSizeCmd())
 	case prBodyLoadedMsg:
 		if msg.err == nil && msg.pr != nil {
 			m.selectedPR = msg.pr
