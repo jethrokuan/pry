@@ -448,6 +448,9 @@ func (m *Model) navigateFile(forward, unviewedOnly bool) tea.Cmd {
 	// In diff view
 	start := m.nav.fileCursor
 	idx := cyclicSearch(start, n, forward, func(i int) bool {
+		if !m.filter.isIncluded(i) {
+			return false
+		}
 		return !unviewedOnly || !m.review.ViewedFiles[m.files[i].Path]
 	})
 	if idx < 0 {
