@@ -3,7 +3,7 @@ package app
 import (
 	"context"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jkuan/pr-review/internal/config"
 	gitpkg "github.com/jkuan/pr-review/internal/git"
@@ -122,7 +122,6 @@ func (m Model) Init() tea.Cmd {
 		prNumber := m.initialPR
 		return tea.Batch(
 			m.diffView.Init(),
-			tea.WindowSize(),
 			m.loadUserIdentity(),
 			func() tea.Msg {
 				full, err := m.svc.GetPR(context.Background(), prNumber)
@@ -134,6 +133,18 @@ func (m Model) Init() tea.Cmd {
 		m.prList.Init(),
 		m.loadUserIdentity(),
 	)
+}
+
+// windowSizeMsg returns a command that re-sends the current window dimensions.
+// This ensures sub-models get sized correctly on screen transitions.
+func (m Model) windowSizeCmd() tea.Cmd {
+	w, h := m.width, m.height
+	if w == 0 {
+		return nil
+	}
+	return func() tea.Msg {
+		return tea.WindowSizeMsg{Width: w, Height: h}
+	}
 }
 
 // Update handles all messages, routing to the active screen.
@@ -191,7 +202,7 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = ScreenDiffView
 		return m, tea.Batch(
 			m.diffView.Init(),
-			tea.WindowSize(),
+			m.windowSizeCmd(),
 			func() tea.Msg {
 				full, err := m.svc.GetPR(context.Background(), pr.Number)
 				return prBodyLoadedMsg{pr: full, err: err}
@@ -220,10 +231,7 @@ func (m Model) updatePRDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.review = review.NewPendingReview(msg.PR.Number, msg.PR.NodeID, msg.PR.HeadSHA)
 		m.diffView = diffview.New(m.svc, msg.PR, m.review, m.diffviewOpts()...)
 		m.screen = ScreenDiffView
-		return m, tea.Batch(
-			m.diffView.Init(),
-			tea.WindowSize(),
-		)
+		return m, tea.Batch(m.diffView.Init(), m.windowSizeCmd())
 	case prdetail.CheckoutMsg:
 		prNumber := msg.PR.Number
 		return m, func() tea.Msg {
@@ -239,7 +247,7 @@ func (m Model) updatePRDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case prdetail.BackMsg:
 		m.screen = ScreenPRList
-		return m, tea.WindowSize()
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -252,15 +260,12 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case diffview.SubmitReviewMsg:
 		m.submit = submit.New(m.svc, m.review)
 		m.screen = ScreenSubmit
-		return m, tea.Batch(
-			m.submit.Init(),
-			tea.WindowSize(),
-		)
+		return m, tea.Batch(m.submit.Init(), m.windowSizeCmd())
 	case diffview.BackMsg:
 		m.review = nil
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		return m, tea.WindowSize()
+		return m, nil
 	case prBodyLoadedMsg:
 		if msg.err == nil && msg.pr != nil {
 			m.selectedPR = msg.pr
@@ -294,13 +299,10 @@ func (m Model) updateSubmit(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selectedPR = nil
 		m.screen = ScreenPRList
 		m.prList = prlist.New(m.svc, m.filters, m.columns)
-		return m, tea.Batch(
-			m.prList.Init(),
-			tea.WindowSize(),
-		)
+		return m, tea.Batch(m.prList.Init(), m.windowSizeCmd())
 	case submit.CancelledMsg:
 		m.screen = ScreenDiffView
-		return m, tea.WindowSize()
+		return m, m.windowSizeCmd()
 	}
 
 	var cmd tea.Cmd
@@ -309,16 +311,20 @@ func (m Model) updateSubmit(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the active screen.
-func (m Model) View() string {
+func (m Model) View() tea.View {
+	var content string
 	switch m.screen {
 	case ScreenPRList:
-		return m.prList.View()
+		content = m.prList.View()
 	case ScreenPRDetail:
-		return m.prDetail.View()
+		content = m.prDetail.View()
 	case ScreenDiffView:
-		return m.diffView.View()
+		content = m.diffView.View()
 	case ScreenSubmit:
-		return m.submit.View()
+		content = m.submit.View()
 	}
-	return ""
+	v := tea.NewView(content)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
 }

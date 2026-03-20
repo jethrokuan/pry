@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jkuan/pr-review/internal/diff"
 	"github.com/jkuan/pr-review/internal/review"
@@ -582,8 +582,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 
-	case tea.MouseMsg:
-		// Forward mouse events to active popup viewports for scroll support
+	case tea.MouseWheelMsg:
+		// Forward mouse wheel events to active popup viewports for scroll support
 		if m.prInfoActive {
 			var cmd tea.Cmd
 			m.prInfoViewport, cmd = m.prInfoViewport.Update(msg)
@@ -596,7 +596,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.loading {
 			return m, nil
 		}
@@ -620,10 +620,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m *Model) syncViewportToCursor() {
 	rendered := m.renderedLineForCursor(m.nav.diffCursor)
-	if rendered < m.nav.diffViewport.YOffset {
+	if rendered < m.nav.diffViewport.YOffset() {
 		m.nav.diffViewport.SetYOffset(rendered)
-	} else if rendered >= m.nav.diffViewport.YOffset+m.nav.diffViewport.Height {
-		m.nav.diffViewport.SetYOffset(rendered - m.nav.diffViewport.Height + 1)
+	} else if rendered >= m.nav.diffViewport.YOffset()+m.nav.diffViewport.Height() {
+		m.nav.diffViewport.SetYOffset(rendered - m.nav.diffViewport.Height() + 1)
 	}
 	m.updateDiffContent()
 }
@@ -637,7 +637,7 @@ func (m *Model) syncViewportToCursorWithComments() {
 
 	// Total height of the diff line (1) + its comment block.
 	totalHeight := 1 + commentHeight
-	vpHeight := m.nav.diffViewport.Height
+	vpHeight := m.nav.diffViewport.Height()
 
 	if totalHeight >= vpHeight {
 		// Block is taller than viewport — keep cursor line at top.
@@ -715,7 +715,7 @@ func (m *Model) commentBlockHeight(cursor int) int {
 // maxCommentBlockHeight returns the maximum rendered lines for a comment block.
 // Comment blocks taller than this are capped and become scrollable.
 func (m *Model) maxCommentBlockHeight() int {
-	h := m.nav.diffViewport.Height / 3
+	h := m.nav.diffViewport.Height() / 3
 	if h < 5 {
 		h = 5
 	}
@@ -738,17 +738,17 @@ func (m *Model) commentRenderedLines(path string, lineNum int, side string) int 
 	}
 
 	// Expanded: each comment = header(1) + rendered body lines + separator(1)
-	contentWidth := m.nav.diffViewport.Width - 8
+	contentWidth := m.nav.diffViewport.Width() - 8
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
 	lines := 0
 	for _, c := range existing {
-		rendered := m.renderMarkdown(c.Body, contentWidth-2, "")
+		rendered := m.renderMarkdown(c.Body, contentWidth-2)
 		lines += 1 + len(strings.Split(rendered, "\n")) + 1
 	}
 	for _, c := range localPending {
-		rendered := m.renderMarkdown(c.Body, contentWidth-2, "")
+		rendered := m.renderMarkdown(c.Body, contentWidth-2)
 		lines += 1 + len(strings.Split(rendered, "\n")) + 1
 	}
 
@@ -793,8 +793,8 @@ func (m *Model) updateViewports() {
 		contentHeight = 1
 	}
 
-	m.nav.treeViewport = viewport.New(treeWidth, contentHeight)
-	m.nav.diffViewport = viewport.New(diffWidth, contentHeight)
+	m.nav.treeViewport = viewport.New(viewport.WithWidth(treeWidth), viewport.WithHeight(contentHeight))
+	m.nav.diffViewport = viewport.New(viewport.WithWidth(diffWidth), viewport.WithHeight(contentHeight))
 
 	if len(m.files) > 0 {
 		m.nav.treeViewport.SetContent(m.renderFileTree())
@@ -1141,7 +1141,7 @@ func (m Model) overlayHelpPopup(base string) string {
 func (m Model) renderHelpPopup() string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
-	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(styles.Current.DiffContext))
+	descStyle := lipgloss.NewStyle().Foreground(styles.DiffContext)
 	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Warning).MarginTop(1)
 
 	type binding struct {
@@ -1235,7 +1235,7 @@ func (m Model) renderHelpPopup() string {
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Primary).
-		Background(lipgloss.Color(styles.Current.BgOverlay)).
+		Background(styles.BgOverlay).
 		Padding(0, 1).
 		Width(maxWidth + 2)
 

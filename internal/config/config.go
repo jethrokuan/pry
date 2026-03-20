@@ -8,7 +8,6 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/jkuan/pr-review/internal/review"
-	"github.com/jkuan/pr-review/internal/ui/styles"
 )
 
 // FilterConfig defines a PR list filter in the config file.
@@ -29,8 +28,6 @@ type Config struct {
 	Editor   string         `toml:"editor"`
 	UseDelta bool           `toml:"use_delta"`
 	PageSize int            `toml:"page_size"`
-	Theme    string         `toml:"theme"`
-	Colors   styles.Theme   `toml:"colors"`
 	Filters  []FilterConfig `toml:"filters"`
 	Columns  []string       `toml:"columns"`
 	FileTree FileTreeConfig `toml:"file_tree"`
@@ -55,7 +52,6 @@ func Default() Config {
 		Editor:   "",
 		UseDelta: true,
 		PageSize: 50,
-		Theme:    "default",
 	}
 }
 
@@ -117,13 +113,3 @@ func (c Config) PRFilters() []review.PRFilter {
 	return result
 }
 
-// ResolveTheme returns a Theme based on the config: picks a built-in theme
-// and overlays any per-color overrides from [colors].
-func ResolveTheme(cfg Config) styles.Theme {
-	themeFn, ok := styles.BuiltinThemes[cfg.Theme]
-	if !ok {
-		themeFn = styles.DefaultTheme
-	}
-	theme := themeFn()
-	return styles.OverlayColors(theme, cfg.Colors)
-}

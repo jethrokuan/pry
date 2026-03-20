@@ -5,11 +5,11 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jkuan/pr-review/internal/review"
 	"github.com/jkuan/pr-review/internal/ui/mdutil"
@@ -105,17 +105,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		footerHeight := 3
 
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width, msg.Height-headerHeight-footerHeight)
+			m.viewport = viewport.New(viewport.WithWidth(msg.Width), viewport.WithHeight(msg.Height-headerHeight-footerHeight))
 			if m.bodyLoaded {
 				m.viewport.SetContent(m.renderBody())
 			}
 			m.ready = true
 		} else {
-			m.viewport.Width = msg.Width
-			m.viewport.Height = msg.Height - headerHeight - footerHeight
+			m.viewport.SetWidth(msg.Width)
+			m.viewport.SetHeight(msg.Height - headerHeight - footerHeight)
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, keys.Back):
 			return m, func() tea.Msg { return BackMsg{} }
@@ -140,7 +140,7 @@ func (m Model) renderBody() string {
 		return "No description provided."
 	}
 	renderer, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		glamour.WithStylePath("dark"),
 		glamour.WithWordWrap(m.width-4),
 	)
 	if err != nil {

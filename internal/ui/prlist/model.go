@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	ltable "github.com/charmbracelet/lipgloss/table"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	ltable "charm.land/lipgloss/v2/table"
 
 	"github.com/jkuan/pr-review/internal/review"
 	"github.com/jkuan/pr-review/internal/ui/styles"
@@ -163,7 +163,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Filter editing mode: forward keys to the text input
 		if m.editing {
 			switch msg.String() {
@@ -243,7 +243,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.customFilter = nil // clear custom filter when entering edit mode
 			m.filterInput.SetValue(m.activeFilter().Qualifier)
 			m.filterInput.Focus()
-			return m, m.filterInput.Cursor.BlinkCmd()
+			return m, nil
 		case key.Matches(msg, keys.Refresh):
 			m.loading = true
 			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
@@ -532,8 +532,8 @@ func (m Model) View() string {
 				pr := visiblePRs[row]
 				if cols[col].style != nil {
 					colStyle := cols[col].style(pr, rctx)
-					fg, _ := colStyle.GetForeground().(lipgloss.Color)
-					if fg != "" {
+					fg := colStyle.GetForeground()
+					if fg != nil {
 						s = s.Foreground(fg)
 					}
 					if colStyle.GetItalic() {

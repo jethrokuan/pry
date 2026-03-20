@@ -3,7 +3,7 @@ package diffview
 import (
 	"strconv"
 
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/viewport"
 
 	"github.com/jkuan/pr-review/internal/diff"
 )
@@ -122,9 +122,9 @@ func (n *DiffNav) syncTreeViewportToCursor() {
 	// Account for the 2-line header (title + blank line)
 	headerLines := 2
 	visibleRow := n.treeCursor + headerLines
-	if visibleRow < n.treeViewport.YOffset {
+	if visibleRow < n.treeViewport.YOffset() {
 		n.treeViewport.SetYOffset(visibleRow)
-	} else if visibleRow >= n.treeViewport.YOffset+n.treeViewport.Height {
-		n.treeViewport.SetYOffset(visibleRow - n.treeViewport.Height + 1)
+	} else if visibleRow >= n.treeViewport.YOffset()+n.treeViewport.Height() {
+		n.treeViewport.SetYOffset(visibleRow - n.treeViewport.Height() + 1)
 	}
 }

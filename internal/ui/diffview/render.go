@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/glamour"
-	glamourstyles "github.com/charmbracelet/glamour/styles"
-	"github.com/charmbracelet/lipgloss"
+	"image/color"
+
+	"charm.land/bubbles/v2/viewport"
+	"charm.land/glamour/v2"
+	"charm.land/glamour/v2/ansi"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jkuan/pr-review/internal/diff"
 	"github.com/jkuan/pr-review/internal/review"
@@ -17,23 +19,21 @@ import (
 
 // mdCacheKey is the cache key for rendered markdown output.
 type mdCacheKey struct {
-	body    string
-	width   int
-	bgColor string
+	body  string
+	width int
 }
 
 // renderMarkdown renders a markdown string using Glamour with caching.
 // Falls back to the raw text on any error. The result is trimmed of
-// leading/trailing whitespace. If bgColor is non-empty, it is set as
-// the document background color in the Glamour style.
-func (m *Model) renderMarkdown(body string, width int, bgColor string) string {
+// leading/trailing whitespace.
+func (m *Model) renderMarkdown(body string, width int, bgColor ...color.Color) string {
 	if width < 10 {
 		width = 10
 	}
 
 	body = mdutil.ReplaceImages(body)
 
-	key := mdCacheKey{body: body, width: width, bgColor: bgColor}
+	key := mdCacheKey{body: body, width: width}
 	if cached, ok := m.mdCache[key]; ok {
 		return cached
 	}
@@ -42,17 +42,15 @@ func (m *Model) renderMarkdown(body string, width int, bgColor string) string {
 		glamour.WithWordWrap(width),
 	}
 
-	if bgColor != "" {
-		sc := glamourstyles.DarkStyleConfig
-		sc.Document.BackgroundColor = stringPtr(bgColor)
-		// Propagate background to text and paragraph so resets don't clear it
-		sc.Document.StylePrimitive.BackgroundColor = stringPtr(bgColor)
-		sc.Text.BackgroundColor = stringPtr(bgColor)
-		sc.Paragraph.StylePrimitive.BackgroundColor = stringPtr(bgColor)
-		opts = append(opts, glamour.WithStyles(sc))
-	} else {
-		opts = append(opts, glamour.WithAutoStyle())
+	sc := mdStyleConfig()
+	if len(bgColor) > 0 && bgColor[0] != nil {
+		hexStr := colorToHex(bgColor[0])
+		sc.Document.BackgroundColor = stringPtr(hexStr)
+		sc.Document.StylePrimitive.BackgroundColor = stringPtr(hexStr)
+		sc.Text.BackgroundColor = stringPtr(hexStr)
+		sc.Paragraph.StylePrimitive.BackgroundColor = stringPtr(hexStr)
 	}
+	opts = append(opts, glamour.WithStyles(sc))
 
 	renderer, err := glamour.NewTermRenderer(opts...)
 	if err != nil {
@@ -68,11 +66,126 @@ func (m *Model) renderMarkdown(body string, width int, bgColor string) string {
 }
 
 func stringPtr(s string) *string { return &s }
+func boolPtr(b bool) *bool    { return &b }
+func uintPtr(u uint) *uint    { return &u }
 
-// glamourBgForComment returns the hex background color string for use with
-// Glamour rendering, derived from a lipgloss.Color.
-func glamourBgForComment(bg lipgloss.Color) string {
-	return string(bg)
+// colorToHex converts a color.Color to a hex string (e.g. "#ff0000").
+func colorToHex(c color.Color) string {
+	r, g, b, _ := c.RGBA()
+	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+}
+
+// mdStyleConfig returns a glamour style that uses ANSI 0-15 colors.
+// No 256-color or hex backgrounds — everything adapts to the terminal theme.
+func mdStyleConfig() ansi.StyleConfig {
+	return ansi.StyleConfig{
+		Document: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				BlockPrefix: "\n",
+				BlockSuffix: "\n",
+			},
+			Margin: uintPtr(0),
+		},
+		Heading: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				BlockSuffix: "\n",
+				Color:       stringPtr("4"), // blue
+				Bold:        boolPtr(true),
+			},
+		},
+		H1: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Prefix: "# ",
+				Bold:   boolPtr(true),
+			},
+		},
+		H2: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Prefix: "## ",
+			},
+		},
+		H3: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Prefix: "### ",
+			},
+		},
+		H4: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Prefix: "#### ",
+			},
+		},
+		H5: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Prefix: "##### ",
+			},
+		},
+		H6: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Prefix: "###### ",
+			},
+		},
+		Strikethrough: ansi.StylePrimitive{
+			CrossedOut: boolPtr(true),
+		},
+		Emph: ansi.StylePrimitive{
+			Italic: boolPtr(true),
+		},
+		Strong: ansi.StylePrimitive{
+			Bold: boolPtr(true),
+		},
+		HorizontalRule: ansi.StylePrimitive{
+			Color:  stringPtr("8"), // bright black
+			Format: "\n--------\n",
+		},
+		Item: ansi.StylePrimitive{
+			BlockPrefix: "• ",
+		},
+		Enumeration: ansi.StylePrimitive{
+			BlockPrefix: ". ",
+		},
+		Task: ansi.StyleTask{
+			Ticked:   "[✓] ",
+			Unticked: "[ ] ",
+		},
+		Link: ansi.StylePrimitive{
+			Color:     stringPtr("6"), // cyan
+			Underline: boolPtr(true),
+		},
+		LinkText: ansi.StylePrimitive{
+			Color: stringPtr("4"), // blue
+			Bold:  boolPtr(true),
+		},
+		ImageText: ansi.StylePrimitive{
+			Color:  stringPtr("8"), // bright black
+			Format: "Image: {{.text}} →",
+		},
+		Code: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color:           stringPtr("3"), // yellow
+				BackgroundColor: stringPtr(""),  // explicitly clear background
+			},
+		},
+		CodeBlock: ansi.StyleCodeBlock{
+			StyleBlock: ansi.StyleBlock{
+				StylePrimitive: ansi.StylePrimitive{
+					Color: stringPtr("8"), // bright black (muted)
+				},
+				Margin: uintPtr(2),
+			},
+		},
+		BlockQuote: ansi.StyleBlock{
+			StylePrimitive: ansi.StylePrimitive{
+				Color: stringPtr("8"), // bright black (muted)
+			},
+			Indent:      uintPtr(1),
+			IndentToken: stringPtr("│ "),
+		},
+		Table: ansi.StyleTable{
+			CenterSeparator: stringPtr("┼"),
+			ColumnSeparator: stringPtr("│"),
+			RowSeparator:    stringPtr("─"),
+		},
+	}
 }
 
 
@@ -88,9 +201,9 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 	commentMarker := lipgloss.NewStyle().Foreground(styles.Warning).Render("▎")
 	noMarker := " "
 	searchQuery := strings.ToLower(m.search.query)
-	cursorBg := lipgloss.Color(styles.Current.BgCursor)
-	searchBg := lipgloss.Color(styles.Current.BgSearch)
-	activeHunkBg := lipgloss.Color(styles.Current.BgActiveHunk)
+	cursorBg := styles.BgCursor
+	searchBg := styles.BgSearch
+	activeHunkBg := styles.BgActiveHunk
 
 	// Determine which hunk is active (contains the cursor)
 	activeHunkIdx := -1
@@ -110,14 +223,14 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 		if isCollapsed {
 			header += fmt.Sprintf("  ▸ %d lines", len(hunk.Lines))
 		}
-		isActiveHunk := hunkIndex == activeHunkIdx && styles.Current.BgActiveHunk != ""
+		isActiveHunk := hunkIndex == activeHunkIdx && styles.BgActiveHunk != nil
 		hs := hunkStyle
 		if isActiveHunk {
 			hs = hs.Background(activeHunkBg)
 		}
 		renderedHeader := hs.Render(header)
-		if w := lipgloss.Width(renderedHeader); w < m.nav.diffViewport.Width {
-			renderedHeader += hs.Render(strings.Repeat(" ", m.nav.diffViewport.Width-w))
+		if w := lipgloss.Width(renderedHeader); w < m.nav.diffViewport.Width() {
+			renderedHeader += hs.Render(strings.Repeat(" ", m.nav.diffViewport.Width()-w))
 		}
 		b.WriteString(renderedHeader + "\n")
 
@@ -129,8 +242,8 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 				foldBg := lipgloss.NewStyle().Background(cursorBg)
 				foldText := foldBg.Render(summary)
 				w := lipgloss.Width(foldText)
-				if w < m.nav.diffViewport.Width {
-					foldText += foldBg.Render(strings.Repeat(" ", m.nav.diffViewport.Width-w))
+				if w < m.nav.diffViewport.Width() {
+					foldText += foldBg.Render(strings.Repeat(" ", m.nav.diffViewport.Width()-w))
 				}
 				b.WriteString(foldText + "\n")
 			} else {
@@ -151,16 +264,16 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 			highlighted := isCurrent || isVisualSelected
 
 			// Determine line background: cursor > diff-type background > active hunk
-			var bg lipgloss.Color
+			var bg color.Color
 			hasBg := false
 			if highlighted {
 				bg = cursorBg
 				hasBg = true
 			} else if line.Type == diff.LineAddition {
-				bg = lipgloss.Color(styles.Current.BgDiffAdd)
+				bg = styles.BgDiffAdd
 				hasBg = true
 			} else if line.Type == diff.LineDeletion {
-				bg = lipgloss.Color(styles.Current.BgDiffDelete)
+				bg = styles.BgDiffDelete
 				hasBg = true
 			} else if isActiveHunk {
 				bg = activeHunkBg
@@ -241,8 +354,8 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 			// Pad to full viewport width for lines with background
 			if hasBg {
 				visWidth := lipgloss.Width(fullLine)
-				if visWidth < m.nav.diffViewport.Width {
-					fullLine += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", m.nav.diffViewport.Width-visWidth))
+				if visWidth < m.nav.diffViewport.Width() {
+					fullLine += lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", m.nav.diffViewport.Width()-visWidth))
 				}
 			}
 
@@ -295,8 +408,8 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 
 	// Gutter matching diff lines: marker(▎) + line-num-area("     │") + space
 	// Content area gets a subtle background to visually group the comment
-	commentBg := lipgloss.Color(styles.Current.BgSurface)
-	cursorBg := lipgloss.Color(styles.Current.BgCursor)
+	commentBg := styles.BgSurface
+	cursorBg := styles.BgCursor
 	gutterPipe := lipgloss.NewStyle().Foreground(styles.Muted).Render("     │")
 	bar := lipgloss.NewStyle().Foreground(styles.Warning).Render("▎")
 	gutterBase := bar + gutterPipe
@@ -315,7 +428,7 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 		return 0
 	}
 
-	contentWidth := m.nav.diffViewport.Width - 8 // 8 = gutter visual width
+	contentWidth := m.nav.diffViewport.Width() - 8 // 8 = gutter visual width
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
@@ -323,26 +436,20 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 	// Build all comment lines into a buffer for potential capping
 	var allLines []string
 
-	buildComment := func(header, bodyText string, bg lipgloss.Color) {
-		bgS := lipgloss.NewStyle().Background(bg)
-		hdrS := lipgloss.NewStyle().Background(bg)
-
-		padLine := func(content string) string {
-			w := lipgloss.Width(content)
-			if w < contentWidth {
-				content += bgS.Render(strings.Repeat(" ", contentWidth-w))
-			}
-			return content
+	buildComment := func(header, bodyText string, bg color.Color) {
+		borderChar := lipgloss.NewStyle().Foreground(styles.Muted).Render("│")
+		selectedBorder := lipgloss.NewStyle().Foreground(styles.Warning).Render("│")
+		border := borderChar
+		if bg == cursorBg {
+			border = selectedBorder
 		}
 
-		// Header line with background
-		hdr := hdrS.Render(" " + header)
-		allLines = append(allLines, gutterBase+padLine(hdr))
-		// Body lines — render markdown with comment bg baked in
-		rendered := m.renderMarkdown(bodyText, contentWidth-2, glamourBgForComment(bg))
+		// Header line with border
+		allLines = append(allLines, gutterBase+" "+border+" "+header)
+		// Body lines — render markdown, prefix each with border
+		rendered := m.renderMarkdown(bodyText, contentWidth-4)
 		for _, bodyLine := range strings.Split(rendered, "\n") {
-			content := bgS.Render(" ") + bodyLine
-			allLines = append(allLines, gutterBase+padLine(content))
+			allLines = append(allLines, gutterBase+" "+border+" "+bodyLine)
 		}
 		// Blank separator
 		allLines = append(allLines, gutterBase)
@@ -397,13 +504,9 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 		b.WriteString(allLines[i] + "\n")
 	}
 	hidden := len(allLines) - (maxH - 1)
-	truncText := " " +
-		lipgloss.NewStyle().Foreground(styles.Warning).Background(commentBg).Render(fmt.Sprintf("… %d more lines", hidden)) +
-		" " + lipgloss.NewStyle().Foreground(styles.Muted).Background(commentBg).Render("[enter to view all]")
-	w := lipgloss.Width(truncText)
-	if w < contentWidth {
-		truncText += lipgloss.NewStyle().Background(commentBg).Render(strings.Repeat(" ", contentWidth-w))
-	}
+	truncText :=
+		lipgloss.NewStyle().Foreground(styles.Warning).Render(fmt.Sprintf("  … %d more lines", hidden)) +
+		" " + lipgloss.NewStyle().Foreground(styles.Muted).Render("[enter to view all]")
 	truncLine := gutterBase + truncText
 	b.WriteString(truncLine + "\n")
 
@@ -458,7 +561,7 @@ func (m Model) renderCommentPopup() string {
 	title := titleStyle.Render(fmt.Sprintf("  Comments on %s:%d", path, lineNum))
 
 	scrollPct := ""
-	if m.comments.popupViewport.TotalLineCount() > m.comments.popupViewport.Height {
+	if m.comments.popupViewport.TotalLineCount() > m.comments.popupViewport.Height() {
 		pct := int(m.comments.popupViewport.ScrollPercent() * 100)
 		scrollPct = lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf(" (%d%%)", pct))
 	}
@@ -475,7 +578,7 @@ func (m Model) renderCommentPopup() string {
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Primary).
-		Background(lipgloss.Color(styles.Current.BgOverlay)).
+		Background(styles.BgOverlay).
 		Padding(0, 1).
 		Width(popupW)
 
@@ -499,7 +602,7 @@ func (m *Model) openPRInfoPopup() {
 
 	content := m.buildPRInfoContent(contentW)
 
-	vp := viewport.New(contentW, vpH)
+	vp := viewport.New(viewport.WithWidth(contentW), viewport.WithHeight(vpH))
 	vp.SetContent(content)
 
 	m.prInfoActive = true
@@ -547,7 +650,7 @@ func (m *Model) buildPRInfoContent(width int) string {
 	if m.pr.Body == "" {
 		b.WriteString(labelStyle.Render("No description provided."))
 	} else {
-		rendered := m.renderMarkdown(m.pr.Body, width, styles.Current.BgOverlay)
+		rendered := m.renderMarkdown(m.pr.Body, width, styles.BgOverlay)
 		b.WriteString(rendered)
 	}
 
@@ -571,7 +674,7 @@ func (m *Model) buildPRInfoContent(width int) string {
 				b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", c.Path, c.Line)))
 			}
 			b.WriteString("\n")
-			rendered := m.renderMarkdown(c.Body, width, styles.Current.BgOverlay)
+			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
 			b.WriteString(bodyStyle.Render(rendered) + "\n")
 			b.WriteString(innerSep + "\n\n")
 		}
@@ -582,7 +685,7 @@ func (m *Model) buildPRInfoContent(width int) string {
 				b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", c.Path, c.Line)))
 			}
 			b.WriteString("\n")
-			rendered := m.renderMarkdown(c.Body, width, styles.Current.BgOverlay)
+			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
 			b.WriteString(bodyStyle.Render(rendered) + "\n")
 			b.WriteString(innerSep + "\n\n")
 		}
@@ -597,7 +700,7 @@ func (m Model) renderPRInfoPopup() string {
 	title := titleStyle.Render(fmt.Sprintf("  PR #%d: %s", m.pr.Number, m.pr.Title))
 
 	scrollPct := ""
-	if m.prInfoViewport.TotalLineCount() > m.prInfoViewport.Height {
+	if m.prInfoViewport.TotalLineCount() > m.prInfoViewport.Height() {
 		pct := int(m.prInfoViewport.ScrollPercent() * 100)
 		scrollPct = lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf(" (%d%%)", pct))
 	}
@@ -614,7 +717,7 @@ func (m Model) renderPRInfoPopup() string {
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Primary).
-		Background(lipgloss.Color(styles.Current.BgOverlay)).
+		Background(styles.BgOverlay).
 		Padding(0, 1).
 		Width(popupW)
 
@@ -683,14 +786,14 @@ func (m Model) overlayGeneric(base, popup string) string {
 
 // highlightMatches renders text with the base style, but applies a highlight
 // background to substrings matching the query (case-insensitive).
-func highlightMatches(text, query string, base lipgloss.Style, hlBg lipgloss.Color) string {
+func highlightMatches(text, query string, base lipgloss.Style, hlBg color.Color) string {
 	if query == "" {
 		return base.Render(text)
 	}
 	lower := strings.ToLower(text)
 	qLen := len(query)
 	var b strings.Builder
-	hlStyle := base.Background(hlBg).Foreground(lipgloss.Color(styles.Current.LabelFg)).Bold(true)
+	hlStyle := base.Background(hlBg).Foreground(styles.LabelFg).Bold(true)
 	pos := 0
 	for {
 		idx := strings.Index(lower[pos:], query)

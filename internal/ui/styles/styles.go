@@ -1,17 +1,6 @@
 package styles
 
-import "github.com/charmbracelet/lipgloss"
-
-// Color aliases — set by Apply().
-var (
-	Primary   lipgloss.Color
-	Secondary lipgloss.Color
-	Success   lipgloss.Color
-	Warning   lipgloss.Color
-	Danger    lipgloss.Color
-	Muted     lipgloss.Color
-	Cyan      lipgloss.Color
-)
+import "charm.land/lipgloss/v2"
 
 // Composed styles — set by Apply().
 var (

@@ -7,10 +7,10 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jkuan/pr-review/internal/review"
 	"github.com/jkuan/pr-review/internal/ui/styles"
@@ -154,7 +154,7 @@ func (m *Model) openCommentPopup() {
 
 	content := m.buildCommentPopupContent(contentW)
 
-	vp := viewport.New(contentW, vpH)
+	vp := viewport.New(viewport.WithWidth(contentW), viewport.WithHeight(vpH))
 	vp.SetContent(content)
 
 	m.comments.popupActive = true
@@ -187,7 +187,7 @@ func (m *Model) buildCommentPopupContent(width int) string {
 				b.WriteString(" " + draftStyle.Render("(draft)"))
 			}
 			b.WriteString("\n\n")
-			rendered := m.renderMarkdown(c.Body, width, styles.Current.BgOverlay)
+			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
 			b.WriteString(bodyStyle.Render(rendered) + "\n\n")
 			b.WriteString(separator + "\n\n")
 		}
@@ -204,7 +204,7 @@ func (m *Model) buildCommentPopupContent(width int) string {
 				syncLabel = " ✗"
 			}
 			b.WriteString("📝 " + pendingStyle.Render("(pending)") + syncLabel + "\n\n")
-			rendered := m.renderMarkdown(c.Body, width, styles.Current.BgOverlay)
+			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
 			b.WriteString(bodyStyle.Render(rendered) + "\n\n")
 			b.WriteString(separator + "\n\n")
 		}

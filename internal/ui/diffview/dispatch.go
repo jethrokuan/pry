@@ -1,8 +1,8 @@
 package diffview
 
 import (
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 )
 
 // inputMode represents the current input mode of the diffview.
@@ -47,7 +47,7 @@ func (m Model) activeMode() inputMode {
 }
 
 // handleKey dispatches a key event to the appropriate mode handler.
-func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	// Clear flash message on any keypress
 	m.flashMsg = ""
 
@@ -79,7 +79,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 // handleCommentSelectKey handles keys when a comment is selected in the diff.
 // Returns handled=true if the key was consumed, false to fall through to normal mode.
-func (m Model) handleCommentSelectKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	switch {
 	case key.Matches(msg, keys.Up):
 		if m.comments.cursor > 0 {
@@ -132,7 +132,7 @@ func (m Model) handleCommentSelectKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 
 // handleNormalKey handles keys in normal mode (no active input/overlay).
 // It processes shared bindings first, then delegates to focus-specific handlers.
-func (m Model) handleNormalKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	// Reset confirmQuit on any non-quit key
 	if !key.Matches(msg, keys.Quit) {
 		m.confirmQuit = false

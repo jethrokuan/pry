@@ -5,13 +5,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 )
 
 // --- Tree key handling ---
 
-func (m Model) handleTreeKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleTreeKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Up):
 		if m.nav.treeCursor > 0 {
@@ -308,7 +308,7 @@ func (m *Model) moveToPrevFile() tea.Cmd {
 	return nil
 }
 
-func (m Model) handleDiffKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Up):
 		if m.nav.diffCursor > 0 {
@@ -346,7 +346,7 @@ func (m Model) handleDiffKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.syncViewportToCursor()
 		}
 	case key.Matches(msg, keys.PageUp):
-		m.nav.diffCursor -= m.nav.diffViewport.Height / 2
+		m.nav.diffCursor -= m.nav.diffViewport.Height() / 2
 		if m.nav.diffCursor < 0 {
 			m.nav.diffCursor = 0
 		}
@@ -355,7 +355,7 @@ func (m Model) handleDiffKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		m.syncViewportToCursor()
 	case key.Matches(msg, keys.PageDown):
-		m.nav.diffCursor += m.nav.diffViewport.Height / 2
+		m.nav.diffCursor += m.nav.diffViewport.Height() / 2
 		if m.nav.diffCursor >= len(m.nav.diffLines) {
 			m.nav.diffCursor = len(m.nav.diffLines) - 1
 		}
@@ -721,7 +721,7 @@ func (m *Model) fileHasComments(path string) bool {
 
 // --- Goto line handling ---
 
-func (m Model) handleGotoKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleGotoKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		if m.search.gotoInput != "" {
@@ -762,7 +762,7 @@ func (m *Model) jumpToLine(lineNum int) {
 
 // --- Search handling ---
 
-func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleSearchKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		m.search.query = m.search.input
@@ -785,8 +785,8 @@ func (m Model) handleSearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	default:
-		if len(msg.Runes) > 0 {
-			m.search.input += string(msg.Runes)
+		if msg.Text != "" {
+			m.search.input += msg.Text
 		}
 		return m, nil
 	}
@@ -834,7 +834,7 @@ func (m *Model) jumpToPrevSearchMatch() tea.Cmd {
 
 // --- Narrow regex filter handling ---
 
-func (m Model) handleNarrowRegexKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleNarrowRegexKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		m.filter.setRegex(m.filter.regexInput)
@@ -851,8 +851,8 @@ func (m Model) handleNarrowRegexKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	default:
-		if len(msg.Runes) > 0 {
-			m.filter.regexInput += string(msg.Runes)
+		if msg.Text != "" {
+			m.filter.regexInput += msg.Text
 		}
 		return m, nil
 	}
@@ -909,7 +909,7 @@ func (m *Model) applyFilters() {
 
 // --- File filter handling ---
 
-func (m Model) handleFilterKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleFilterKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		if len(m.search.filterFiles) > 0 && m.search.filterCursor < len(m.search.filterFiles) {
@@ -945,8 +945,8 @@ func (m Model) handleFilterKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		}
 		return m, nil
 	default:
-		if len(msg.Runes) > 0 {
-			m.search.filterInput += string(msg.Runes)
+		if msg.Text != "" {
+			m.search.filterInput += msg.Text
 			m.updateFilteredFiles()
 		}
 		return m, nil
@@ -980,7 +980,7 @@ func (m Model) allFileIndices() []int {
 
 // --- Inline comment key handling ---
 
-func (m Model) handleInlineKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleInlineKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, inlineKeys.Cancel):
 		if m.comments.inlineTextarea.Value() != "" && !m.comments.confirmDiscard {
@@ -1019,7 +1019,7 @@ func (m Model) handleInlineKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 // --- PR info popup key handling ---
 
-func (m Model) handlePRInfoKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handlePRInfoKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "i", "ctrl+c":
 		m.prInfoActive = false
@@ -1034,7 +1034,7 @@ func (m Model) handlePRInfoKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 
 // --- Comment popup key handling ---
 
-func (m Model) handleCommentPopupKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) handleCommentPopupKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "enter", "ctrl+c":
 		m.comments.popupActive = false

@@ -2,9 +2,10 @@ package diffview
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jkuan/pr-review/internal/diff"
 	"github.com/jkuan/pr-review/internal/ui/styles"
@@ -266,11 +267,11 @@ func (m Model) renderFileTree() string {
 			if isCursorRow || isActiveFile {
 				// Apply background to each segment individually so inner
 				// ANSI resets don't break the row background.
-				var bg lipgloss.Color
+				var bg color.Color
 				if isCursorRow {
-					bg = lipgloss.Color(styles.Current.BgCursor)
+					bg = styles.BgCursor
 				} else {
-					bg = lipgloss.Color(styles.Current.BgSurface)
+					bg = styles.BgSurface
 				}
 
 				plain := lipgloss.NewStyle().Background(bg)
@@ -295,7 +296,7 @@ func (m Model) renderFileTree() string {
 
 				// Pad to full width
 				visWidth := lipgloss.Width(line)
-				treeWidth := m.nav.treeViewport.Width
+				treeWidth := m.nav.treeViewport.Width()
 				if visWidth < treeWidth {
 					line += plain.Render(strings.Repeat(" ", treeWidth-visWidth))
 				}
@@ -337,7 +338,7 @@ func (m Model) renderFileTree() string {
 			if isCursorRow {
 				// Apply background to each segment individually so inner
 				// ANSI resets don't break the row background.
-				bg := lipgloss.Color(styles.Current.BgCursor)
+				bg := styles.BgCursor
 				plain := lipgloss.NewStyle().Background(bg).Bold(true)
 				dirStyleBg := dirStyle.Background(bg)
 
@@ -351,7 +352,7 @@ func (m Model) renderFileTree() string {
 
 				// Pad to full width
 				visWidth := lipgloss.Width(line)
-				treeWidth := m.nav.treeViewport.Width
+				treeWidth := m.nav.treeViewport.Width()
 				if visWidth < treeWidth {
 					line += plain.Render(strings.Repeat(" ", treeWidth-visWidth))
 				}

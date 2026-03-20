@@ -9,14 +9,13 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jkuan/pr-review/internal/app"
 	"github.com/jkuan/pr-review/internal/config"
 	gitpkg "github.com/jkuan/pr-review/internal/git"
 	gh "github.com/jkuan/pr-review/internal/github"
 	"github.com/jkuan/pr-review/internal/logging"
-	"github.com/jkuan/pr-review/internal/ui/styles"
 )
 
 // CLI defines the command-line interface for pr-review.
@@ -49,7 +48,8 @@ func main() {
 	} else {
 		cfg = config.Load()
 	}
-	styles.Apply(config.ResolveTheme(cfg))
+	// Theme is derived from the terminal's ANSI palette — no config needed.
+	_ = cfg
 
 	// Detect repo context
 	owner, repo, err := gitpkg.GetRepoInfo()
@@ -78,7 +78,7 @@ func main() {
 		model = app.New(svc, cfg, filters, columns)
 	}
 
-	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(model)
 
 	// Force-quit handler: double Ctrl-C exits even if the TUI event loop is hung.
 	// This runs in a separate goroutine independent of Bubble Tea.
@@ -103,7 +103,7 @@ func main() {
 
 			// First Ctrl-C: forward to Bubble Tea as a key event so the
 			// normal quit flow (with unsaved-work confirmation) still works.
-			p.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+			p.Send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 		}
 	}()
 

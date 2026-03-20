@@ -1,8 +1,8 @@
 package diffview
 
 import (
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
 
 	"github.com/jkuan/pr-review/internal/review"
 )
