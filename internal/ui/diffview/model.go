@@ -626,25 +626,28 @@ func (m *Model) syncViewportToCursor() {
 	m.updateDiffContent()
 }
 
-// syncViewportToCursorWithComments ensures both the cursor line and its
-// comment block (if any) are visible in the viewport.
+// syncViewportToCursorWithComments centers the cursor line and its comment
+// block in the viewport. If the combined block is taller than the viewport,
+// it places the cursor line at the top instead.
 func (m *Model) syncViewportToCursorWithComments() {
 	rendered := m.renderedLineForCursor(m.nav.diffCursor)
 	commentHeight := m.commentBlockHeight(m.nav.diffCursor)
 
-	// Try to show cursor line + comment block. If the block is too tall,
-	// at least keep the cursor line at the top of the viewport.
-	endLine := rendered + commentHeight
-	if endLine >= m.nav.diffViewport.YOffset+m.nav.diffViewport.Height {
-		// Need to scroll down — put cursor at top if block fits, otherwise just show cursor
-		if commentHeight < m.nav.diffViewport.Height {
-			m.nav.diffViewport.SetYOffset(endLine - m.nav.diffViewport.Height + 1)
-		} else {
-			m.nav.diffViewport.SetYOffset(rendered)
-		}
-	}
-	if rendered < m.nav.diffViewport.YOffset {
+	// Total height of the diff line (1) + its comment block.
+	totalHeight := 1 + commentHeight
+	vpHeight := m.nav.diffViewport.Height
+
+	if totalHeight >= vpHeight {
+		// Block is taller than viewport — keep cursor line at top.
 		m.nav.diffViewport.SetYOffset(rendered)
+	} else {
+		// Center the block (diff line + comments) within the viewport.
+		topMargin := (vpHeight - totalHeight) / 2
+		offset := rendered - topMargin
+		if offset < 0 {
+			offset = 0
+		}
+		m.nav.diffViewport.SetYOffset(offset)
 	}
 	m.updateDiffContent()
 }
