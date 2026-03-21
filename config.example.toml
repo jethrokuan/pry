@@ -16,6 +16,11 @@
 # Number of PRs to fetch per page in the PR list.
 # page_size = 50
 
+# Cache PR list results per filter. Uses Go duration format (e.g. "5m", "1h").
+# Avoids repeated API calls when switching between filters. Press 'r' to force
+# a refresh. Set to "" or omit to disable caching (default).
+# cache_ttl = "5m"
+
 # ---------------------------------------------------------------------------
 # Theme
 # ---------------------------------------------------------------------------

@@ -298,6 +298,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				return m, openBrowser(m.prs[m.cursor].URL)
 			}
 		case key.Matches(msg, keys.Refresh):
+			if inv, ok := m.svc.(review.CacheInvalidator); ok {
+				inv.InvalidateListPRs()
+			}
 			m.loading = true
 			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
 		case key.Matches(msg, keys.Help):

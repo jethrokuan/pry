@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/BurntSushi/toml"
 
@@ -34,10 +35,24 @@ type Config struct {
 	Editor   string         `toml:"editor"`
 	UseDelta bool           `toml:"use_delta"`
 	PageSize int            `toml:"page_size"`
+	CacheTTL string         `toml:"cache_ttl"`
 	Filters  []FilterConfig `toml:"filters"`
 	Columns  []string       `toml:"columns"`
 	FileTree FileTreeConfig `toml:"file_tree"`
 	PRList   PRListConfig   `toml:"pr_list"`
+}
+
+// CacheTTLDuration parses the CacheTTL string into a time.Duration.
+// Returns 0 (caching disabled) if the string is empty or invalid.
+func (c Config) CacheTTLDuration() time.Duration {
+	if c.CacheTTL == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(c.CacheTTL)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 // DefaultColumns returns the default PR list columns.

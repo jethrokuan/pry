@@ -16,6 +16,7 @@ import (
 	gitpkg "github.com/jethrokuan/pry/internal/git"
 	gh "github.com/jethrokuan/pry/internal/github"
 	"github.com/jethrokuan/pry/internal/logging"
+	"github.com/jethrokuan/pry/internal/review"
 )
 
 // CLI defines the command-line interface for pry.
@@ -60,10 +61,16 @@ func main() {
 	}
 
 	// Create GitHub client (implements review.Service directly)
-	svc, err := gh.NewClient(owner, repo)
+	ghClient, err := gh.NewClient(owner, repo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Wrap with caching layer if cache_ttl is configured
+	var svc review.Service = ghClient
+	if ttl := cfg.CacheTTLDuration(); ttl > 0 {
+		svc = review.NewCachingService(ghClient, ttl)
 	}
 
 	// Load filters and columns from config (falls back to defaults)
