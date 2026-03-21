@@ -39,6 +39,7 @@ require (
 	github.com/google/pprof v0.0.0-20260115054156-294ebfa9ad83 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/henvic/httpretty v0.0.6 // indirect
+	github.com/hmarr/codeowners v1.2.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.20 // indirect
