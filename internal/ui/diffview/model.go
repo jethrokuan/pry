@@ -86,6 +86,16 @@ type editorFinishedMsg struct {
 	err     error
 }
 
+type clipboardImageMsg struct {
+	data []byte
+	err  error
+}
+
+type imageUploadedMsg struct {
+	url string
+	err error
+}
+
 type flashExpiredMsg struct{}
 
 type mentionableUsersMsg struct {
@@ -197,11 +207,13 @@ var inlineKeys = struct {
 	Cancel     key.Binding
 	ToggleMode key.Binding
 	OpenEditor key.Binding
+	PasteImage key.Binding
 }{
 	Save:       key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "save")),
 	Cancel:     key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "cancel")),
 	ToggleMode: key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl+t", "toggle mode")),
 	OpenEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "open $EDITOR")),
+	PasteImage: key.NewBinding(key.WithKeys("ctrl+v"), key.WithHelp("ctrl+v", "paste image")),
 }
 
 // --- Model ---
@@ -594,6 +606,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case mentionableUsersMsg:
 		if msg.err == nil {
 			m.comments.mentionAll = msg.users
+		}
+
+	case clipboardImageMsg:
+		if msg.err != nil {
+			return m, m.setFlash("Clipboard error: " + msg.err.Error())
+		} else if msg.data == nil {
+			return m, m.setFlash("No image in clipboard")
+		} else {
+			flashCmd := m.setFlash("Uploading image...")
+			return m, tea.Batch(flashCmd, m.uploadImageCmd(msg.data))
+		}
+
+	case imageUploadedMsg:
+		if msg.err != nil {
+			return m, m.setFlash("Upload failed: " + msg.err.Error())
+		} else if m.comments.inlineActive {
+			// Insert markdown image link at current cursor position
+			mdLink := fmt.Sprintf("![image](%s)", msg.url)
+			m.comments.inlineTextarea.InsertString(mdLink)
+			return m, m.setFlash("Image uploaded")
 		}
 
 	case editorFinishedMsg:

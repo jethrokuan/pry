@@ -33,6 +33,7 @@ type MockService struct {
 	MarkFileAsViewedFn     func(ctx context.Context, prNodeID, path string) error
 	UnmarkFileAsViewedFn   func(ctx context.Context, prNodeID, path string) error
 	ListMentionableUsersFn func(ctx context.Context) ([]string, error)
+	UploadImageFn          func(ctx context.Context, data []byte, filename string) (string, error)
 }
 
 func (m *MockService) RepoOwner() string { return m.Owner }
@@ -148,4 +149,11 @@ func (m *MockService) ListMentionableUsers(ctx context.Context) ([]string, error
 		return m.ListMentionableUsersFn(ctx)
 	}
 	return nil, nil
+}
+
+func (m *MockService) UploadImage(ctx context.Context, data []byte, filename string) (string, error) {
+	if m.UploadImageFn != nil {
+		return m.UploadImageFn(ctx, data, filename)
+	}
+	return "", nil
 }

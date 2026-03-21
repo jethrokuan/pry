@@ -1096,6 +1096,9 @@ func (m Model) handleInlineKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, inlineKeys.OpenEditor):
 		return m, m.openExternalEditorForComment()
+
+	case key.Matches(msg, inlineKeys.PasteImage):
+		return m, checkClipboardImageCmd
 	}
 
 	// Any other key resets the discard confirmation

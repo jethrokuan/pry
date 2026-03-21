@@ -57,6 +57,9 @@ func (s *stubService) UnmarkFileAsViewed(_ context.Context, _, _ string) error {
 func (s *stubService) ListMentionableUsers(_ context.Context) ([]string, error) {
 	return nil, nil
 }
+func (s *stubService) UploadImage(_ context.Context, _ []byte, _ string) (string, error) {
+	return "", nil
+}
 
 // defaultFilters provides a minimal filter set so prlist.Init() doesn't panic.
 var defaultFilters = []review.PRFilter{{Name: "Default", Qualifier: "is:open"}}
