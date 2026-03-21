@@ -7,9 +7,9 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	"github.com/jkuan/pr-review/internal/diff"
-	"github.com/jkuan/pr-review/internal/review"
-	"github.com/jkuan/pr-review/internal/testutil"
+	"github.com/jethrokuan/pry/internal/diff"
+	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/testutil"
 )
 
 var _ = ginkgo.Describe("MockService", func() {

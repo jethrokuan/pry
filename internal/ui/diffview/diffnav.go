@@ -5,7 +5,7 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 
-	"github.com/jkuan/pr-review/internal/diff"
+	"github.com/jethrokuan/pry/internal/diff"
 )
 
 // DiffNav manages cursor positions, viewport scrolling, diff line mapping,

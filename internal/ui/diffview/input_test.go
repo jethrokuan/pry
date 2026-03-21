@@ -5,9 +5,9 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	"github.com/jkuan/pr-review/internal/appctx"
-	"github.com/jkuan/pr-review/internal/diff"
-	"github.com/jkuan/pr-review/internal/review"
+	"github.com/jethrokuan/pry/internal/appctx"
+	"github.com/jethrokuan/pry/internal/diff"
+	"github.com/jethrokuan/pry/internal/review"
 )
 
 // testFiles returns a small set of DiffFiles for testing navigation and input handling.

@@ -4,7 +4,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	"github.com/jkuan/pr-review/internal/review"
+	"github.com/jethrokuan/pry/internal/review"
 )
 
 var _ = ginkgo.Describe("Comment CRUD state management", func() {

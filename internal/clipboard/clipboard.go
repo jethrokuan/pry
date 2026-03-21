@@ -62,7 +62,7 @@ end try`
 // readClipboardPNG reads PNG data directly from macOS clipboard.
 func readClipboardPNG() ([]byte, error) {
 	script := `set pngData to the clipboard as «class PNGf»
-set tmpPath to (POSIX path of (path to temporary items folder)) & "pr-review-clipboard.png"
+set tmpPath to (POSIX path of (path to temporary items folder)) & "pry-clipboard.png"
 try
 	set f to open for access tmpPath with write permission
 	set eof of f to 0
@@ -96,7 +96,7 @@ return tmpPath`
 // readClipboardTIFF reads TIFF data from macOS clipboard and converts to PNG via sips.
 func readClipboardTIFF() ([]byte, error) {
 	script := `set tiffData to the clipboard as «class TIFF»
-set tmpPath to (POSIX path of (path to temporary items folder)) & "pr-review-clipboard.tiff"
+set tmpPath to (POSIX path of (path to temporary items folder)) & "pry-clipboard.tiff"
 try
 	set f to open for access tmpPath with write permission
 	set eof of f to 0

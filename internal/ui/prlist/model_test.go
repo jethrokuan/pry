@@ -7,8 +7,8 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	"github.com/jkuan/pr-review/internal/review"
-	"github.com/jkuan/pr-review/internal/review/reviewtest"
+	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/review/reviewtest"
 )
 
 func newTestModel(svc *reviewtest.MockService, filters ...review.PRFilter) Model {

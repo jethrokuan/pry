@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/jkuan/pr-review/internal/review"
+	"github.com/jethrokuan/pry/internal/review"
 )
 
 // --- API response types (GitHub-specific) ---

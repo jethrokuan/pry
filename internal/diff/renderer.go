@@ -7,7 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/jkuan/pr-review/internal/ui/styles"
+	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
 // HasDelta checks if the delta binary is available.

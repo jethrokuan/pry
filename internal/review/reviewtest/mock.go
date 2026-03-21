@@ -6,8 +6,8 @@ package reviewtest
 import (
 	"context"
 
-	"github.com/jkuan/pr-review/internal/diff"
-	"github.com/jkuan/pr-review/internal/review"
+	"github.com/jethrokuan/pry/internal/diff"
+	"github.com/jethrokuan/pry/internal/review"
 )
 
 // MockService implements review.Service with configurable function fields.

@@ -7,7 +7,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/jkuan/pr-review/internal/review"
+	"github.com/jethrokuan/pry/internal/review"
 )
 
 // FilterConfig defines a PR list filter in the config file.
@@ -66,7 +66,7 @@ func LoadFrom(path string) Config {
 	return cfg
 }
 
-// Load reads config from ~/.config/pr-review/config.toml.
+// Load reads config from ~/.config/pry/config.toml.
 // Falls back to defaults for missing values.
 func Load() Config {
 	cfg := Default()
@@ -76,7 +76,7 @@ func Load() Config {
 		return cfg
 	}
 
-	path := filepath.Join(home, ".config", "pr-review", "config.toml")
+	path := filepath.Join(home, ".config", "pry", "config.toml")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return cfg
 	}

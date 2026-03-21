@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jkuan/pr-review/internal/codeowners"
-	"github.com/jkuan/pr-review/internal/diff"
+	"github.com/jethrokuan/pry/internal/codeowners"
+	"github.com/jethrokuan/pry/internal/diff"
 )
 
 // FileFilter manages stackable file tree narrowing filters.

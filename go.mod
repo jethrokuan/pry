@@ -1,4 +1,4 @@
-module github.com/jkuan/pr-review
+module github.com/jethrokuan/pry
 
 go 1.25.8
 

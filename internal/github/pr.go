@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jkuan/pr-review/internal/review"
+	"github.com/jethrokuan/pry/internal/review"
 )
 
 const myTeamsPlaceholder = "@my-teams"

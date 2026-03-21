@@ -1,7 +1,7 @@
 .PHONY: build test
 
 build:
-	go build -o pr-review ./cmd/...
+	go build -o "$$HOME/.local/bin/pry" ./cmd/...
 
 test:
 	ginkgo -r -v

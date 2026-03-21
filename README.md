@@ -1,4 +1,4 @@
-# pr-review
+# pry
 
 A terminal UI for reviewing GitHub pull requests with inline comments and code suggestions — the workflow `gh pr review` doesn't support.
 
@@ -11,15 +11,15 @@ GitHub's `gh` CLI can list and merge PRs, but reviewing with inline line comment
 ## Install
 
 ```bash
-go install github.com/jkuan/pr-review/cmd@latest
+go install github.com/jethrokuan/pry/cmd@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/jkuan/pr-review.git
-cd pr-review
-go build -o pr-review ./cmd/...
+git clone https://github.com/jethrokuan/pry.git
+cd pry
+go build -o pry ./cmd/...
 ```
 
 ### Requirements
@@ -33,7 +33,7 @@ go build -o pr-review ./cmd/...
 Run from any directory inside a GitHub-hosted git repository:
 
 ```bash
-pr-review
+pry
 ```
 
 ### Flow

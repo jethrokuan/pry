@@ -1,5 +1,5 @@
-# pr-review configuration
-# Copy to ~/.config/pr-review/config.toml and customize.
+# pry configuration
+# Copy to ~/.config/pry/config.toml and customize.
 
 # ---------------------------------------------------------------------------
 # General
@@ -23,7 +23,7 @@
 # Colors are inherited from your terminal's ANSI palette (the 16 standard
 # colors: black, red, green, yellow, blue, magenta, cyan, white + bright
 # variants). To change the look, configure your terminal emulator's color
-# scheme (Catppuccin, Solarized, Dracula, Gruvbox, Nord, etc.) and pr-review
+# scheme (Catppuccin, Solarized, Dracula, Gruvbox, Nord, etc.) and pry
 # will adapt automatically.
 
 # ---------------------------------------------------------------------------

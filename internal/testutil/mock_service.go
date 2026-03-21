@@ -3,8 +3,8 @@ package testutil
 import (
 	"context"
 
-	"github.com/jkuan/pr-review/internal/diff"
-	"github.com/jkuan/pr-review/internal/review"
+	"github.com/jethrokuan/pry/internal/diff"
+	"github.com/jethrokuan/pry/internal/review"
 )
 
 // MockService is a configurable mock implementation of review.Service.

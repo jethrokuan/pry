@@ -11,14 +11,14 @@ import (
 	"github.com/alecthomas/kong"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jkuan/pr-review/internal/app"
-	"github.com/jkuan/pr-review/internal/config"
-	gitpkg "github.com/jkuan/pr-review/internal/git"
-	gh "github.com/jkuan/pr-review/internal/github"
-	"github.com/jkuan/pr-review/internal/logging"
+	"github.com/jethrokuan/pry/internal/app"
+	"github.com/jethrokuan/pry/internal/config"
+	gitpkg "github.com/jethrokuan/pry/internal/git"
+	gh "github.com/jethrokuan/pry/internal/github"
+	"github.com/jethrokuan/pry/internal/logging"
 )
 
-// CLI defines the command-line interface for pr-review.
+// CLI defines the command-line interface for pry.
 type CLI struct {
 	PRNumber int    `arg:"" optional:"" help:"PR number to open directly."`
 	Config   string `short:"c" help:"Path to config file." type:"path"`
@@ -28,12 +28,12 @@ type CLI struct {
 func main() {
 	var cli CLI
 	kong.Parse(&cli,
-		kong.Name("pr-review"),
+		kong.Name("pry"),
 		kong.Description("Terminal UI for reviewing GitHub pull requests."),
 		kong.UsageOnError(),
 	)
 
-	// Set up file-based logging (writes to ~/.config/pr-review/debug.log)
+	// Set up file-based logging (writes to ~/.config/pry/debug.log)
 	logCleanup, err := logging.Setup(cli.Verbose)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not set up logging: %v\n", err)

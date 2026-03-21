@@ -15,10 +15,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jkuan/pr-review/internal/appctx"
-	"github.com/jkuan/pr-review/internal/diff"
-	"github.com/jkuan/pr-review/internal/review"
-	"github.com/jkuan/pr-review/internal/ui/styles"
+	"github.com/jethrokuan/pry/internal/appctx"
+	"github.com/jethrokuan/pry/internal/diff"
+	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
 // --- Messages ---

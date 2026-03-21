@@ -5,14 +5,14 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jkuan/pr-review/internal/appctx"
-	"github.com/jkuan/pr-review/internal/config"
-	gitpkg "github.com/jkuan/pr-review/internal/git"
-	"github.com/jkuan/pr-review/internal/review"
-	"github.com/jkuan/pr-review/internal/ui/diffview"
-	"github.com/jkuan/pr-review/internal/ui/prdetail"
-	"github.com/jkuan/pr-review/internal/ui/prlist"
-	"github.com/jkuan/pr-review/internal/ui/submit"
+	"github.com/jethrokuan/pry/internal/appctx"
+	"github.com/jethrokuan/pry/internal/config"
+	gitpkg "github.com/jethrokuan/pry/internal/git"
+	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/diffview"
+	"github.com/jethrokuan/pry/internal/ui/prdetail"
+	"github.com/jethrokuan/pry/internal/ui/prlist"
+	"github.com/jethrokuan/pry/internal/ui/submit"
 )
 
 // Screen represents the current active screen.

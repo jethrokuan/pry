@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jkuan/pr-review/internal/appctx"
-	"github.com/jkuan/pr-review/internal/config"
-	"github.com/jkuan/pr-review/internal/diff"
-	"github.com/jkuan/pr-review/internal/review"
-	"github.com/jkuan/pr-review/internal/ui/diffview"
-	"github.com/jkuan/pr-review/internal/ui/prdetail"
-	"github.com/jkuan/pr-review/internal/ui/prlist"
-	"github.com/jkuan/pr-review/internal/ui/submit"
+	"github.com/jethrokuan/pry/internal/appctx"
+	"github.com/jethrokuan/pry/internal/config"
+	"github.com/jethrokuan/pry/internal/diff"
+	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/diffview"
+	"github.com/jethrokuan/pry/internal/ui/prdetail"
+	"github.com/jethrokuan/pry/internal/ui/prlist"
+	"github.com/jethrokuan/pry/internal/ui/submit"
 )
 
 // --- Pull Request builder ---

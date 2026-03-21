@@ -14,7 +14,7 @@ const logFileName = "debug.log"
 
 // Setup configures the global slog logger to write to a file.
 // When verbose is true the log level is set to Debug; otherwise it is Info.
-// The log file is created at ~/.config/pr-review/debug.log.
+// The log file is created at ~/.config/pry/debug.log.
 // Returns a cleanup function that should be deferred by the caller.
 func Setup(verbose bool) (cleanup func(), err error) {
 	dir, err := os.UserConfigDir()
@@ -22,7 +22,7 @@ func Setup(verbose bool) (cleanup func(), err error) {
 		return nil, fmt.Errorf("failed to determine config dir: %w", err)
 	}
 
-	logDir := filepath.Join(dir, "pr-review")
+	logDir := filepath.Join(dir, "pry")
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create log dir %s: %w", logDir, err)
 	}
@@ -43,7 +43,7 @@ func Setup(verbose bool) (cleanup func(), err error) {
 	})
 	slog.SetDefault(slog.New(handler))
 
-	slog.Info("pr-review started", "verbose", verbose, "logFile", logPath)
+	slog.Info("pry started", "verbose", verbose, "logFile", logPath)
 
 	return func() { f.Close() }, nil
 }

@@ -11,9 +11,9 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jkuan/pr-review/internal/review"
-	"github.com/jkuan/pr-review/internal/ui/mdutil"
-	"github.com/jkuan/pr-review/internal/ui/styles"
+	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/mdutil"
+	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
 // StartReviewMsg signals to transition to the diff view.

@@ -14,13 +14,13 @@ See **[dev.md](dev.md)** for detailed documentation of the domain model, archite
 
 ```bash
 # Build
-go build -o pr-review ./cmd/...
+go build -o pry ./cmd/...
 
 # Run (must be inside a GitHub-hosted git repo with `gh` authenticated)
-./pr-review
+./pry
 
 # Install globally
-go install github.com/jkuan/pr-review/cmd@latest
+go install github.com/jethrokuan/pry/cmd@latest
 ```
 
 ## Testing
@@ -83,7 +83,7 @@ internal/app/      ← wires review.Service to screens
 
 ## Configuration
 
-User configuration lives at `~/.config/pr-review/config.toml`. An annotated example is at `config.example.toml` in the repo root.
+User configuration lives at `~/.config/pry/config.toml`. An annotated example is at `config.example.toml` in the repo root.
 
 **Currently configurable:** theme selection (10 built-in themes), per-color overrides, editor command, delta toggle, page size, PR list filters, PR list columns, file tree owner filter.
 

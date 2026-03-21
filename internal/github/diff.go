@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/jkuan/pr-review/internal/diff"
+	"github.com/jethrokuan/pry/internal/diff"
 )
 
 // prFile represents a file changed in a PR from the API.

@@ -14,8 +14,8 @@ import (
 	"charm.land/lipgloss/v2"
 	ltable "charm.land/lipgloss/v2/table"
 
-	"github.com/jkuan/pr-review/internal/review"
-	"github.com/jkuan/pr-review/internal/ui/styles"
+	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
 // PRSelectedMsg is sent when the user selects a PR.

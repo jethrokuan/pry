@@ -1,7 +1,7 @@
 # termwright integration
 
 Go client for [termwright](https://github.com/fcoury/termwright) — a Playwright-inspired
-terminal automation framework. Enables end-to-end testing of the pr-review TUI by
+terminal automation framework. Enables end-to-end testing of the pry TUI by
 driving it through a real PTY.
 
 ## How it works
@@ -25,7 +25,7 @@ Tests skip automatically if `termwright` is not installed.
 ## Example: testing a screen transition
 
 ```go
-client, err := termwright.Spawn(120, 40, "./pr-review")
+client, err := termwright.Spawn(120, 40, "./pry")
 Expect(err).NotTo(HaveOccurred())
 defer client.Close()
 
@@ -67,7 +67,7 @@ Expect(screen).To(ContainSubstring("Files changed"))
 - **macOS/Linux only**: No Windows support
 - **No CI by default**: Tests require the binary; skip gracefully in CI unless provisioned
 - **PTY-based**: Tests are slower than unit tests (~seconds per scenario)
-- **GitHub auth**: Testing the real pr-review binary requires `gh` auth and a repo context
+- **GitHub auth**: Testing the real pry binary requires `gh` auth and a repo context
 
 ## Recommended usage
 

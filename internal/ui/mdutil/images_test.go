@@ -4,7 +4,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/jkuan/pr-review/internal/ui/mdutil"
+	"github.com/jethrokuan/pry/internal/ui/mdutil"
 )
 
 var _ = Describe("ReplaceImages", func() {

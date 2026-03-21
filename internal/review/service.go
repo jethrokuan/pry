@@ -3,7 +3,7 @@ package review
 import (
 	"context"
 
-	"github.com/jkuan/pr-review/internal/diff"
+	"github.com/jethrokuan/pry/internal/diff"
 )
 
 // UserIdentity holds the authenticated user's login and team memberships.

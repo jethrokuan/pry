@@ -12,9 +12,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jkuan/pr-review/internal/clipboard"
-	"github.com/jkuan/pr-review/internal/review"
-	"github.com/jkuan/pr-review/internal/ui/styles"
+	"github.com/jethrokuan/pry/internal/clipboard"
+	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
 // --- Comment selection ---
@@ -680,7 +680,7 @@ func (m Model) openExternalEditorForComment() tea.Cmd {
 
 	content := m.comments.inlineTextarea.Value()
 
-	tmpFile, err := os.CreateTemp("", "pr-review-comment-*.md")
+	tmpFile, err := os.CreateTemp("", "pry-comment-*.md")
 	if err != nil {
 		return nil
 	}

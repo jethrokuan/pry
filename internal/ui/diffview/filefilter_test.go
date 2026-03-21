@@ -8,8 +8,8 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	"github.com/jkuan/pr-review/internal/codeowners"
-	"github.com/jkuan/pr-review/internal/diff"
+	"github.com/jethrokuan/pry/internal/codeowners"
+	"github.com/jethrokuan/pry/internal/diff"
 )
 
 var _ = ginkgo.Describe("FileFilter", func() {

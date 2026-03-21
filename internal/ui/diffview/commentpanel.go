@@ -4,7 +4,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 
-	"github.com/jkuan/pr-review/internal/review"
+	"github.com/jethrokuan/pry/internal/review"
 )
 
 // CommentPanel manages comment display state, inline comment editor,

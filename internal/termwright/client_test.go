@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/jkuan/pr-review/internal/termwright"
+	"github.com/jethrokuan/pry/internal/termwright"
 )
 
 // These tests require `termwright` to be installed:
