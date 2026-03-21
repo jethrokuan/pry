@@ -204,12 +204,12 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 		if err == nil {
 			rendered, err := renderer.Render(mdutil.ReplaceImages(body))
 			if err == nil {
-				b.WriteString(rendered)
+				b.WriteString(truncateLines(rendered, 15))
 			} else {
-				b.WriteString(body + "\n")
+				b.WriteString(truncateLines(body, 15))
 			}
 		} else {
-			b.WriteString(body + "\n")
+			b.WriteString(truncateLines(body, 15))
 		}
 	} else if m.loading {
 		b.WriteString(sectionHeader.Render("≡ Summary") + "\n")
@@ -217,6 +217,14 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 	}
 
 	m.sidebar.SetContent(b.String())
+}
+
+func truncateLines(s string, max int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) <= max {
+		return s
+	}
+	return strings.Join(lines[:max], "\n") + "\n" + lipgloss.NewStyle().Foreground(styles.Muted).Render("  ⋯") + "\n"
 }
 
 func stripOrgPrefix(slug string) string {
