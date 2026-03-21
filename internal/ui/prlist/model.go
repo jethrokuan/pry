@@ -59,6 +59,8 @@ type KeyMap struct {
 	OpenInBrowser key.Binding
 	CopyNumber   key.Binding
 	CopyURL      key.Binding
+	HalfPageDown key.Binding
+	HalfPageUp   key.Binding
 	Quit         key.Binding
 	Help         key.Binding
 }
@@ -76,6 +78,8 @@ var keys = KeyMap{
 	OpenInBrowser: key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "open in browser")),
 	CopyNumber:   key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy PR number")),
 	CopyURL:      key.NewBinding(key.WithKeys("Y"), key.WithHelp("Y", "copy PR URL")),
+	HalfPageDown: key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "half page down")),
+	HalfPageUp:   key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "half page up")),
 	Quit:         key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 	Help:         key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 }
@@ -274,6 +278,36 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.Down):
 			if m.cursor < len(m.prs)-1 {
 				m.cursor++
+				return m, m.refreshSidebarPreview()
+			}
+		case key.Matches(msg, keys.HalfPageDown):
+			if len(m.prs) > 0 {
+				_, mainHeight := m.layoutDimensions()
+				rowHeight := 4
+				visibleRows := mainHeight / rowHeight
+				half := visibleRows / 2
+				if half < 1 {
+					half = 1
+				}
+				m.cursor += half
+				if m.cursor >= len(m.prs) {
+					m.cursor = len(m.prs) - 1
+				}
+				return m, m.refreshSidebarPreview()
+			}
+		case key.Matches(msg, keys.HalfPageUp):
+			if len(m.prs) > 0 {
+				_, mainHeight := m.layoutDimensions()
+				rowHeight := 4
+				visibleRows := mainHeight / rowHeight
+				half := visibleRows / 2
+				if half < 1 {
+					half = 1
+				}
+				m.cursor -= half
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
 				return m, m.refreshSidebarPreview()
 			}
 		case key.Matches(msg, keys.Select):
@@ -492,7 +526,7 @@ func (m Model) View() string {
 // helpSections returns the keybinding sections for the help popup.
 func helpSections() []helppopup.Section {
 	return []helppopup.Section{
-		helppopup.Bind("Navigation", keys.Up, keys.Down, keys.Select),
+		helppopup.Bind("Navigation", keys.Up, keys.Down, keys.HalfPageDown, keys.HalfPageUp, keys.Select),
 		helppopup.Bind("Tabs & Filters", keys.NextTab, keys.PrevTab, keys.EditFilter),
 		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp),
 		helppopup.Bind("Copy", keys.CopyNumber, keys.CopyURL),
