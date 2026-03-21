@@ -597,6 +597,7 @@ func (m *Model) closeInlineComment() {
 	m.comments.inlineActive = false
 	m.comments.inlineEditLocalID = 0
 	m.comments.confirmDiscard = false
+	m.comments.mentionActive = false
 	m.updateViewports()
 	m.updateDiffContent()
 }

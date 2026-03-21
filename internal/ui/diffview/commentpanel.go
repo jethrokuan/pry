@@ -34,4 +34,11 @@ type CommentPanel struct {
 	inlineSuggestion  string // original code for suggestion mode
 	inlineEditLocalID int  // non-zero when editing an existing comment
 	confirmDiscard    bool // true after first esc with unsaved content
+
+	// @ mention autocomplete
+	mentionActive  bool     // autocomplete dropdown is visible
+	mentionPrefix  string   // current filter text after @
+	mentionAll     []string // all mentionable usernames (cached from service)
+	mentionMatches []string // filtered matches for current prefix
+	mentionCursor  int      // selected index in mentionMatches
 }

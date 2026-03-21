@@ -88,6 +88,11 @@ type editorFinishedMsg struct {
 
 type flashExpiredMsg struct{}
 
+type mentionableUsersMsg struct {
+	users []string
+	err   error
+}
+
 // UserIdentityMsg carries the resolved user identity from the app layer.
 type UserIdentityMsg struct {
 	Identity *review.UserIdentity
@@ -320,8 +325,16 @@ func (m Model) Init() tea.Cmd {
 		m.loadComments(),
 		m.loadPendingReview(),
 		m.loadViewedFiles(),
+		m.loadMentionableUsers(),
 		m.spinner.Tick,
 	)
+}
+
+func (m Model) loadMentionableUsers() tea.Cmd {
+	return func() tea.Msg {
+		users, err := m.svc.ListMentionableUsers(context.Background())
+		return mentionableUsersMsg{users: users, err: err}
+	}
 }
 
 func (m Model) loadViewedFiles() tea.Cmd {
@@ -576,6 +589,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if len(m.review.ViewedFiles) == 0 && m.review.PRNodeID != "" {
 				return m, m.loadViewedFiles()
 			}
+		}
+
+	case mentionableUsersMsg:
+		if msg.err == nil {
+			m.comments.mentionAll = msg.users
 		}
 
 	case editorFinishedMsg:

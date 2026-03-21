@@ -28,6 +28,7 @@ type MockService struct {
 	FetchViewedFilesFn      func(ctx context.Context, prNodeID string) (map[string]bool, error)
 	MarkFileAsViewedFn      func(ctx context.Context, prNodeID, path string) error
 	UnmarkFileAsViewedFn    func(ctx context.Context, prNodeID, path string) error
+	ListMentionableUsersFn  func(ctx context.Context) ([]string, error)
 }
 
 // Compile-time check that MockService implements review.Service.
@@ -150,4 +151,11 @@ func (m *MockService) UnmarkFileAsViewed(ctx context.Context, prNodeID, path str
 		return m.UnmarkFileAsViewedFn(ctx, prNodeID, path)
 	}
 	return nil
+}
+
+func (m *MockService) ListMentionableUsers(ctx context.Context) ([]string, error) {
+	if m.ListMentionableUsersFn != nil {
+		return m.ListMentionableUsersFn(ctx)
+	}
+	return nil, nil
 }

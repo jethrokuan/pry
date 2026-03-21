@@ -544,7 +544,12 @@ func (m Model) renderCommentBox() string {
 	}
 	help := styles.HelpStyle.Render(helpText)
 
-	return header + "\n" + boxStyle.Render(m.comments.inlineTextarea.View()) + "\n" + help
+	content := m.comments.inlineTextarea.View()
+	if m.comments.mentionActive && len(m.comments.mentionMatches) > 0 {
+		content += "\n" + m.renderMentionDropdown()
+	}
+
+	return header + "\n" + boxStyle.Render(content) + "\n" + help
 }
 
 // renderCommentPopup builds the bordered comment popup.

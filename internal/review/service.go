@@ -63,4 +63,7 @@ type Service interface {
 	MarkFileAsViewed(ctx context.Context, prNodeID, path string) error
 	// UnmarkFileAsViewed unmarks a file as viewed on a PR.
 	UnmarkFileAsViewed(ctx context.Context, prNodeID, path string) error
+
+	// ListMentionableUsers returns usernames that can be @mentioned in the repo.
+	ListMentionableUsers(ctx context.Context) ([]string, error)
 }

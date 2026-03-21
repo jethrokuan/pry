@@ -30,12 +30,13 @@ type currentUserCache struct {
 
 // Client wraps the go-gh REST and GraphQL clients.
 type Client struct {
-	rest    restClient
-	graphql graphqlClient
-	owner   string
-	repo    string
-	teams   userTeamsCache
-	user    currentUserCache
+	rest        restClient
+	graphql     graphqlClient
+	owner       string
+	repo        string
+	teams       userTeamsCache
+	user        currentUserCache
+	mentionable mentionableUsersCache
 }
 
 // CurrentUser returns the authenticated user's login.

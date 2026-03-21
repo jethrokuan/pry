@@ -1061,6 +1061,16 @@ func (m Model) allFileIndices() []int {
 // --- Inline comment key handling ---
 
 func (m Model) handleInlineKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	// When mention autocomplete is active, intercept navigation keys
+	if m.comments.mentionActive {
+		result, cmd, consumed := m.handleMentionKey(msg)
+		if consumed {
+			return result, cmd
+		}
+		// esc in mention mode just closes the dropdown; don't also close the editor
+		// (already handled above since esc is consumed by handleMentionKey)
+	}
+
 	switch {
 	case key.Matches(msg, inlineKeys.Cancel):
 		if m.comments.inlineTextarea.Value() != "" && !m.comments.confirmDiscard {
@@ -1094,6 +1104,10 @@ func (m Model) handleInlineKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	// Forward to textarea
 	var cmd tea.Cmd
 	m.comments.inlineTextarea, cmd = m.comments.inlineTextarea.Update(msg)
+
+	// After textarea processes the key, check for @ mention trigger
+	m.updateMentionState()
+
 	return m, cmd
 }
 
