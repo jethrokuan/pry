@@ -43,14 +43,14 @@ type Config struct {
 }
 
 // CacheTTLDuration parses the CacheTTL string into a time.Duration.
-// Returns 0 (caching disabled) if the string is empty or invalid.
+// Returns 5 minutes by default. Set to "0" to disable caching.
 func (c Config) CacheTTLDuration() time.Duration {
 	if c.CacheTTL == "" {
-		return 0
+		return 5 * time.Minute
 	}
 	d, err := time.ParseDuration(c.CacheTTL)
 	if err != nil {
-		return 0
+		return 5 * time.Minute
 	}
 	return d
 }

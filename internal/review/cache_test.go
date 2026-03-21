@@ -3,6 +3,8 @@ package review_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -35,7 +37,7 @@ var _ = Describe("CachingService", func() {
 
 	Describe("with caching enabled", func() {
 		BeforeEach(func() {
-			cache = review.NewCachingService(mock, 5*time.Minute)
+			cache = review.NewCachingService(mock, 5*time.Minute, "")
 		})
 
 		It("returns cached results on second call with same filter", func() {
@@ -95,7 +97,7 @@ var _ = Describe("CachingService", func() {
 					return []review.PullRequest{{Number: 1}}, nil
 				},
 			}
-			c := review.NewCachingService(errMock, 5*time.Minute)
+			c := review.NewCachingService(errMock, 5*time.Minute, "")
 			filter := review.PRFilter{Name: "Test", Qualifier: "q"}
 
 			_, err := c.ListPRs(ctx, filter)
@@ -120,7 +122,7 @@ var _ = Describe("CachingService", func() {
 
 	Describe("with caching disabled (ttl=0)", func() {
 		BeforeEach(func() {
-			cache = review.NewCachingService(mock, 0)
+			cache = review.NewCachingService(mock, 0, "")
 		})
 
 		It("passes through every call to inner service", func() {
@@ -136,7 +138,7 @@ var _ = Describe("CachingService", func() {
 
 	Describe("CacheInvalidator interface", func() {
 		It("is implemented by CachingService", func() {
-			c := review.NewCachingService(mock, time.Minute)
+			c := review.NewCachingService(mock, time.Minute, "")
 			var inv review.CacheInvalidator = c
 			Expect(inv).NotTo(BeNil())
 		})
@@ -145,14 +147,90 @@ var _ = Describe("CachingService", func() {
 	Describe("delegated methods", func() {
 		It("passes RepoOwner through to inner service", func() {
 			mock.Owner = "myorg"
-			c := review.NewCachingService(mock, time.Minute)
+			c := review.NewCachingService(mock, time.Minute, "")
 			Expect(c.RepoOwner()).To(Equal("myorg"))
 		})
 
 		It("passes RepoName through to inner service", func() {
 			mock.Repo = "myrepo"
-			c := review.NewCachingService(mock, time.Minute)
+			c := review.NewCachingService(mock, time.Minute, "")
 			Expect(c.RepoName()).To(Equal("myrepo"))
+		})
+	})
+
+	Describe("disk cache", func() {
+		var tmpDir string
+
+		BeforeEach(func() {
+			tmpDir = GinkgoT().TempDir()
+		})
+
+		It("persists cache to disk and reads it back", func() {
+			c := review.NewCachingService(mock, 5*time.Minute, tmpDir)
+			filter := review.PRFilter{Name: "Test", Qualifier: "author:@me"}
+
+			prs, err := c.ListPRs(ctx, filter)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(prs).To(HaveLen(1))
+			Expect(prs[0].Number).To(Equal(1))
+			Expect(calls).To(Equal(1))
+
+			// Verify a cache file was written to disk.
+			entries, err := os.ReadDir(tmpDir)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(entries).To(HaveLen(1))
+			Expect(entries[0].Name()).To(HavePrefix("prlist_"))
+		})
+
+		It("loads from disk when in-memory cache is empty", func() {
+			// First instance writes to disk.
+			c1 := review.NewCachingService(mock, 5*time.Minute, tmpDir)
+			filter := review.PRFilter{Name: "Test", Qualifier: "author:@me"}
+
+			_, err := c1.ListPRs(ctx, filter)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(calls).To(Equal(1))
+
+			// Second instance (simulating restart) should read from disk.
+			c2 := review.NewCachingService(mock, 5*time.Minute, tmpDir)
+			prs, err := c2.ListPRs(ctx, filter)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(prs).To(HaveLen(1))
+			Expect(prs[0].Number).To(Equal(1)) // same data from disk
+			Expect(calls).To(Equal(1))          // no additional API call
+		})
+
+		It("invalidation clears disk cache files", func() {
+			c := review.NewCachingService(mock, 5*time.Minute, tmpDir)
+			filter := review.PRFilter{Name: "Test", Qualifier: "q"}
+
+			_, err := c.ListPRs(ctx, filter)
+			Expect(err).NotTo(HaveOccurred())
+
+			entries, _ := os.ReadDir(tmpDir)
+			Expect(entries).To(HaveLen(1))
+
+			c.InvalidateListPRs()
+
+			entries, _ = os.ReadDir(tmpDir)
+			jsonFiles := 0
+			for _, e := range entries {
+				if filepath.Ext(e.Name()) == ".json" {
+					jsonFiles++
+				}
+			}
+			Expect(jsonFiles).To(Equal(0))
+		})
+
+		It("gracefully handles missing cache dir", func() {
+			c := review.NewCachingService(mock, 5*time.Minute, filepath.Join(tmpDir, "nonexistent", "deep"))
+			filter := review.PRFilter{Name: "Test", Qualifier: "q"}
+
+			// Should still work — just fetches from API.
+			prs, err := c.ListPRs(ctx, filter)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(prs).To(HaveLen(1))
+			Expect(calls).To(Equal(1))
 		})
 	})
 })

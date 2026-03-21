@@ -18,7 +18,8 @@
 
 # Cache PR list results per filter. Uses Go duration format (e.g. "5m", "1h").
 # Avoids repeated API calls when switching between filters. Press 'r' to force
-# a refresh. Set to "" or omit to disable caching (default).
+# a refresh. Cache is persisted to disk (~/.cache/pry/ or ~/Library/Caches/pry/)
+# so it survives restarts. Default: "5m". Set to "0" to disable.
 # cache_ttl = "5m"
 
 # ---------------------------------------------------------------------------

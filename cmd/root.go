@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -67,11 +68,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Wrap with caching layer if cache_ttl is configured
-	var svc review.Service = ghClient
-	if ttl := cfg.CacheTTLDuration(); ttl > 0 {
-		svc = review.NewCachingService(ghClient, ttl)
+	// Wrap with caching layer (on by default with 5m TTL).
+	// Cache is scoped per forge repo to avoid cross-repo collisions.
+	var cacheDir string
+	if dir, err := os.UserCacheDir(); err == nil {
+		cacheDir = filepath.Join(dir, "pry", owner, repo)
 	}
+	var svc review.Service = review.NewCachingService(ghClient, cfg.CacheTTLDuration(), cacheDir)
 
 	// Load filters and columns from config (falls back to defaults)
 	filters := cfg.PRFilters()
