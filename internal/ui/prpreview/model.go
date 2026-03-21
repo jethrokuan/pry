@@ -141,8 +141,8 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 	b.WriteString(authorLine + "\n\n")
 
 	// Review status
-	sectionHeader := lipgloss.NewStyle().Bold(true).Foreground(styles.Muted)
-	b.WriteString(sectionHeader.Render("── Reviewers ──") + "\n")
+	sectionHeader := lipgloss.NewStyle().Bold(true)
+	b.WriteString(sectionHeader.Render("☷ Reviewers") + "\n")
 	var reviewStatus string
 	switch pr.ReviewDecision {
 	case "APPROVED":
@@ -163,7 +163,7 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 
 	// Labels
 	if len(pr.Labels) > 0 {
-		b.WriteString(sectionHeader.Render("── Labels ──") + "\n")
+		b.WriteString(sectionHeader.Render("◫ Labels") + "\n")
 		for _, l := range pr.Labels {
 			b.WriteString(styles.LabelStyle.Render(l) + " ")
 		}
@@ -171,13 +171,13 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 	}
 
 	// Changes
-	b.WriteString(sectionHeader.Render("── Changes ──") + "\n")
+	b.WriteString(sectionHeader.Render("△ Changes") + "\n")
 	add := lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("+%d", pr.Additions))
 	del := lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("-%d", pr.Deletions))
 	b.WriteString(fmt.Sprintf("%d files changed  %s %s", pr.Files, add, del) + "\n\n")
 
 	// CI status
-	b.WriteString(sectionHeader.Render("── Checks ──") + "\n")
+	b.WriteString(sectionHeader.Render("◈ Checks") + "\n")
 	if pr.ChecksPass == nil {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("○ No checks") + "\n")
 	} else if *pr.ChecksPass {
@@ -192,7 +192,7 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 
 	// Summary (markdown body)
 	if body != "" {
-		b.WriteString(sectionHeader.Render("── Summary ──") + "\n")
+		b.WriteString(sectionHeader.Render("≡ Summary") + "\n")
 		sidebarContentWidth := m.sidebarWidth - 5
 		if sidebarContentWidth < 20 {
 			sidebarContentWidth = 20
@@ -212,7 +212,7 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 			b.WriteString(body + "\n")
 		}
 	} else if m.loading {
-		b.WriteString(sectionHeader.Render("── Summary ──") + "\n")
+		b.WriteString(sectionHeader.Render("≡ Summary") + "\n")
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("Loading...") + "\n")
 	}
 
