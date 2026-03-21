@@ -21,6 +21,40 @@ const (
 	SyncFailed                     // Sync failed
 )
 
+// CheckRunStatus represents the execution status of a check run.
+type CheckRunStatus string
+
+const (
+	CheckRunQueued     CheckRunStatus = "QUEUED"
+	CheckRunInProgress CheckRunStatus = "IN_PROGRESS"
+	CheckRunCompleted  CheckRunStatus = "COMPLETED"
+)
+
+// CheckRunConclusion represents the outcome of a completed check run.
+type CheckRunConclusion string
+
+const (
+	ConclusionSuccess        CheckRunConclusion = "SUCCESS"
+	ConclusionFailure        CheckRunConclusion = "FAILURE"
+	ConclusionTimedOut       CheckRunConclusion = "TIMED_OUT"
+	ConclusionCancelled      CheckRunConclusion = "CANCELLED"
+	ConclusionSkipped        CheckRunConclusion = "SKIPPED"
+	ConclusionNeutral        CheckRunConclusion = "NEUTRAL"
+	ConclusionActionRequired CheckRunConclusion = "ACTION_REQUIRED"
+	ConclusionStartupFailure CheckRunConclusion = "STARTUP_FAILURE"
+	ConclusionStale          CheckRunConclusion = "STALE"
+)
+
+// CheckRun represents an individual CI check run or status context.
+type CheckRun struct {
+	Name        string
+	Status      CheckRunStatus
+	Conclusion  CheckRunConclusion
+	StartedAt   time.Time
+	CompletedAt time.Time
+	DetailsURL  string
+}
+
 // Reviewer represents a reviewer and their review status on a PR.
 type Reviewer struct {
 	Login  string // User login or team slug
@@ -53,6 +87,7 @@ type PullRequest struct {
 	// CI status
 	ChecksPass    *bool
 	ChecksSummary string
+	CheckRuns     []CheckRun
 
 	// Merge & review status
 	MergeState     string     // BLOCKED, CLEAN, DIRTY, DRAFT, HAS_HOOKS, UNKNOWN, UNSTABLE

@@ -61,11 +61,31 @@ type graphqlPRNode struct {
 		Nodes      []struct {
 			Commit struct {
 				StatusCheckRollup struct {
-					State string `json:"state"`
+					State    string `json:"state"`
+					Contexts struct {
+						Nodes []graphqlCheckContext `json:"nodes"`
+					} `json:"contexts"`
 				} `json:"statusCheckRollup"`
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+}
+
+// graphqlCheckContext represents a union of CheckRun | StatusContext from the API.
+type graphqlCheckContext struct {
+	TypeName string `json:"__typename"`
+	// CheckRun fields
+	Name        string     `json:"name"`
+	Status      string     `json:"status"`
+	Conclusion  string     `json:"conclusion"`
+	StartedAt   *time.Time `json:"startedAt"`
+	CompletedAt *time.Time `json:"completedAt"`
+	DetailsURL  string     `json:"detailsUrl"`
+	// StatusContext fields
+	Context   string     `json:"context"`
+	State     string     `json:"state"`
+	TargetURL string     `json:"targetUrl"`
+	CreatedAt *time.Time `json:"createdAt"`
 }
 
 // graphqlReviewer handles the union type (User | Team) in requestedReviewer.
@@ -136,6 +156,25 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 							commit {
 								statusCheckRollup {
 									state
+									contexts(first: 50) {
+										nodes {
+											__typename
+											... on CheckRun {
+												name
+												status
+												conclusion
+												startedAt
+												completedAt
+												detailsUrl
+											}
+											... on StatusContext {
+												context
+												state
+												targetUrl
+												createdAt
+											}
+										}
+									}
 								}
 							}
 						}
@@ -290,9 +329,10 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 
 	// Extract CI status from the last commit's status check rollup
 	var checksPass *bool
+	var checkRuns []review.CheckRun
 	if len(node.Commits.Nodes) > 0 {
-		state := node.Commits.Nodes[len(node.Commits.Nodes)-1].Commit.StatusCheckRollup.State
-		switch state {
+		rollup := node.Commits.Nodes[len(node.Commits.Nodes)-1].Commit.StatusCheckRollup
+		switch rollup.State {
 		case "SUCCESS":
 			t := true
 			checksPass = &t
@@ -301,6 +341,11 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 			checksPass = &f
 		case "PENDING", "EXPECTED":
 			// Leave as nil (pending)
+		}
+
+		for _, ctx := range rollup.Contexts.Nodes {
+			cr := graphqlContextToCheckRun(ctx)
+			checkRuns = append(checkRuns, cr)
 		}
 	}
 
@@ -325,6 +370,7 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		URL:            node.URL,
 		HeadSHA:        node.HeadRefOid,
 		ChecksPass:     checksPass,
+		CheckRuns:      checkRuns,
 		MergeState:     node.MergeStateStatus,
 		Mergeable:      node.Mergeable,
 		ReviewDecision: node.ReviewDecision,
@@ -332,6 +378,44 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		PendingTeams:   pendingTeams,
 		MyReviewState:  myReviewState,
 	}
+}
+
+// graphqlContextToCheckRun converts a GraphQL check context (CheckRun or StatusContext) to a domain CheckRun.
+func graphqlContextToCheckRun(ctx graphqlCheckContext) review.CheckRun {
+	cr := review.CheckRun{}
+
+	if ctx.TypeName == "CheckRun" {
+		cr.Name = ctx.Name
+		cr.Status = review.CheckRunStatus(ctx.Status)
+		cr.Conclusion = review.CheckRunConclusion(ctx.Conclusion)
+		cr.DetailsURL = ctx.DetailsURL
+		if ctx.StartedAt != nil {
+			cr.StartedAt = *ctx.StartedAt
+		}
+		if ctx.CompletedAt != nil {
+			cr.CompletedAt = *ctx.CompletedAt
+		}
+	} else {
+		// StatusContext
+		cr.Name = ctx.Context
+		cr.DetailsURL = ctx.TargetURL
+		if ctx.CreatedAt != nil {
+			cr.StartedAt = *ctx.CreatedAt
+		}
+		// Map StatusContext states to CheckRun equivalents
+		switch ctx.State {
+		case "SUCCESS":
+			cr.Status = review.CheckRunCompleted
+			cr.Conclusion = review.ConclusionSuccess
+		case "PENDING", "EXPECTED":
+			cr.Status = review.CheckRunInProgress
+		case "ERROR", "FAILURE":
+			cr.Status = review.CheckRunCompleted
+			cr.Conclusion = review.ConclusionFailure
+		}
+	}
+
+	return cr
 }
 
 // GetPR fetches a single PR by number, including the full body.
@@ -363,8 +447,53 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 				headRefOid
 				reviewDecision
 				mergeStateStatus
+				mergeable
 				author { login }
+				comments { totalCount }
 				labels(first: 10) { nodes { name } }
+				commits(last: 1) {
+					totalCount
+					nodes {
+						commit {
+							statusCheckRollup {
+								state
+								contexts(first: 50) {
+									nodes {
+										__typename
+										... on CheckRun {
+											name
+											status
+											conclusion
+											startedAt
+											completedAt
+											detailsUrl
+										}
+										... on StatusContext {
+											context
+											state
+											targetUrl
+											createdAt
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+				reviewRequests(first: 20) {
+					nodes {
+						requestedReviewer {
+							... on Team { slug organization { login } }
+							... on User { login }
+						}
+					}
+				}
+				latestReviews(first: 30) {
+					nodes {
+						author { login }
+						state
+					}
+				}
 			}
 		}
 	}`
