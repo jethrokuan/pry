@@ -16,6 +16,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/appctx"
+	"github.com/jethrokuan/pry/internal/clipboard"
 	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
@@ -165,6 +166,7 @@ type KeyMap struct {
 	NarrowPrefix  key.Binding
 	JumpBack      key.Binding
 	JumpForward   key.Binding
+	CopyLink      key.Binding
 }
 
 var keys = KeyMap{
@@ -201,6 +203,7 @@ var keys = KeyMap{
 	NarrowPrefix:  key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "filter prefix")),
 	JumpBack:      key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "jump back")),
 	JumpForward:   key.NewBinding(key.WithKeys("ctrl+i"), key.WithHelp("ctrl+i", "jump forward")),
+	CopyLink:      key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy link")),
 }
 
 // Inline comment key bindings (when textarea is active)
@@ -638,6 +641,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, m.setFlash("Image uploaded")
 		}
 
+	case copyResultMsg:
+		if msg.err != nil {
+			return m, m.setFlash("Copy failed: " + msg.err.Error())
+		}
+		return m, m.setFlash("Copied link")
+
 	case editorFinishedMsg:
 		if msg.err == nil && msg.content != "" {
 			m.comments.inlineTextarea.SetValue(msg.content)
@@ -870,6 +879,76 @@ func (m *Model) updateViewports() {
 		m.treeDirty = false
 		m.updateDiffContent()
 	}
+}
+
+// copyForgeLink builds a GitHub permalink for the current file+line (or selection)
+// and copies it to the system clipboard.
+func (m *Model) copyForgeLink() tea.Cmd {
+	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+		return m.setFlash("No file to copy link for")
+	}
+
+	file := m.files[m.nav.fileCursor]
+	sha := m.pr.HeadSHA
+	owner := m.ctx.Svc.RepoOwner()
+	repo := m.ctx.Svc.RepoName()
+
+	// Build base blob URL
+	url := fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", owner, repo, sha, file.Path)
+
+	// Add line anchor
+	if m.nav.diffCursor < len(m.nav.diffLines) {
+		if m.nav.visualMode {
+			// Selection active — compute line range
+			startIdx := min(m.nav.visualStart, m.nav.visualEnd)
+			endIdx := max(m.nav.visualStart, m.nav.visualEnd)
+			startLine := m.resolveLineNumber(startIdx)
+			endLine := m.resolveLineNumber(endIdx)
+			if startLine > 0 && endLine > 0 {
+				if startLine == endLine {
+					url += fmt.Sprintf("#L%d", startLine)
+				} else {
+					url += fmt.Sprintf("#L%d-L%d", startLine, endLine)
+				}
+			}
+		} else {
+			// Single line
+			line := m.resolveLineNumber(m.nav.diffCursor)
+			if line > 0 {
+				url += fmt.Sprintf("#L%d", line)
+			}
+		}
+	}
+
+	return m.copyToClipboard(url)
+}
+
+// resolveLineNumber returns the new-side line number for a diff line index,
+// falling back to old-side if the line is a deletion.
+func (m *Model) resolveLineNumber(idx int) int {
+	if idx >= len(m.nav.diffLines) {
+		return 0
+	}
+	dl := m.nav.diffLines[idx]
+	if dl.newLine > 0 {
+		return dl.newLine
+	}
+	return dl.oldLine
+}
+
+// copyToClipboard copies text to the system clipboard and shows a flash message.
+func (m *Model) copyToClipboard(text string) tea.Cmd {
+	return func() tea.Msg {
+		if err := clipboard.WriteText(text); err != nil {
+			return copyResultMsg{err: err}
+		}
+		return copyResultMsg{url: text}
+	}
+}
+
+type copyResultMsg struct {
+	url string
+	err error
 }
 
 // openBrowser opens the given URL in the user's default browser.
@@ -1245,7 +1324,7 @@ func helpSections() []helppopup.Section {
 			keys.Reply, keys.EditComment, keys.DeleteComment,
 		),
 		helppopup.Bind("Other",
-			keys.ToggleTree, keys.Info, keys.OpenInBrowser,
+			keys.ToggleTree, keys.Info, keys.OpenInBrowser, keys.CopyLink,
 			keys.Editor, keys.Help, keys.Back, keys.Quit,
 		),
 	}

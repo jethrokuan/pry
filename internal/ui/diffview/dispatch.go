@@ -210,6 +210,9 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 		return m.markCurrentFileViewed()
 
+	case key.Matches(msg, keys.CopyLink):
+		return m, m.copyForgeLink()
+
 	case key.Matches(msg, keys.OpenInBrowser):
 		url := m.pr.URL + "/changes"
 		return m, openBrowser(url)
