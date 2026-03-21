@@ -162,6 +162,12 @@ Do NOT close an issue if any gate fails.
   - A **Test plan** section describing how the change was tested (e.g., which tests were added/run, manual verification steps)
 - Do NOT stop or close the issue until the PR has been created and the URL is confirmed.
 
+### Change summary
+
+- Before closing out, add a **concise summary** of what you changed to the PR description and as a note on the beads issue (`bd update <id> --notes="..."`).
+- The summary must list: files changed, what was added/modified/removed, and why.
+- This helps reviewers and future sessions understand the change without reading the full diff.
+
 ### Conflict avoidance
 
 - Keep changes to the minimum set of files needed.

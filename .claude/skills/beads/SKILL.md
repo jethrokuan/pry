@@ -39,3 +39,4 @@ bd create --title="<concise title>" --description="<why and what>" --type=<task|
 - Priority: 0-4 (0=critical, 4=backlog). Default to 2 if unspecified.
 - Types: `task`, `bug`, `feature`
 - Do NOT use `bd edit` — it opens an interactive editor that blocks agents.
+- When creating issues, ONLY create the issue. Do NOT claim it or start working on it unless the user explicitly asks you to.
