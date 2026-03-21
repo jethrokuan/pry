@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# bd-patrol: Watch for ready beads tasks, spawn Claude Code worktrees, verify completed work.
-# Fully local — no GitHub PRs. Workers commit, rebase onto main, and close their own issues.
+# bd-patrol: Watch for ready beads tasks, spawn Claude Code worktrees, land completed work.
+# Fully local — workers commit, patrol rebases onto main sequentially (no races).
 #
 # Usage:
 #   ./scripts/bd-patrol.sh                  # default: poll every 5s
@@ -42,9 +42,12 @@ REPO_ROOT="$(jj workspace root 2>/dev/null || git rev-parse --show-toplevel)"
 STATE_DIR="${REPO_ROOT}/.bd-patrol"
 mkdir -p "$STATE_DIR"
 
-# Active workers: track via sentinel files in STATE_DIR
-# Running: $STATE_DIR/<issue_id>.worker  (contains worktree name + PID)
-# Done:    $STATE_DIR/<issue_id>.exit    (contains exit code)
+# State machine via sentinel files in STATE_DIR:
+# .worker        — claude worker running (contains ws_name)
+# .exit          — worker finished (contains exit code)
+# .done          — worker succeeded, queued for landing (contains ws_name)
+# .resolver      — conflict resolver running (contains ws_name)
+# .resolver-exit — resolver finished (contains exit code)
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
@@ -55,19 +58,20 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
-# --- Count active workers ---
+# --- Count active workers (workers + resolvers) ---
 count_active_workers() {
   local count=0
   shopt -s nullglob
-  for f in "$STATE_DIR"/*.worker; do
+  for f in "$STATE_DIR"/*.worker "$STATE_DIR"/*.resolver; do
     count=$(( count + 1 ))
   done
   shopt -u nullglob
   echo "$count"
 }
 
-# --- Verify a worker landed its commit on main ---
-verify_worker() {
+# --- Land a completed worker's commit onto main ---
+# Returns: 0 = landed, 1 = failed (empty/missing), 2 = resolver spawned
+land_worker() {
   local issue_id="$1"
   local ws_name="$2"
 
@@ -76,24 +80,37 @@ verify_worker() {
   change_id="$(jj log --no-graph -r "${ws_name}@-" -T 'change_id' 2>/dev/null || echo "")"
 
   if [[ -z "$change_id" ]]; then
-    log "No commit found for workspace $ws_name, nothing to verify"
+    log "No commit found for workspace $ws_name"
     return 1
   fi
 
   # Check if the commit is empty
-  if jj diff -r "$change_id" --stat 2>/dev/null | grep -q 'no changes'; then
-    log "Worker $ws_name produced no changes"
+  if jj log --no-graph -r "$change_id" -T 'empty' 2>/dev/null | grep -q 'true'; then
+    log "Worker $ws_name produced empty commit"
     return 1
   fi
 
-  # Verify the commit is an ancestor of main (worker rebased + updated bookmark)
-  if jj log --no-graph -r "$change_id & ancestors(main)" -T 'change_id' 2>/dev/null | grep -q .; then
-    log "Verified $issue_id landed on main ($change_id)"
-    return 0
-  else
-    log "Worker $issue_id committed but did NOT land on main — may need manual intervention"
-    return 1
+  # Rebase the worker's commit onto main (jj never fails — conflicts are materialized)
+  log "Rebasing $issue_id onto main..."
+  jj rebase -r "$change_id" -d main 2>/dev/null
+
+  # Check for conflicts
+  if jj log --no-graph -r "$change_id" -T 'conflict' 2>/dev/null | grep -q 'true'; then
+    log "Conflict detected landing $issue_id — spawning resolver"
+    spawn_resolver "$issue_id" "$ws_name" "$change_id"
+    return 2
   fi
+
+  # No conflicts — advance main
+  jj bookmark set main -r "$change_id" 2>/dev/null
+  log "Landed $issue_id on main"
+
+  # Close the issue
+  bd close "$issue_id" 2>/dev/null || true
+
+  # Clean up workspace and worktree directory
+  cleanup_worktree "$ws_name"
+  return 0
 }
 
 # --- Clean up a worktree ---
@@ -106,14 +123,12 @@ cleanup_worktree() {
   fi
 }
 
-# --- Reap completed workers ---
+# --- Reap completed workers and land sequentially ---
 reap_workers() {
   shopt -s nullglob
-  local exit_files=("$STATE_DIR"/*.exit)
-  shopt -u nullglob
-  if [[ ${#exit_files[@]} -eq 0 ]]; then return; fi
-  for exit_file in "${exit_files[@]}"; do
 
+  # Phase 1: Collect completed workers → .done files
+  for exit_file in "$STATE_DIR"/*.exit; do
     local issue_id
     issue_id="$(basename "$exit_file" .exit)"
     local worker_file="$STATE_DIR/${issue_id}.worker"
@@ -128,16 +143,108 @@ reap_workers() {
     exit_code="$(cat "$exit_file")"
 
     if [[ "$exit_code" -eq 0 ]]; then
-      log "Worker for $issue_id completed, verifying landing..."
-      verify_worker "$issue_id" "$ws_name"
+      log "Worker for $issue_id completed, queuing for landing"
+      mv "$worker_file" "$STATE_DIR/${issue_id}.done"
     else
       log "Worker for $issue_id failed (exit $exit_code)"
       bd update "$issue_id" --notes="Worker failed with exit code $exit_code" 2>/dev/null || true
+      cleanup_worktree "$ws_name"
+      rm -f "$worker_file"
+    fi
+    rm -f "$exit_file"
+  done
+
+  # Phase 2: Collect completed resolvers → back to .done
+  for exit_file in "$STATE_DIR"/*.resolver-exit; do
+    local issue_id
+    issue_id="$(basename "$exit_file" .resolver-exit)"
+    local resolver_file="$STATE_DIR/${issue_id}.resolver"
+
+    if [[ ! -f "$resolver_file" ]]; then
+      rm -f "$exit_file"
+      continue
     fi
 
-    cleanup_worktree "$ws_name"
-    rm -f "$worker_file" "$exit_file"
+    local ws_name exit_code
+    ws_name="$(head -1 "$resolver_file")"
+    exit_code="$(cat "$exit_file")"
+
+    if [[ "$exit_code" -eq 0 ]]; then
+      log "Resolver for $issue_id completed, re-queuing for landing"
+      echo "$ws_name" > "$STATE_DIR/${issue_id}.done"
+    else
+      log "Resolver for $issue_id failed (exit $exit_code)"
+      bd update "$issue_id" --notes="Resolver failed with exit code $exit_code — needs manual intervention" 2>/dev/null || true
+      cleanup_worktree "$ws_name"
+    fi
+    rm -f "$resolver_file" "$exit_file"
   done
+
+  # Phase 3: Sequential landing queue (one at a time — no races on main)
+  for done_file in "$STATE_DIR"/*.done; do
+    local issue_id
+    issue_id="$(basename "$done_file" .done)"
+    local ws_name
+    ws_name="$(head -1 "$done_file")"
+
+    land_worker "$issue_id" "$ws_name"
+    local rc=$?
+
+    if [[ $rc -eq 0 ]]; then
+      # Landed successfully — worktree already cleaned up in land_worker
+      rm -f "$done_file"
+    elif [[ $rc -eq 2 ]]; then
+      # Resolver spawned — remove .done (now tracked by .resolver)
+      rm -f "$done_file"
+    else
+      # Failed (empty/missing commit)
+      bd update "$issue_id" --notes="Landing failed — empty or missing commit" 2>/dev/null || true
+      cleanup_worktree "$ws_name"
+      rm -f "$done_file"
+    fi
+  done
+
+  shopt -u nullglob
+}
+
+# --- Spawn a conflict resolver ---
+spawn_resolver() {
+  local issue_id="$1"
+  local ws_name="$2"
+  local change_id="$3"
+
+  local model_flag=""
+  if [[ -n "$CLAUDE_MODEL" ]]; then
+    model_flag="--model $CLAUDE_MODEL"
+  fi
+
+  local prompt
+  prompt="$(cat <<PROMPT
+You are a conflict resolver. A commit for issue $issue_id was rebased onto main but has conflicts.
+
+## Your task
+1. jj workspace update-stale          — ensure worktree reflects the rebased state
+2. Resolve ALL conflict markers in the working copy
+3. go build ./cmd/...                  — must pass after resolution
+4. ginkgo -r -v                        — must pass after resolution
+5. jj squash                           — fold your resolution into the conflicted commit
+
+Do NOT create new commits. Just resolve conflicts in-place and squash.
+Do NOT rebase or move bookmarks. The patrol process handles that.
+If conflicts are too complex to resolve, add notes (bd update $issue_id --notes="...") and exit 1.
+PROMPT
+)"
+
+  # Track as resolver
+  echo "$ws_name" > "$STATE_DIR/${issue_id}.resolver"
+
+  # shellcheck disable=SC2086
+  zellij run --name "${ws_name}-resolve" -- \
+    bash -c "trap '' INT TSTP QUIT; exec < /dev/null; claude -p --verbose --output-format stream-json --worktree \"$ws_name\" --dangerously-skip-permissions $model_flag \"\$1\" | claude-pretty-printer --layout compact; echo \${PIPESTATUS[0]} > \"$STATE_DIR/${issue_id}.resolver-exit\"" -- "$prompt"
+
+  zellij action focus-previous-pane
+
+  log "Resolver launched for $issue_id ($ws_name)"
 }
 
 # --- Spawn a worker ---
@@ -186,15 +293,10 @@ Description: $description
 4. ginkgo -r -v                         — must pass
 5. jj diff                              — review your own diff, remove anything unrelated
 6. jj commit -m "$issue_id: <summary>"  — commit with issue ID in message
+7. bd update $issue_id --notes="<summary of what you changed, files modified, and why>"
 
-## Land your change
-After committing, you MUST rebase onto main and advance the bookmark:
-7. jj rebase -r @- -d main             — rebase your commit onto main
-   - If there are conflicts, resolve them, then re-run build + tests before continuing
-8. jj bookmark set main -r @-          — advance main to your commit
-9. bd close $issue_id                   — mark issue done
-
-Do NOT push, do NOT create PRs. Just commit and land locally.
+Do NOT rebase, do NOT move bookmarks, do NOT close the issue, do NOT push, do NOT create PRs.
+Just commit and stop. The patrol process will land your change onto main.
 If any quality gate fails or the task is ambiguous, add notes (bd update $issue_id --notes="...") and stop.
 PROMPT
 )"

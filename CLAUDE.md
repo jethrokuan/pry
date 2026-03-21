@@ -132,13 +132,12 @@ This project uses `bd-patrol` to dispatch autonomous Claude Code instances in wo
 - Keep your diff minimal. Every changed line must be justified by the issue description.
 - If you discover a problem outside your issue's scope, file a new beads issue (`bd create`) and move on.
 
-### Quality gates (must pass before closing)
+### Quality gates (must pass before committing)
 
 1. `go build ./cmd/...` — build must succeed
 2. `ginkgo -r -v` — all tests must pass
 3. `jj diff` — review your own changes; remove anything unrelated
 
-Do NOT close an issue if any gate fails.
 
 ### Error handling / fail gracefully
 
@@ -148,25 +147,16 @@ Do NOT close an issue if any gate fails.
 
 ### No external side effects
 
-- Do NOT comment on GitHub issues/PRs, post to Slack, or interact with any external service (except creating a PR — see below).
+- Do NOT comment on GitHub issues/PRs, post to Slack, or interact with any external service.
 - Do NOT modify CI/CD configuration, GitHub Actions workflows, or Makefiles unless the issue explicitly requires it.
-- Do NOT push to `main`. Always work on a topic bookmark.
+- Do NOT rebase onto main, move bookmarks, push, or create PRs. The patrol process handles landing.
 
-### Pull request required
+### Commit and stop
 
-- Autonomous workers **MUST** create a pull request before finishing. Work is not complete without a PR.
-- Use `gh pr create` to open the PR against `main`.
-- The PR **must** include:
-  - A clear title summarizing the change
-  - A **Summary** section explaining what the PR solves and why, explaining the motivation for the change
-  - A **Test plan** section describing how the change was tested (e.g., which tests were added/run, manual verification steps)
-- Do NOT stop or close the issue until the PR has been created and the URL is confirmed.
-
-### Change summary
-
-- Before closing out, add a **concise summary** of what you changed to the PR description and as a note on the beads issue (`bd update <id> --notes="..."`).
-- The summary must list: files changed, what was added/modified/removed, and why.
-- This helps reviewers and future sessions understand the change without reading the full diff.
+After passing quality gates:
+1. `jj commit -m "<issue_id>: <summary>"` — commit with issue ID in message
+2. `bd update <id> --notes="<summary of files changed and why>"` — document what you did
+3. Stop. Do NOT close the issue — the patrol process closes it after landing on main.
 
 ### Conflict avoidance
 
@@ -196,36 +186,11 @@ bd close <id>         # Complete work
 
 ## Landing the Plane (Session Completion)
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `jj git push` succeeds.
-
-**MANDATORY WORKFLOW:**
+**When ending a work session**, complete these steps:
 
 1. **File issues for remaining work** - Create issues for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Build, tests
 3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   bd dolt push
-   jj git push
-   jj log -r 'mine()'  # Verify your changes are pushed
-   ```
-5. **CREATE A PULL REQUEST** - This is MANDATORY (if code changed):
-   ```bash
-   gh pr create --title "Short description" --body "$(cat <<'EOF'
-   ## Summary
-   <What this PR does and why.>
-
-   ## Test plan
-   <How this was tested: new/existing tests run, manual verification, etc.>
-   EOF
-   )"
-   ```
-6. **Verify** - All changes committed, pushed, AND PR created
-7. **Hand off** - Provide context for next session (if interactive)
-
-**CRITICAL RULES:**
-- Work is NOT complete until `jj git push` succeeds AND a PR is created
-- NEVER stop before pushing and creating a PR - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push and create the PR
-- If push or PR creation fails, resolve and retry until it succeeds
+4. **Commit** - Ensure all changes are committed
+5. **Hand off** - Provide context for next session (if interactive)
 <!-- END BEADS INTEGRATION -->
