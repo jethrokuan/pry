@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/appctx"
+	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/scrollbar"
 	"github.com/jethrokuan/pry/internal/ui/components/tabbar"
@@ -92,6 +93,9 @@ type Model struct {
 	editing      bool            // true when the qualifier text input is active
 	filterInput  textinput.Model // text input for editing the qualifier
 	customFilter *review.PRFilter // non-nil when a user-edited filter is active
+
+	// Help overlay
+	showHelp bool
 }
 
 // New creates a new PR list model.
@@ -173,7 +177,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// Pre-size sidebar so viewport is initialized before content is set
+				// Pre-size sidebar so viewport is initialized before content is set
 		sw, mh := m.layoutDimensions()
 		m.preview.SetSize(sw, mh)
 
@@ -230,6 +234,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 
+		// Help overlay: any key dismisses
+		if m.showHelp {
+			m.showHelp = false
+			return m, nil
+		}
+
 		if m.loading {
 			return m, nil
 		}
@@ -282,6 +292,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.Refresh):
 			m.loading = true
 			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+		case key.Matches(msg, keys.Help):
+			m.showHelp = true
+			return m, nil
 		}
 
 		// Number keys 1-9 for direct tab selection
@@ -412,16 +425,30 @@ func (m Model) View() string {
 	// Footer
 	b.WriteString("\n")
 	repoLabel := fmt.Sprintf("%s/%s", m.svc.RepoOwner(), m.svc.RepoName())
-	help := styles.HelpStyle.Render("↑/k up  ↓/j down  enter select  tab switch  / search  J/K scroll preview  r refresh  ctrl+c quit")
+	helpText := styles.HelpStyle.Render("↑/k up  ↓/j down  enter select  tab switch  / search  J/K scroll preview  r refresh  ? help")
 	repo := lipgloss.NewStyle().Foreground(styles.Primary).Render(repoLabel)
-	footerWidth := lipgloss.Width(help) + lipgloss.Width(repo)
-	gap := m.width - footerWidth
+	gap := m.width - lipgloss.Width(helpText) - lipgloss.Width(repo)
 	if gap < 1 {
 		gap = 1
 	}
-	b.WriteString(help + strings.Repeat(" ", gap) + repo)
+	b.WriteString(helpText + strings.Repeat(" ", gap) + repo)
 
-	return b.String()
+	result := b.String()
+	if m.showHelp {
+		popup := helppopup.Render(helpSections(), m.width)
+		result = helppopup.Overlay(result, popup, m.width, m.height)
+	}
+	return result
+}
+
+// helpSections returns the keybinding sections for the help popup.
+func helpSections() []helppopup.Section {
+	return []helppopup.Section{
+		helppopup.Bind("Navigation", keys.Up, keys.Down, keys.Select),
+		helppopup.Bind("Tabs & Filters", keys.NextTab, keys.PrevTab, keys.EditFilter),
+		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp),
+		helppopup.Bind("Other", keys.Refresh, keys.Help, keys.Quit),
+	}
 }
 
 // renderTable renders the PR table with multi-line rows (gh-dash style).
@@ -486,25 +513,27 @@ func (m Model) renderTable(width, height int) string {
 		}
 		line2 := base.Width(width).Render(indent + titleRendered)
 
-		// Line 3: stats with colored icons
+		// Line 3: stats on left, merge status flushed right
 		dot := muted.Render(" · ")
 		statsContent := indent +
 			s(styles.Success).Render(fmt.Sprintf("+%s", formatNum(pr.Additions))) +
 			muted.Render(" ") +
 			s(styles.Danger).Render(fmt.Sprintf("-%s", formatNum(pr.Deletions))) +
 			dot +
-			s(lipgloss.BrightCyan).Render(iconFiles) + muted.Render(fmt.Sprintf(" %d", pr.Files)) +
-			dot +
-			renderMergeIconInherited(pr, base)
+			s(lipgloss.BrightCyan).Render(iconFiles) + muted.Render(fmt.Sprintf(" %d", pr.Files))
 		if pr.CommentCount > 0 {
 			statsContent += dot +
 				s(lipgloss.BrightBlue).Render(iconCommentSingle) + muted.Render(fmt.Sprintf(" %d", pr.CommentCount))
 		}
 		statsContent += dot +
-			s(lipgloss.BrightMagenta).Render(iconUpdated) + muted.Render(" "+shortTimeAgo(pr.UpdatedAt)) +
-			dot +
-			s(lipgloss.BrightCyan).Render(iconCreated) + muted.Render(" "+shortTimeAgo(pr.CreatedAt))
-		line3 := base.Width(width).Render(statsContent)
+			s(lipgloss.BrightMagenta).Render(iconUpdated) + muted.Render(" "+shortTimeAgo(pr.UpdatedAt))
+
+		mergeIcon, mergeLabel, mergeColor := mergeStateLabel(pr)
+		mergeTag := s(mergeColor).Render(mergeIcon+" "+mergeLabel) + " "
+		leftPart := base.Render(statsContent)
+		line3 := base.Width(width).Render(
+			leftPart + lipgloss.PlaceHorizontal(width-lipgloss.Width(leftPart), lipgloss.Right, mergeTag, lipgloss.WithWhitespaceStyle(base)),
+		)
 
 		row := line1 + "\n" + line2 + "\n" + line3
 		borderStyle := lipgloss.NewStyle().
@@ -549,24 +578,21 @@ func renderStateIcon(pr review.PullRequest) (string, color.Color) {
 	}
 }
 
-// renderMergeIconInherited renders the merge state icon with color, inheriting base for background.
-func renderMergeIconInherited(pr review.PullRequest, base lipgloss.Style) string {
-	s := func(c color.Color) lipgloss.Style {
-		return lipgloss.NewStyle().Foreground(c).Inherit(base)
-	}
+// mergeStateLabel returns the icon, label text, and color for a PR's merge state.
+func mergeStateLabel(pr review.PullRequest) (string, string, color.Color) {
 	switch pr.MergeState {
 	case "CLEAN", "HAS_HOOKS":
-		return s(lipgloss.Green).Render(iconApproved)
+		return iconApproved, "Ready", lipgloss.Green
 	case "BLOCKED":
-		return s(lipgloss.Red).Render(iconChangesRequested)
+		return iconChangesRequested, "Blocked", lipgloss.Red
 	case "UNSTABLE":
-		return s(lipgloss.BrightYellow).Render(iconWaiting)
+		return iconWaiting, "Unstable", lipgloss.BrightYellow
 	case "DIRTY":
-		return s(lipgloss.Red).Render(iconChangesRequested)
+		return iconChangesRequested, "Conflicts", lipgloss.Red
 	case "DRAFT":
-		return s(lipgloss.BrightBlack).Render(iconWaiting)
+		return iconWaiting, "Draft", lipgloss.BrightBlack
 	default:
-		return s(lipgloss.BrightBlack).Render(iconWaiting)
+		return iconWaiting, "Unknown", lipgloss.BrightBlack
 	}
 }
 
@@ -590,14 +616,8 @@ func renderStatsPlain(pr review.PullRequest) string {
 
 // renderMergePlain returns the merge state as plain text.
 func renderMergePlain(pr review.PullRequest) string {
-	switch pr.MergeState {
-	case "CLEAN", "HAS_HOOKS":
-		return iconApproved
-	case "BLOCKED", "DIRTY":
-		return iconChangesRequested
-	default:
-		return iconWaiting
-	}
+	icon, label, _ := mergeStateLabel(pr)
+	return icon + " " + label
 }
 
 // formatNum formats a number with k suffix for large values.

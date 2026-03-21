@@ -16,6 +16,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/appctx"
+	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/styles"
@@ -1216,116 +1217,36 @@ func (m Model) currentPosition() (label string, index int, total int) {
 
 // overlayHelpPopup renders a centered help popup over the existing content.
 func (m Model) overlayHelpPopup(base string) string {
-	return m.overlayGeneric(base, m.renderHelpPopup())
+	popup := helppopup.Render(helpSections(), m.width)
+	return m.overlayGeneric(base, popup)
 }
 
-// renderHelpPopup builds the help popup content.
-func (m Model) renderHelpPopup() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
-	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
-	descStyle := lipgloss.NewStyle().Foreground(styles.DiffContext)
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Warning).MarginTop(1)
-
-	type binding struct {
-		key  string
-		desc string
+// helpSections returns the keybinding sections for the diffview help popup.
+func helpSections() []helppopup.Section {
+	return []helppopup.Section{
+		helppopup.Bind("Navigation",
+			keys.Down, keys.Up, keys.PageDown, keys.PageUp,
+			keys.NextFile, keys.PrevFile, keys.NextHunk, keys.PrevHunk,
+			keys.NextComment, keys.PrevComment, keys.JumpBack, keys.JumpForward,
+		),
+		helppopup.Bind("Search",
+			keys.Search, keys.NextSearch, keys.PrevSearch, keys.FilterFile,
+		),
+		{Title: "Filter", Entries: []helppopup.Entry{
+			{Key: "Tf", Desc: "narrow by regex path"},
+			{Key: "To", Desc: "toggle CODEOWNERS filter"},
+			{Key: "Tx", Desc: "clear all filters"},
+		}},
+		helppopup.Bind("Review",
+			keys.Enter, keys.SelectLine, keys.MarkViewed,
+			keys.ToggleComment, keys.FoldComment, keys.Submit,
+		),
+		helppopup.Bind("Comment Selection",
+			keys.Reply, keys.EditComment, keys.DeleteComment,
+		),
+		helppopup.Bind("Other",
+			keys.ToggleTree, keys.Info, keys.OpenInBrowser,
+			keys.Editor, keys.Help, keys.Back, keys.Quit,
+		),
 	}
-
-	sections := []struct {
-		title    string
-		bindings []binding
-	}{
-		{
-			title: "Navigation",
-			bindings: []binding{
-				{"j / k", "Scroll down / up"},
-				{"ctrl+d / ctrl+u", "Page down / up"},
-				{"f / F", "Next / prev file"},
-				{"h / H", "Next / prev hunk"},
-				{"c / C", "Next / prev comment"},
-				{"ctrl+o / ctrl+i", "Jump back / forward"},
-			},
-		},
-		{
-			title: "Search",
-			bindings: []binding{
-				{"/ (text)", "Search in file"},
-				{"n / N", "Next / prev search match"},
-				{"ctrl+p", "Filter files (jump to file)"},
-			},
-		},
-		{
-			title: "Filter",
-			bindings: []binding{
-				{"Tf", "Narrow tree by regex path filter"},
-				{"To", "Toggle CODEOWNERS team filter"},
-				{"Tx", "Clear all narrowing filters"},
-			},
-		},
-		{
-			title: "Review",
-			bindings: []binding{
-				{"enter", "New comment / open comments"},
-				{"space", "Start visual selection"},
-				{"m", "Toggle mark as viewed"},
-				{"tab / S-tab", "Toggle / toggle all comments"},
-				{"ctrl+s", "Submit review"},
-			},
-		},
-		{
-			title: "Comment selection (j/k on expanded comments)",
-			bindings: []binding{
-				{"j / k", "Next / prev comment"},
-				{"enter", "View all comments in popup"},
-				{"r", "Reply to comment"},
-				{"e", "Edit pending comment"},
-				{"d", "Delete pending comment"},
-				{"esc", "Deselect comment"},
-			},
-		},
-		{
-			title: "Other",
-			bindings: []binding{
-				{"t", "Toggle file tree"},
-				{"i", "Toggle PR info popup"},
-				{"w", "Open in browser"},
-				{"ctrl+e", "Open in $EDITOR"},
-				{"esc", "Back"},
-				{"ctrl+c", "Quit (×2 force)"},
-			},
-		},
-	}
-
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("  Keybindings") + "\n")
-
-	for _, section := range sections {
-		b.WriteString(sectionStyle.Render("  "+section.title) + "\n")
-		for _, bind := range section.bindings {
-			key := keyStyle.Render(fmt.Sprintf("  %-20s", bind.key))
-			desc := descStyle.Render(bind.desc)
-			b.WriteString(key + desc + "\n")
-		}
-	}
-
-	b.WriteString("\n" + styles.HelpStyle.Render("  Press any key to close"))
-
-	content := b.String()
-
-	// Find the widest line for the box
-	maxWidth := 0
-	for _, line := range strings.Split(content, "\n") {
-		if w := lipgloss.Width(line); w > maxWidth {
-			maxWidth = w
-		}
-	}
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Primary).
-		Background(styles.BgOverlay).
-		Padding(0, 1).
-		Width(maxWidth + 2)
-
-	return boxStyle.Render(content)
 }
