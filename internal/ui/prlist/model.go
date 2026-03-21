@@ -15,6 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/components/scrollbar"
 	"github.com/jethrokuan/pry/internal/ui/components/tabbar"
 	"github.com/jethrokuan/pry/internal/ui/prpreview"
 	"github.com/jethrokuan/pry/internal/ui/styles"
@@ -375,7 +376,32 @@ func (m Model) View() string {
 		leftPane.WriteString("No PRs found for this filter.\n")
 		leftPane.WriteString("\nPress tab to switch filters or ctrl+c to quit")
 	} else {
-		leftPane.WriteString(m.renderTable(tableWidth, tableHeight))
+		scrollbarWidth := 1
+		tableContent := m.renderTable(tableWidth-scrollbarWidth, tableHeight)
+
+		sb := scrollbar.New()
+		sb.Height = tableHeight
+		sb.TotalItems = len(m.prs)
+		rowHeight := 4
+		sb.VisibleItems = tableHeight / rowHeight
+		sb.ThumbColor = styles.Primary
+		// Compute offset (same logic as renderTable)
+		visibleRows := tableHeight / rowHeight
+		if visibleRows < 1 {
+			visibleRows = 1
+		}
+		start := 0
+		if m.cursor >= visibleRows {
+			start = m.cursor - visibleRows + 1
+		}
+		sb.Offset = start
+
+		sbView := sb.View()
+		if sbView != "" {
+			leftPane.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, tableContent, sbView))
+		} else {
+			leftPane.WriteString(tableContent)
+		}
 	}
 
 	m.preview.SetSize(sidebarW, mainHeight)

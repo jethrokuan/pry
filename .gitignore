@@ -1,2 +1,6 @@
 pry
 .bd-patrol/*.worker
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
