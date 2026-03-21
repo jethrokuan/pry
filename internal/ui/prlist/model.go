@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"image/color"
 	"log/slog"
+	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -51,8 +53,9 @@ type KeyMap struct {
 	Refresh     key.Binding
 	SidebarDown key.Binding
 	SidebarUp   key.Binding
-	Quit        key.Binding
-	Help        key.Binding
+	OpenInBrowser key.Binding
+	Quit          key.Binding
+	Help          key.Binding
 }
 
 var keys = KeyMap{
@@ -65,8 +68,9 @@ var keys = KeyMap{
 	Refresh:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 	SidebarDown: key.NewBinding(key.WithKeys("J"), key.WithHelp("J", "scroll preview down")),
 	SidebarUp:   key.NewBinding(key.WithKeys("K"), key.WithHelp("K", "scroll preview up")),
-	Quit:        key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
-	Help:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+	OpenInBrowser: key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "open in browser")),
+	Quit:          key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+	Help:          key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 }
 
 // Model is the Bubble Tea model for the PR list screen.
@@ -289,6 +293,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.preview.ScrollDown(3)
 		case key.Matches(msg, keys.SidebarUp):
 			m.preview.ScrollUp(3)
+		case key.Matches(msg, keys.OpenInBrowser):
+			if len(m.prs) > 0 {
+				return m, openBrowser(m.prs[m.cursor].URL)
+			}
 		case key.Matches(msg, keys.Refresh):
 			m.loading = true
 			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
@@ -425,7 +433,7 @@ func (m Model) View() string {
 	// Footer
 	b.WriteString("\n")
 	repoLabel := fmt.Sprintf("%s/%s", m.svc.RepoOwner(), m.svc.RepoName())
-	helpText := styles.HelpStyle.Render("↑/k up  ↓/j down  enter select  tab switch  / search  J/K scroll preview  r refresh  ? help")
+	helpText := styles.HelpStyle.Render("↑/k up  ↓/j down  enter select  tab switch  / search  J/K scroll preview  w open  r refresh  ? help")
 	repo := lipgloss.NewStyle().Foreground(styles.Primary).Render(repoLabel)
 	gap := m.width - lipgloss.Width(helpText) - lipgloss.Width(repo)
 	if gap < 1 {
@@ -447,7 +455,7 @@ func helpSections() []helppopup.Section {
 		helppopup.Bind("Navigation", keys.Up, keys.Down, keys.Select),
 		helppopup.Bind("Tabs & Filters", keys.NextTab, keys.PrevTab, keys.EditFilter),
 		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp),
-		helppopup.Bind("Other", keys.Refresh, keys.Help, keys.Quit),
+		helppopup.Bind("Other", keys.OpenInBrowser, keys.Refresh, keys.Help, keys.Quit),
 	}
 }
 
@@ -544,6 +552,25 @@ func (m Model) renderTable(width, height int) string {
 	}
 
 	return b.String()
+}
+
+// openBrowser opens the given URL in the user's default browser.
+func openBrowser(url string) tea.Cmd {
+	return func() tea.Msg {
+		var cmd *exec.Cmd
+		switch runtime.GOOS {
+		case "darwin":
+			cmd = exec.Command("open", url)
+		case "windows":
+			cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		default:
+			cmd = exec.Command("xdg-open", url)
+		}
+		if err := cmd.Start(); err != nil {
+			slog.Warn("failed to open URL in browser", "url", url, "error", err)
+		}
+		return nil
+	}
 }
 
 // Nerd Font icons — exact codepoints from gh-dash constants.go.
