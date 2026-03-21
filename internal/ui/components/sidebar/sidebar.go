@@ -27,11 +27,12 @@ func New() Model {
 func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height
-	contentWidth := max(width-3, 1) // left border + padding
+	contentWidth := max(width-5, 1)  // left border(1) + left pad(1) + right pad(1) + border width(2)
+	contentHeight := max(height-2, 1) // top pad(1) + bottom pad(1)
 	if !m.ready {
 		m.viewport = viewport.New(
 			viewport.WithWidth(contentWidth),
-			viewport.WithHeight(height),
+			viewport.WithHeight(contentHeight),
 		)
 		m.ready = true
 		if m.pendingContent != "" {
@@ -40,7 +41,7 @@ func (m *Model) SetSize(width, height int) {
 		}
 	} else {
 		m.viewport.SetWidth(contentWidth)
-		m.viewport.SetHeight(height)
+		m.viewport.SetHeight(contentHeight)
 	}
 }
 
@@ -73,6 +74,7 @@ func (m Model) View() string {
 		BorderLeft(true).
 		BorderStyle(lipgloss.Border{Left: "│"}).
 		BorderForeground(styles.Muted).
+		Padding(1).
 		Width(m.width).
 		Height(m.height)
 
