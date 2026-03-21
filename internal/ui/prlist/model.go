@@ -381,7 +381,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				if err := clipboard.WriteText(pr.URL); err != nil {
 					return m, m.setFlash("Copy failed: " + err.Error())
 				}
-				return m, m.setFlash("Copied PR URL")
+				return m, m.setFlash(fmt.Sprintf("Copied %s", pr.URL))
 			}
 		case key.Matches(msg, keys.Help):
 			m.showHelp = true

@@ -645,7 +645,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.err != nil {
 			return m, m.setFlash("Copy failed: " + msg.err.Error())
 		}
-		return m, m.setFlash("Copied link")
+		return m, m.setFlash(fmt.Sprintf("Copied %s", msg.url))
 
 	case editorFinishedMsg:
 		if msg.err == nil && msg.content != "" {
