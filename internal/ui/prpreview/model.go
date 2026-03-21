@@ -123,9 +123,16 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 	default:
 		stateBadge = lipgloss.NewStyle().Foreground(styles.Success).Render("● Open")
 	}
-	branchInfo := lipgloss.NewStyle().Foreground(styles.Muted).Render(
-		fmt.Sprintf("  %s ← %s", pr.Base, pr.Branch))
-	b.WriteString(stateBadge + branchInfo + "\n")
+	pill := lipgloss.NewStyle().
+		Foreground(lipgloss.BrightWhite).
+		Background(styles.BgSelected).
+		Padding(0, 1)
+	renderPill := func(text string) string {
+		return pill.Render(text)
+	}
+	arrow := lipgloss.NewStyle().Foreground(styles.Muted).Render(" ← ")
+	branchInfo := renderPill(pr.Base) + arrow + renderPill(pr.Branch)
+	b.WriteString(stateBadge + "  " + branchInfo + "\n")
 
 	// Author + time
 	authorLine := fmt.Sprintf("by %s · %s",
