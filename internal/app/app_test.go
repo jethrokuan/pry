@@ -67,7 +67,7 @@ func (s *stubService) UploadImage(_ context.Context, _ []byte, _ string) (string
 var defaultFilters = []review.PRFilter{{Name: "Default", Qualifier: "is:open"}}
 
 func newTestModel() Model {
-	return New(&stubService{}, config.Config{}, defaultFilters, nil)
+	return New(&stubService{}, config.Config{}, defaultFilters)
 }
 
 func testPR() *review.PullRequest {
@@ -267,7 +267,7 @@ var _ = Describe("App message routing", func() {
 
 	Describe("NewWithPR", func() {
 		It("starts on the diff view screen", func() {
-			m := NewWithPR(&stubService{}, config.Config{}, 99, defaultFilters, nil)
+			m := NewWithPR(&stubService{}, config.Config{}, 99, defaultFilters)
 
 			Expect(m.screen).To(Equal(ScreenDiffView))
 			Expect(m.initialPR).To(Equal(99))

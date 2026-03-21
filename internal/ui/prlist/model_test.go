@@ -17,8 +17,7 @@ func newTestModel(svc *reviewtest.MockService, filters ...review.PRFilter) Model
 			{Name: "Default", Qualifier: "is:open"},
 		}
 	}
-	columns := []string{"number", "title", "author"}
-	return New(svc, filters, columns)
+	return New(svc, filters)
 }
 
 func samplePRs(n int) []review.PullRequest {
@@ -167,7 +166,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 	})
 
-	ginkgo.Describe("filter picker", func() {
+	ginkgo.Describe("tab navigation", func() {
 		var filters []review.PRFilter
 
 		ginkgo.BeforeEach(func() {
@@ -178,67 +177,61 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			}
 		})
 
-		ginkgo.It("opens filter picker with f", func() {
+		ginkgo.It("switches to next tab with tab key", func() {
 			svc := &reviewtest.MockService{}
 			m := loadModel(svc, samplePRs(1), filters...)
 
-			m, _ = m.Update(tea.KeyPressMsg{Code: 'f'})
-			gomega.Expect(m.showFilterPicker).To(gomega.BeTrue())
-			gomega.Expect(m.filterCursor).To(gomega.Equal(0))
-		})
-
-		ginkgo.It("navigates filter picker with j/k", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1), filters...)
-			m.showFilterPicker = true
-			m.filterCursor = 0
-
-			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.filterCursor).To(gomega.Equal(1))
-
-			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.filterCursor).To(gomega.Equal(2))
-
-			// Clamp at bottom
-			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.filterCursor).To(gomega.Equal(2))
-
-			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
-			gomega.Expect(m.filterCursor).To(gomega.Equal(1))
-		})
-
-		ginkgo.It("selects a different filter and triggers reload", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1), filters...)
-			m.showFilterPicker = true
-			m.filterCursor = 1
-
-			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-			gomega.Expect(m.showFilterPicker).To(gomega.BeFalse())
+			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(1))
+			gomega.Expect(m.tabBar.Active()).To(gomega.Equal(1))
 			gomega.Expect(m.loading).To(gomega.BeTrue())
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
 		})
 
-		ginkgo.It("does not reload when selecting the same filter", func() {
+		ginkgo.It("switches to prev tab with shift+tab", func() {
 			svc := &reviewtest.MockService{}
 			m := loadModel(svc, samplePRs(1), filters...)
-			m.showFilterPicker = true
-			m.filterCursor = 0 // same as filterIdx
+			m.tabBar.SetActive(2)
+			m.filterIdx = 2
 
-			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-			gomega.Expect(m.showFilterPicker).To(gomega.BeFalse())
+			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+			gomega.Expect(m.filterIdx).To(gomega.Equal(1))
+			gomega.Expect(m.tabBar.Active()).To(gomega.Equal(1))
+			gomega.Expect(m.loading).To(gomega.BeTrue())
+			gomega.Expect(cmd).NotTo(gomega.BeNil())
+		})
+
+		ginkgo.It("does not go past last tab", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1), filters...)
+			m.tabBar.SetActive(2)
+			m.filterIdx = 2
+
+			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+			gomega.Expect(m.filterIdx).To(gomega.Equal(2))
 			gomega.Expect(m.loading).To(gomega.BeFalse())
 			gomega.Expect(cmd).To(gomega.BeNil())
 		})
 
-		ginkgo.It("closes filter picker with esc", func() {
+		ginkgo.It("does not go before first tab", func() {
 			svc := &reviewtest.MockService{}
 			m := loadModel(svc, samplePRs(1), filters...)
-			m.showFilterPicker = true
 
-			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-			gomega.Expect(m.showFilterPicker).To(gomega.BeFalse())
+			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+			gomega.Expect(m.filterIdx).To(gomega.Equal(0))
+			gomega.Expect(m.loading).To(gomega.BeFalse())
+			gomega.Expect(cmd).To(gomega.BeNil())
+		})
+
+		ginkgo.It("switches tab by number key", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1), filters...)
+
+			m, cmd := m.Update(tea.KeyPressMsg{Code: '2'})
+			gomega.Expect(m.filterIdx).To(gomega.Equal(1))
+			gomega.Expect(m.tabBar.Active()).To(gomega.Equal(1))
+			gomega.Expect(m.loading).To(gomega.BeTrue())
+			gomega.Expect(cmd).NotTo(gomega.BeNil())
 		})
 	})
 

@@ -68,14 +68,13 @@ func main() {
 
 	// Load filters and columns from config (falls back to defaults)
 	filters := cfg.PRFilters()
-	columns := cfg.PRColumns()
 
 	// Create the app — optionally jump to a specific PR
 	var model app.Model
 	if cli.PRNumber > 0 {
-		model = app.NewWithPR(svc, cfg, cli.PRNumber, filters, columns)
+		model = app.NewWithPR(svc, cfg, cli.PRNumber, filters)
 	} else {
-		model = app.New(svc, cfg, filters, columns)
+		model = app.New(svc, cfg, filters)
 	}
 
 	p := tea.NewProgram(model)

@@ -111,7 +111,9 @@ app.Model
 ├── selectedPR *PullRequest     ← the active PR (nil on PR list)
 │   ├── PendingReview           ← created by pr.StartReview()
 │   └── ExistingComments        ← fetched in diffview, stored on PR
-├── prList prlist.Model         ← takes svc, filters, columns
+├── prList prlist.Model         ← takes svc, filters, columns, cfg.PRList
+│   ├── tabBar tabbar.Model    ← horizontal filter tab carousel
+│   └── sidebar sidebar.Model  ← toggleable PR preview pane
 ├── diffView diffview.Model     ← takes ctx + pr (reads pr.PendingReview)
 └── submit submit.Model         ← takes ctx + pr (reads pr.PendingReview)
 ```
@@ -153,9 +155,11 @@ internal/
 ├── app/          Top-level model, screen routing
 ├── ui/
 │   ├── diffview/ Diff review screen (largest screen)
-│   ├── prlist/   PR list + filtering
+│   ├── prlist/   PR list + tab bar + sidebar preview
 │   ├── prdetail/ PR metadata view
 │   ├── submit/   Review submission
+│   ├── components/tabbar/   Reusable horizontal tab carousel
+│   ├── components/sidebar/  Reusable toggleable sidebar viewport
 │   └── styles/   Theme + style definitions
 ├── diff/         Unified diff parser
 ├── config/       User configuration (TOML)

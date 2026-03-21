@@ -23,6 +23,12 @@ type FileTreeConfig struct {
 	OwnerFilter *bool `toml:"owner_filter"`
 }
 
+// PRListConfig holds PR list layout settings.
+type PRListConfig struct {
+	SidebarWidth   int  `toml:"sidebar_width"`   // width of sidebar in columns (default 50)
+	SidebarVisible bool `toml:"sidebar_visible"` // whether sidebar starts visible
+}
+
 // Config holds user configuration for the tool.
 type Config struct {
 	Editor   string         `toml:"editor"`
@@ -31,11 +37,12 @@ type Config struct {
 	Filters  []FilterConfig `toml:"filters"`
 	Columns  []string       `toml:"columns"`
 	FileTree FileTreeConfig `toml:"file_tree"`
+	PRList   PRListConfig   `toml:"pr_list"`
 }
 
 // DefaultColumns returns the default PR list columns.
 func DefaultColumns() []string {
-	return []string{"number", "title", "author", "changes", "my_review", "my_teams", "updated"}
+	return []string{"state", "number", "title", "author", "changes", "ci", "my_review", "my_teams", "updated"}
 }
 
 // PRColumns returns the configured columns, falling back to defaults.
@@ -52,6 +59,9 @@ func Default() Config {
 		Editor:   "",
 		UseDelta: true,
 		PageSize: 50,
+		PRList: PRListConfig{
+			SidebarWidth: 50,
+		},
 	}
 }
 

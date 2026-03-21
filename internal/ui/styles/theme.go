@@ -22,6 +22,7 @@ var (
 // Semantic background colors.
 var (
 	BgCursor     color.Color = lipgloss.BrightBlack
+	BgSelected   color.Color = lipgloss.Color("#3a3a5c") // Bright highlight for selected rows
 	BgSearch     color.Color = lipgloss.Yellow
 	// Subtle background tints — hardcoded hex since ANSI 16 has no in-between shades.
 	// These are dark enough to work on any dark terminal theme.

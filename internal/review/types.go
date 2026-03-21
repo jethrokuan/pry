@@ -21,6 +21,13 @@ const (
 	SyncFailed                     // Sync failed
 )
 
+// Reviewer represents a reviewer and their review status on a PR.
+type Reviewer struct {
+	Login  string // User login or team slug
+	IsTeam bool   // True if this is a team reviewer
+	State  string // APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, PENDING, or ""
+}
+
 // PullRequest represents a pull/merge request in a forge-agnostic way.
 type PullRequest struct {
 	Number    int
@@ -36,8 +43,9 @@ type PullRequest struct {
 	UpdatedAt time.Time
 	Additions int
 	Deletions int
-	Files     int
-	Body      string
+	Files        int
+	CommentCount int
+	Body         string
 	URL       string
 	HeadSHA   string
 
@@ -46,9 +54,10 @@ type PullRequest struct {
 	ChecksSummary string
 
 	// Review status
-	ReviewDecision string   // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
-	PendingTeams   []string // Team slugs with outstanding review requests
-	MyReviewState  string   // Authenticated user's latest review: APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, or ""
+	ReviewDecision string     // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
+	Reviewers      []Reviewer // Individual reviewer statuses
+	PendingTeams   []string   // Team slugs with outstanding review requests
+	MyReviewState  string     // Authenticated user's latest review: APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, or ""
 
 	// Review state (populated when user enters review)
 	PendingReview    *PendingReview    // nil until user starts reviewing

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/jethrokuan/pry/internal/appctx"
-	"github.com/jethrokuan/pry/internal/config"
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/diffview"
@@ -131,7 +130,7 @@ func NewPRListModel(svc review.Service, filters ...review.PRFilter) prlist.Model
 			{Name: "Default", Qualifier: "is:open"},
 		}
 	}
-	return prlist.New(svc, filters, config.DefaultColumns())
+	return prlist.New(svc, filters)
 }
 
 // NewPRDetailModel creates a prdetail.Model for the given PR.

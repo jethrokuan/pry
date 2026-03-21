@@ -30,9 +30,12 @@ type graphqlPRNode struct {
 	BaseRefName    string    `json:"baseRefName"`
 	HeadRefOid     string    `json:"headRefOid"`
 	ReviewDecision string    `json:"reviewDecision"`
-	Author         struct {
+	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
+	Comments struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"comments"`
 	Labels struct {
 		Nodes []struct {
 			Name string `json:"name"`
@@ -51,6 +54,15 @@ type graphqlPRNode struct {
 			State string `json:"state"`
 		} `json:"nodes"`
 	} `json:"latestReviews"`
+	Commits struct {
+		Nodes []struct {
+			Commit struct {
+				StatusCheckRollup struct {
+					State string `json:"state"`
+				} `json:"statusCheckRollup"`
+			} `json:"commit"`
+		} `json:"nodes"`
+	} `json:"commits"`
 }
 
 // graphqlReviewer handles the union type (User | Team) in requestedReviewer.
@@ -91,7 +103,7 @@ func (c *Client) ListPRs(_ context.Context, filter review.PRFilter) ([]review.Pu
 func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 	query := fmt.Sprintf("is:pr is:open repo:%s/%s %s sort:updated-desc", c.owner, c.repo, qualifier)
 
-	// Minimal fields for the list view — details fetched on demand via GetPR.
+	// Fields for the list view — enough for the expanded 2-line row format.
 	graphqlQuery := `
 	query($query: String!) {
 		viewer { login }
@@ -101,11 +113,27 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 					id
 					number
 					title
+					state
 					isDraft
+					createdAt
 					updatedAt
 					additions
 					deletions
+					changedFiles
+					headRefName
+					baseRefName
+					reviewDecision
 					author { login }
+					comments { totalCount }
+					commits(last: 1) {
+						nodes {
+							commit {
+								statusCheckRollup {
+									state
+								}
+							}
+						}
+					}
 					reviewRequests(first: 20) {
 						nodes {
 							requestedReviewer {
@@ -212,13 +240,61 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		}
 	}
 
+	// Build per-reviewer statuses.
+	// Start with completed reviews (latestReviews), then add pending requests.
+	reviewerMap := make(map[string]review.Reviewer)
 	var myReviewState string
-	if viewer != "" {
-		for _, rv := range node.LatestReviews.Nodes {
-			if strings.EqualFold(rv.Author.Login, viewer) {
-				myReviewState = rv.State
-				break
+	for _, rv := range node.LatestReviews.Nodes {
+		login := rv.Author.Login
+		if login == "" {
+			continue
+		}
+		reviewerMap[strings.ToLower(login)] = review.Reviewer{
+			Login: login,
+			State: rv.State,
+		}
+		if viewer != "" && strings.EqualFold(login, viewer) {
+			myReviewState = rv.State
+		}
+	}
+	// Add pending user reviewers (requested but haven't reviewed yet)
+	for _, rr := range node.ReviewRequests.Nodes {
+		r := rr.RequestedReviewer
+		if r.Login != "" {
+			key := strings.ToLower(r.Login)
+			if _, exists := reviewerMap[key]; !exists {
+				reviewerMap[key] = review.Reviewer{Login: r.Login, State: "PENDING"}
 			}
+		}
+		if r.Slug != "" && r.Organization.Login != "" {
+			key := strings.ToLower(r.Organization.Login + "/" + r.Slug)
+			if _, exists := reviewerMap[key]; !exists {
+				reviewerMap[key] = review.Reviewer{
+					Login:  r.Slug,
+					IsTeam: true,
+					State:  "PENDING",
+				}
+			}
+		}
+	}
+	reviewers := make([]review.Reviewer, 0, len(reviewerMap))
+	for _, r := range reviewerMap {
+		reviewers = append(reviewers, r)
+	}
+
+	// Extract CI status from the last commit's status check rollup
+	var checksPass *bool
+	if len(node.Commits.Nodes) > 0 {
+		state := node.Commits.Nodes[len(node.Commits.Nodes)-1].Commit.StatusCheckRollup.State
+		switch state {
+		case "SUCCESS":
+			t := true
+			checksPass = &t
+		case "ERROR", "FAILURE":
+			f := false
+			checksPass = &f
+		case "PENDING", "EXPECTED":
+			// Leave as nil (pending)
 		}
 	}
 
@@ -237,10 +313,13 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		Additions:      node.Additions,
 		Deletions:      node.Deletions,
 		Files:          node.ChangedFiles,
+		CommentCount:   node.Comments.TotalCount,
 		Body:           node.Body,
 		URL:            node.URL,
 		HeadSHA:        node.HeadRefOid,
+		ChecksPass:     checksPass,
 		ReviewDecision: node.ReviewDecision,
+		Reviewers:      reviewers,
 		PendingTeams:   pendingTeams,
 		MyReviewState:  myReviewState,
 	}

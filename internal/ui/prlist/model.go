@@ -3,6 +3,7 @@ package prlist
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"log/slog"
 	"strings"
 	"time"
@@ -12,9 +13,13 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	ltable "charm.land/lipgloss/v2/table"
+
+	"charm.land/glamour/v2"
 
 	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/components/sidebar"
+	"github.com/jethrokuan/pry/internal/ui/components/tabbar"
+	"github.com/jethrokuan/pry/internal/ui/mdutil"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
@@ -35,27 +40,39 @@ type userTeamsLoadedMsg struct {
 	teams []string
 }
 
+type sidebarBodyLoadedMsg struct {
+	prNumber int
+	body     string
+	err      error
+}
+
 // KeyMap defines the key bindings for the PR list.
 type KeyMap struct {
-	Up         key.Binding
-	Down       key.Binding
-	Select     key.Binding
-	Filter     key.Binding
-	EditFilter key.Binding
-	Refresh    key.Binding
-	Quit       key.Binding
-	Help       key.Binding
+	Up          key.Binding
+	Down        key.Binding
+	Select      key.Binding
+	NextTab     key.Binding
+	PrevTab     key.Binding
+	EditFilter  key.Binding
+	Refresh     key.Binding
+	SidebarDown key.Binding
+	SidebarUp   key.Binding
+	Quit        key.Binding
+	Help        key.Binding
 }
 
 var keys = KeyMap{
-	Up:         key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
-	Down:       key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-	Select:     key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
-	Filter:     key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "filter")),
-	EditFilter: key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "edit filter")),
-	Refresh:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-	Quit:       key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
-	Help:       key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+	Up:          key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
+	Down:        key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+	Select:      key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+	NextTab:     key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next tab")),
+	PrevTab:     key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev tab")),
+	EditFilter:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "edit filter")),
+	Refresh:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
+	SidebarDown: key.NewBinding(key.WithKeys("J"), key.WithHelp("J", "scroll preview down")),
+	SidebarUp:   key.NewBinding(key.WithKeys("K"), key.WithHelp("K", "scroll preview up")),
+	Quit:        key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+	Help:        key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 }
 
 // Model is the Bubble Tea model for the PR list screen.
@@ -65,15 +82,21 @@ type Model struct {
 	cursor           int
 	filters          []review.PRFilter
 	filterIdx        int
-	columns          []string
 	userTeams        map[string]bool // cached user team membership ("org/slug" → true)
 	loading          bool
 	err              error
 	width            int
 	height           int
 	spinner          spinner.Model
-	showFilterPicker bool
-	filterCursor     int
+
+	// Tab bar (replaces filter picker overlay)
+	tabBar tabbar.Model
+
+	// Sidebar preview
+	sidebar        sidebar.Model
+	sidebarWidth   int // configured width hint (used for glamour word wrap)
+	previewPRNum   int // PR number of the currently loaded preview body
+	previewLoading bool
 
 	// Filter editing
 	editing      bool            // true when the qualifier text input is active
@@ -82,7 +105,7 @@ type Model struct {
 }
 
 // New creates a new PR list model.
-func New(svc review.Service, filters []review.PRFilter, columns []string) Model {
+func New(svc review.Service, filters []review.PRFilter) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
@@ -90,13 +113,20 @@ func New(svc review.Service, filters []review.PRFilter, columns []string) Model 
 	ti.Placeholder = "e.g. review-requested:@me label:bug author:octocat"
 	ti.CharLimit = 256
 
+	tabs := make([]tabbar.Tab, len(filters))
+	for i, f := range filters {
+		tabs[i] = tabbar.Tab{Label: f.Name, Count: -1}
+	}
+
 	return Model{
-		svc:         svc,
-		filters:     filters,
-		columns:     columns,
-		loading:     true,
-		spinner:     s,
-		filterInput: ti,
+		svc:          svc,
+		filters:      filters,
+		loading:      true,
+		spinner:      s,
+		filterInput:  ti,
+		tabBar:       tabbar.New(tabs),
+		sidebar:      sidebar.New(),
+		sidebarWidth: 50, // initial default; recalculated on WindowSizeMsg
 	}
 }
 
@@ -107,6 +137,17 @@ func (m Model) Init() tea.Cmd {
 		m.fetchUserTeams(),
 		m.spinner.Tick,
 	)
+}
+
+// layoutDimensions returns sidebar width and main content height.
+func (m Model) layoutDimensions() (sidebarW, mainHeight int) {
+	sidebarW = m.width * 45 / 100
+	// tab bar (1) + separator (1) + footer (2) = 4
+	mainHeight = m.height - 4
+	if mainHeight < 3 {
+		mainHeight = 3
+	}
+	return
 }
 
 func (m Model) fetchUserTeams() tea.Cmd {
@@ -142,6 +183,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Pre-size sidebar so viewport is initialized before content is set
+		sw, mh := m.layoutDimensions()
+		m.sidebarWidth = sw
+		m.sidebar.SetSize(sw, mh)
 
 	case prsLoadedMsg:
 		m.loading = false
@@ -150,12 +195,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.prs = msg.prs
 			m.cursor = 0
+			m.previewPRNum = 0 // reset to trigger fresh body load
+			m.tabBar.SetCount(m.filterIdx, len(m.prs))
+			return m, m.refreshSidebarPreview()
 		}
 
 	case userTeamsLoadedMsg:
 		m.userTeams = make(map[string]bool, len(msg.teams))
 		for _, t := range msg.teams {
 			m.userTeams[t] = true
+		}
+
+	case sidebarBodyLoadedMsg:
+		// Only apply if this is still the PR we're viewing
+		if len(m.prs) > 0 && m.cursor < len(m.prs) && m.prs[m.cursor].Number == msg.prNumber {
+			m.previewLoading = false
+			if msg.err == nil {
+				m.updateSidebarContent(&m.prs[m.cursor], msg.body)
+			} else {
+				m.updateSidebarContent(&m.prs[m.cursor], "")
+			}
 		}
 
 	case spinner.TickMsg:
@@ -192,31 +251,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Filter picker mode
-		if m.showFilterPicker {
-			switch {
-			case key.Matches(msg, keys.Up):
-				if m.filterCursor > 0 {
-					m.filterCursor--
-				}
-			case key.Matches(msg, keys.Down):
-				if m.filterCursor < len(m.filters)-1 {
-					m.filterCursor++
-				}
-			case key.Matches(msg, keys.Select):
-				m.showFilterPicker = false
-				if m.filterCursor != m.filterIdx || m.customFilter != nil {
-					m.filterIdx = m.filterCursor
-					m.customFilter = nil
-					m.loading = true
-					return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
-				}
-			case key.Matches(msg, keys.Quit), key.Matches(msg, key.NewBinding(key.WithKeys("esc", "f"))):
-				m.showFilterPicker = false
-			}
-			return m, nil
-		}
-
 		// Normal mode
 		switch {
 		case key.Matches(msg, keys.Quit):
@@ -224,10 +258,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.Up):
 			if m.cursor > 0 {
 				m.cursor--
+				return m, m.refreshSidebarPreview()
 			}
 		case key.Matches(msg, keys.Down):
 			if m.cursor < len(m.prs)-1 {
 				m.cursor++
+				return m, m.refreshSidebarPreview()
 			}
 		case key.Matches(msg, keys.Select):
 			if len(m.prs) > 0 {
@@ -236,247 +272,284 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return PRSelectedMsg{PR: &pr}
 				}
 			}
-		case key.Matches(msg, keys.Filter):
-			m.showFilterPicker = true
-			m.filterCursor = m.filterIdx
+		case key.Matches(msg, keys.NextTab):
+			if m.tabBar.Next() {
+				m.filterIdx = m.tabBar.Active()
+				m.customFilter = nil
+				m.loading = true
+				return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+			}
+		case key.Matches(msg, keys.PrevTab):
+			if m.tabBar.Prev() {
+				m.filterIdx = m.tabBar.Active()
+				m.customFilter = nil
+				m.loading = true
+				return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+			}
 		case key.Matches(msg, keys.EditFilter):
 			m.editing = true
 			m.customFilter = nil // clear custom filter when entering edit mode
 			m.filterInput.SetValue(m.activeFilter().Qualifier)
 			m.filterInput.Focus()
 			return m, nil
+		case key.Matches(msg, keys.SidebarDown):
+			m.sidebar.ScrollDown(3)
+		case key.Matches(msg, keys.SidebarUp):
+			m.sidebar.ScrollUp(3)
 		case key.Matches(msg, keys.Refresh):
 			m.loading = true
 			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+		}
+
+		// Number keys 1-9 for direct tab selection
+		if num := msg.String(); len(num) == 1 && num[0] >= '1' && num[0] <= '9' {
+			idx := int(num[0]-'1')
+			if idx < len(m.filters) && idx != m.filterIdx {
+				m.tabBar.SetActive(idx)
+				m.filterIdx = idx
+				m.customFilter = nil
+				m.loading = true
+				return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+			}
 		}
 	}
 
 	return m, nil
 }
 
-// renderCtx holds extra data needed by some columns at render time.
-type renderCtx struct {
-	userTeams map[string]bool // "org/team-slug" → true
-}
+// refreshSidebarPreview updates the sidebar with the current PR's metadata
+// and triggers an async body fetch if needed.
+func (m *Model) refreshSidebarPreview() tea.Cmd {
+	if len(m.prs) == 0 || m.cursor >= len(m.prs) {
+		m.sidebar.SetContent("No PR selected")
+		return nil
+	}
+	pr := &m.prs[m.cursor]
+	m.updateSidebarContent(pr, "")
 
-// columnDef describes how to render a single column.
-type columnDef struct {
-	id     string
-	header string
-	width  int // fixed width; 0 means flexible (takes remaining space)
-	render func(pr review.PullRequest, ctx renderCtx) string
-	// style returns a lipgloss.Style for the cell. If nil, no extra styling.
-	style func(pr review.PullRequest, ctx renderCtx) lipgloss.Style
-}
-
-// knownColumns maps column IDs to their definitions.
-// Width 0 means the column is flexible and fills remaining space.
-var knownColumns = map[string]columnDef{
-	"number": {
-		id:     "number",
-		header: "#",
-		width:  7,
-		render: func(pr review.PullRequest, _ renderCtx) string {
-			return fmt.Sprintf("#%d", pr.Number)
-		},
-		style: func(_ review.PullRequest, _ renderCtx) lipgloss.Style {
-			return lipgloss.NewStyle().Foreground(styles.Primary)
-		},
-	},
-	"title": {
-		id:     "title",
-		header: "Title",
-		width:  0, // flexible
-		render: func(pr review.PullRequest, _ renderCtx) string {
-			return pr.Title
-		},
-		style: func(pr review.PullRequest, _ renderCtx) lipgloss.Style {
-			if pr.Draft {
-				return lipgloss.NewStyle().Italic(true).Foreground(styles.Muted)
+	// Fetch body async if not already loaded for this PR
+	if pr.Number != m.previewPRNum {
+		m.previewLoading = true
+		m.previewPRNum = pr.Number
+		prNumber := pr.Number
+		return func() tea.Msg {
+			full, err := m.svc.GetPR(context.Background(), prNumber)
+			if err != nil {
+				return sidebarBodyLoadedMsg{prNumber: prNumber, err: err}
 			}
-			return lipgloss.NewStyle()
-		},
-	},
-	"author": {
-		id:     "author",
-		header: "Author",
-		width:  14,
-		render: func(pr review.PullRequest, _ renderCtx) string {
-			return "@" + pr.Author
-		},
-		style: func(_ review.PullRequest, _ renderCtx) lipgloss.Style {
-			return lipgloss.NewStyle().Foreground(styles.Cyan)
-		},
-	},
-	"changes": {
-		id:     "changes",
-		header: "+/-",
-		width:  12,
-		render: func(pr review.PullRequest, _ renderCtx) string {
-			return fmt.Sprintf("+%d/-%d", pr.Additions, pr.Deletions)
-		},
-	},
-	"updated": {
-		id:     "updated",
-		header: "Updated",
-		width:  10,
-		render: func(pr review.PullRequest, _ renderCtx) string {
-			return timeAgo(pr.UpdatedAt)
-		},
-	},
-	"pending_teams": {
-		id:     "pending_teams",
-		header: "Pending Teams",
-		width:  20,
-		render: func(pr review.PullRequest, _ renderCtx) string {
-			if len(pr.PendingTeams) == 0 {
-				return ""
-			}
-			return strings.Join(stripOrgPrefixes(pr.PendingTeams), ", ")
-		},
-	},
-	"my_teams": {
-		id:     "my_teams",
-		header: "My Teams",
-		width:  20,
-		render: func(pr review.PullRequest, ctx renderCtx) string {
-			if len(pr.PendingTeams) == 0 || len(ctx.userTeams) == 0 {
-				return ""
-			}
-			var mine []string
-			for _, t := range pr.PendingTeams {
-				if ctx.userTeams[t] {
-					mine = append(mine, stripOrgPrefix(t))
-				}
-			}
-			return strings.Join(mine, ", ")
-		},
-	},
-	"my_review": {
-		id:     "my_review",
-		header: "Review",
-		width:  10,
-		render: func(pr review.PullRequest, _ renderCtx) string {
-			switch pr.MyReviewState {
-			case "APPROVED":
-				return "Approved"
-			case "CHANGES_REQUESTED":
-				return "Changes"
-			case "COMMENTED":
-				return "Commented"
-			case "DISMISSED":
-				return "Dismissed"
-			default:
-				return ""
-			}
-		},
-		style: func(pr review.PullRequest, _ renderCtx) lipgloss.Style {
-			switch pr.MyReviewState {
-			case "APPROVED":
-				return lipgloss.NewStyle().Foreground(styles.Success)
-			case "CHANGES_REQUESTED":
-				return lipgloss.NewStyle().Foreground(styles.Warning)
-			case "COMMENTED":
-				return lipgloss.NewStyle().Foreground(styles.Cyan)
-			case "DISMISSED":
-				return lipgloss.NewStyle().Foreground(styles.Muted)
-			default:
-				return lipgloss.NewStyle()
-			}
-		},
-	},
-}
-
-// resolveColumns returns ordered column defs for the configured column IDs.
-func resolveColumns(ids []string) []columnDef {
-	var cols []columnDef
-	for _, id := range ids {
-		if c, ok := knownColumns[id]; ok {
-			cols = append(cols, c)
+			return sidebarBodyLoadedMsg{prNumber: prNumber, body: full.Body}
 		}
 	}
-	return cols
+	return nil
+}
+
+// updateSidebarContent renders the sidebar preview for a PR.
+func (m *Model) updateSidebarContent(pr *review.PullRequest, body string) {
+	var b strings.Builder
+
+	// Header
+	prLabel := fmt.Sprintf("#%d", pr.Number)
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.BrightYellow).Bold(true).Render(prLabel) + "\n\n")
+
+	// Title
+	b.WriteString(lipgloss.NewStyle().Bold(true).Render(pr.Title) + "\n\n")
+
+	// State badge + branch info
+	var stateBadge string
+	switch {
+	case pr.Draft:
+		stateBadge = lipgloss.NewStyle().Foreground(styles.Muted).Render("◌ Draft")
+	case pr.State == "MERGED":
+		stateBadge = lipgloss.NewStyle().Foreground(styles.Secondary).Render("● Merged")
+	case pr.State == "CLOSED":
+		stateBadge = lipgloss.NewStyle().Foreground(styles.Danger).Render("● Closed")
+	default:
+		stateBadge = lipgloss.NewStyle().Foreground(styles.Success).Render("● Open")
+	}
+	branchInfo := lipgloss.NewStyle().Foreground(styles.Muted).Render(
+		fmt.Sprintf("  %s ← %s", pr.Base, pr.Branch))
+	b.WriteString(stateBadge + branchInfo + "\n")
+
+	// Author + time
+	authorLine := fmt.Sprintf("by %s · %s",
+		lipgloss.NewStyle().Foreground(styles.Cyan).Render("@"+pr.Author),
+		timeAgo(pr.UpdatedAt))
+	b.WriteString(authorLine + "\n\n")
+
+	// Review status
+	sectionHeader := lipgloss.NewStyle().Bold(true).Foreground(styles.Muted)
+	b.WriteString(sectionHeader.Render("── Reviewers ──") + "\n")
+	var reviewStatus string
+	switch pr.ReviewDecision {
+	case "APPROVED":
+		reviewStatus = lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Approved")
+	case "CHANGES_REQUESTED":
+		reviewStatus = lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ Changes requested")
+	case "REVIEW_REQUIRED":
+		reviewStatus = lipgloss.NewStyle().Foreground(styles.Warning).Render("○ Review required")
+	default:
+		reviewStatus = lipgloss.NewStyle().Foreground(styles.Muted).Render("○ Pending")
+	}
+	b.WriteString(reviewStatus + "\n")
+	if len(pr.PendingTeams) > 0 {
+		teams := strings.Join(stripOrgPrefixes(pr.PendingTeams), ", ")
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("  Waiting: "+teams) + "\n")
+	}
+	b.WriteString("\n")
+
+	// Labels
+	if len(pr.Labels) > 0 {
+		b.WriteString(sectionHeader.Render("── Labels ──") + "\n")
+		for _, l := range pr.Labels {
+			b.WriteString(styles.LabelStyle.Render(l) + " ")
+		}
+		b.WriteString("\n\n")
+	}
+
+	// Changes
+	b.WriteString(sectionHeader.Render("── Changes ──") + "\n")
+	add := lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("+%d", pr.Additions))
+	del := lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("-%d", pr.Deletions))
+	b.WriteString(fmt.Sprintf("%d files changed  %s %s", pr.Files, add, del) + "\n\n")
+
+	// CI status
+	b.WriteString(sectionHeader.Render("── Checks ──") + "\n")
+	if pr.ChecksPass == nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("○ No checks") + "\n")
+	} else if *pr.ChecksPass {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Checks passing") + "\n")
+	} else {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ Checks failing") + "\n")
+	}
+	if pr.ChecksSummary != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("  "+pr.ChecksSummary) + "\n")
+	}
+	b.WriteString("\n")
+
+	// Summary (markdown body)
+	if body != "" {
+		b.WriteString(sectionHeader.Render("── Summary ──") + "\n")
+		sidebarContentWidth := m.sidebarWidth - 5
+		if sidebarContentWidth < 20 {
+			sidebarContentWidth = 20
+		}
+		renderer, err := glamour.NewTermRenderer(
+			glamour.WithStylePath("dark"),
+			glamour.WithWordWrap(sidebarContentWidth),
+		)
+		if err == nil {
+			rendered, err := renderer.Render(mdutil.ReplaceImages(body))
+			if err == nil {
+				b.WriteString(rendered)
+			} else {
+				b.WriteString(body + "\n")
+			}
+		} else {
+			b.WriteString(body + "\n")
+		}
+	} else if m.previewLoading {
+		b.WriteString(sectionHeader.Render("── Summary ──") + "\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("Loading...") + "\n")
+	}
+
+	m.sidebar.SetContent(b.String())
+}
+
+// renderCtx holds extra data needed at render time.
+type renderCtx struct {
+	userTeams map[string]bool // "org/team-slug" → true
 }
 
 // View renders the PR list.
 func (m Model) View() string {
 	if m.width == 0 {
-		return ""
+		return m.spinner.View() + " Loading..."
 	}
 
 	var b strings.Builder
 
-	// Header
-	header := styles.Title.Render("PR Review")
-	af := m.activeFilter()
-	filterLabel := fmt.Sprintf("  Filter: [%s]", af.Name)
-	repoLabel := fmt.Sprintf("  %s/%s", m.svc.RepoOwner(), m.svc.RepoName())
-	b.WriteString(header + filterLabel + repoLabel + "\n")
+	// Tab bar (full width)
+	m.tabBar.SetWidth(m.width)
+	b.WriteString(m.tabBar.View() + "\n")
 
+	// Horizontal separator between tab bar and panes
+	b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(strings.Repeat("─", m.width)) + "\n")
+
+	// Compute layout
+	sidebarW, mainHeight := m.layoutDimensions()
+	tableWidth := m.width - sidebarW
+
+	// Left pane: search bar + PR table
+	var leftPane strings.Builder
+
+	// Search bar (scoped to left pane width)
 	if m.editing {
-		prompt := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("  Qualifier: ")
-		b.WriteString(prompt + m.filterInput.View() + "\n")
-		hint := lipgloss.NewStyle().Foreground(styles.Muted)
-		b.WriteString(hint.Render("  enter apply  esc cancel  Examples: author:X label:Y review-requested:@me team-review-requested:@my-teams") + "\n\n")
-		// Still show the table below the editor
+		searchBorder := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(styles.Primary).
+			Width(tableWidth - 4).
+			Padding(0, 1)
+		leftPane.WriteString(searchBorder.Render(m.filterInput.View()) + "\n")
 	} else {
+		af := m.activeFilter()
 		qualifier := af.Qualifier
 		if qualifier == "" {
-			qualifier = "(none)"
+			qualifier = "(all open)"
 		}
-		qualifierStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-		b.WriteString(qualifierStyle.Render("  "+qualifier) + "\n\n")
+		searchBorder := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(styles.Muted).
+			Width(tableWidth - 4).
+			Padding(0, 1)
+		leftPane.WriteString(searchBorder.Render(
+			lipgloss.NewStyle().Foreground(styles.Muted).Render(qualifier),
+		) + "\n")
 	}
 
-	// Filter picker overlay
-	if m.showFilterPicker {
-		b.WriteString("Select a filter:\n\n")
-		for i, f := range m.filters {
-			cursor := "  "
-			if i == m.filterCursor {
-				cursor = "> "
-			}
-			name := f.Name
-			if i == m.filterIdx {
-				name += " (current)"
-			}
-			if i == m.filterCursor {
-				b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render(cursor+name) + "\n")
-			} else {
-				b.WriteString(cursor + name + "\n")
-			}
-		}
-		b.WriteString("\n")
-		b.WriteString(styles.HelpStyle.Render("↑/k up  ↓/j down  enter select  esc/f cancel"))
-		return b.String()
-	}
+	// Search bar takes 3 lines (border top + content + border bottom)
+	tableHeight := mainHeight - 3
 
 	if m.loading {
-		b.WriteString(m.spinner.View() + " Loading PRs...\n")
-		return b.String()
+		loadingText := m.spinner.View() + " Loading PRs..."
+		leftPane.WriteString(lipgloss.Place(tableWidth, tableHeight, lipgloss.Center, lipgloss.Center, loadingText))
+	} else if m.err != nil {
+		leftPane.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("Error: %v", m.err)))
+		leftPane.WriteString("\n\nPress 'r' to retry or ctrl+c to quit")
+	} else if len(m.prs) == 0 {
+		leftPane.WriteString("No PRs found for this filter.\n")
+		leftPane.WriteString("\nPress tab to switch filters or ctrl+c to quit")
+	} else {
+		leftPane.WriteString(m.renderTable(tableWidth, tableHeight))
 	}
 
-	if m.err != nil {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("Error: %v", m.err)))
-		b.WriteString("\n\nPress 'r' to retry or ctrl+c to quit")
-		return b.String()
-	}
+	m.sidebar.SetSize(sidebarW, mainHeight)
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, leftPane.String(), m.sidebar.View()))
 
-	if len(m.prs) == 0 {
-		b.WriteString("No PRs found for this filter.\n")
-		b.WriteString("\nPress 'f' to change filter or ctrl+c to quit")
-		return b.String()
+	// Footer
+	b.WriteString("\n")
+	repoLabel := fmt.Sprintf("%s/%s", m.svc.RepoOwner(), m.svc.RepoName())
+	help := styles.HelpStyle.Render("↑/k up  ↓/j down  enter select  tab switch  / search  J/K scroll preview  r refresh  ctrl+c quit")
+	repo := lipgloss.NewStyle().Foreground(styles.Primary).Render(repoLabel)
+	footerWidth := lipgloss.Width(help) + lipgloss.Width(repo)
+	gap := m.width - footerWidth
+	if gap < 1 {
+		gap = 1
 	}
+	b.WriteString(help + strings.Repeat(" ", gap) + repo)
 
-	cols := resolveColumns(m.columns)
-	rctx := renderCtx{userTeams: m.userTeams}
+	return b.String()
+}
 
-	// Compute visible window (account for qualifier line from PR #6)
-	tableHeight := m.height - 7 // header + qualifier + footer + padding
-	if tableHeight < 3 {
-		tableHeight = 3
-	}
-	visibleRows := tableHeight - 2 // header row + border
+// renderTable renders the PR table with multi-line rows (gh-dash style).
+// Each PR gets three lines:
+//
+//	Line 1: state_icon  #number by @author
+//	Line 2:             bold title
+//	Line 3:             +N -N  ·  N files  ·  review_status  CI  ·  comments  ·  updated  age
+func (m Model) renderTable(width, height int) string {
+	// Each PR row = 3 lines content + 1 border = 4 lines visual height
+	rowHeight := 4
+	visibleRows := height / rowHeight
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
@@ -489,76 +562,346 @@ func (m Model) View() string {
 		end = len(m.prs)
 	}
 
-	// Build headers
-	headers := make([]string, len(cols))
-	for i, c := range cols {
-		headers[i] = c.header
-	}
+	stateWidth := 4 // icon + padding
 
-	// Build rows for visible window
+	var b strings.Builder
+
 	visiblePRs := m.prs[start:end]
-	rows := make([][]string, len(visiblePRs))
-	for i, pr := range visiblePRs {
-		row := make([]string, len(cols))
-		for j, c := range cols {
-			row[j] = c.render(pr, rctx)
-		}
-		rows[i] = row
-	}
-
-	// Cursor-relative index within the visible window
 	cursorInView := m.cursor - start
 
-	// Build lipgloss table
-	t := ltable.New().
-		Headers(headers...).
-		Rows(rows...).
-		Width(m.width).
-		BorderTop(false).
-		BorderBottom(false).
-		BorderLeft(false).
-		BorderRight(false).
-		BorderColumn(false).
-		BorderHeader(true).
-		StyleFunc(func(row, col int) lipgloss.Style {
-			s := lipgloss.NewStyle().PaddingRight(1)
+	for i, pr := range visiblePRs {
+		isSelected := i == cursorInView
 
-			// Header row
-			if row == ltable.HeaderRow {
-				return s.Bold(true).Foreground(styles.Secondary)
-			}
+		// Base style carries background for selected rows.
+		// All fragment styles use .Inherit(base) to pick it up.
+		base := lipgloss.NewStyle()
+		if isSelected {
+			base = base.Background(styles.BgSelected)
+		}
+		s := func(c color.Color) lipgloss.Style {
+			return lipgloss.NewStyle().Foreground(c).Inherit(base)
+		}
+		muted := s(styles.Muted)
 
-			// Per-column styling
-			if col >= 0 && col < len(cols) {
-				pr := visiblePRs[row]
-				if cols[col].style != nil {
-					colStyle := cols[col].style(pr, rctx)
-					fg := colStyle.GetForeground()
-					if fg != nil {
-						s = s.Foreground(fg)
-					}
-					if colStyle.GetItalic() {
-						s = s.Italic(true)
-					}
-				}
-			}
+		stateIcon, stateColor := renderStateIcon(pr)
 
-			// Selected row
-			if row == cursorInView {
-				s = s.Bold(true)
-			}
+		// Line 1: state_icon  #number by @author
+		line1Content := s(stateColor).Width(stateWidth).Render(stateIcon) +
+			s(lipgloss.BrightYellow).Render(fmt.Sprintf("#%d", pr.Number)) +
+			muted.Render(" by ") +
+			s(lipgloss.BrightYellow).Render("@"+pr.Author)
+		line1 := base.Width(width).Render(line1Content)
 
-			return s
-		})
+		// Line 2: bold title
+		indent := lipgloss.NewStyle().Inherit(base).Width(stateWidth).Render("")
+		var titleRendered string
+		if pr.Draft {
+			titleRendered = lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Inherit(base).Render(pr.Title)
+		} else {
+			titleRendered = lipgloss.NewStyle().Bold(true).Inherit(base).Render(pr.Title)
+		}
+		line2 := base.Width(width).Render(indent + titleRendered)
 
-	b.WriteString(t.Render())
+		// Line 3: stats with colored icons
+		dot := muted.Render(" · ")
+		statsContent := indent +
+			s(styles.Success).Render(fmt.Sprintf("+%s", formatNum(pr.Additions))) +
+			muted.Render(" ") +
+			s(styles.Danger).Render(fmt.Sprintf("-%s", formatNum(pr.Deletions))) +
+			dot +
+			s(lipgloss.BrightCyan).Render(iconFiles) + muted.Render(fmt.Sprintf(" %d", pr.Files)) +
+			dot +
+			renderReviewStatusInherited(pr, base) +
+			muted.Render(" ") +
+			renderCIIconInherited(pr, base)
+		if pr.CommentCount > 0 {
+			statsContent += dot +
+				s(lipgloss.BrightBlue).Render(iconCommentSingle) + muted.Render(fmt.Sprintf(" %d", pr.CommentCount))
+		}
+		statsContent += dot +
+			s(lipgloss.BrightMagenta).Render(iconUpdated) + muted.Render(" "+shortTimeAgo(pr.UpdatedAt)) +
+			dot +
+			s(lipgloss.BrightCyan).Render(iconCreated) + muted.Render(" "+shortTimeAgo(pr.CreatedAt))
+		line3 := base.Width(width).Render(statsContent)
 
-	// Footer
-	b.WriteString("\n")
-	help := "↑/k up  ↓/j down  enter select  f filter  / edit filter  r refresh  ctrl+c quit"
-	b.WriteString(styles.HelpStyle.Render(help))
+		row := line1 + "\n" + line2 + "\n" + line3
+		borderStyle := lipgloss.NewStyle().
+			BorderBottom(true).
+			BorderStyle(lipgloss.Border{Bottom: "─"}).
+			BorderForeground(styles.Muted)
+		b.WriteString(borderStyle.Render(row) + "\n")
+	}
 
 	return b.String()
+}
+
+// Nerd Font icons — exact codepoints from gh-dash constants.go.
+var (
+	iconOpen   = "\uf407" // nf-oct-git_pull_request
+	iconDraft  = "\uebdb" // nf-cod-git_pull_request_draft
+	iconMerged = "\uf4c9" // nf-oct-git_merge
+	iconClosed = "\uf4dc" // nf-oct-git_pull_request_closed
+
+	iconApproved         = "\U000f012c" // nf-md-check_circle
+	iconChangesRequested = "\ueb43"     // nf-cod-request_changes
+	iconWaiting          = "\ue641"     // nf-seti-clock
+	iconComment          = "\uf0e6"     // nf-fa-comments
+	iconCommentSingle    = "\uf27b"     // nf-fa-commenting
+
+	iconCISuccess = "\uf058"     // nf-fa-check_circle
+	iconCIFailure = "\U000f0159" // nf-md-close_circle
+	iconCIPending = "\ue641"     // nf-seti-clock
+	iconEmpty     = "\ueabd"     // nf-cod-circle_slash
+
+	iconFiles   = "\uf440" // nf-oct-diff
+	iconUpdated = "\uf472" // nf-oct-history
+	iconCreated = "\uf455" // nf-oct-calendar
+)
+
+// renderStateIcon returns the icon and color for a PR's state.
+func renderStateIcon(pr review.PullRequest) (string, color.Color) {
+	if pr.Draft {
+		return iconDraft, lipgloss.BrightBlack
+	}
+	switch pr.State {
+	case "MERGED":
+		return iconMerged, lipgloss.Magenta
+	case "CLOSED":
+		return iconClosed, lipgloss.Red
+	default:
+		return iconOpen, lipgloss.Green
+	}
+}
+
+// renderReviewStatusInherited renders the review porcelain with colors, inheriting base for background.
+func renderReviewStatusInherited(pr review.PullRequest, base lipgloss.Style) string {
+	s := func(c color.Color) lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(c).Inherit(base)
+	}
+
+	if len(pr.Reviewers) == 0 {
+		switch pr.ReviewDecision {
+		case "APPROVED":
+			return s(lipgloss.Green).Render(iconApproved)
+		case "CHANGES_REQUESTED":
+			return s(lipgloss.Red).Render(iconChangesRequested)
+		default:
+			return s(lipgloss.BrightBlack).Render(iconWaiting)
+		}
+	}
+
+	var approved, pending, changesReq, commented int
+	for _, r := range pr.Reviewers {
+		switch r.State {
+		case "APPROVED":
+			approved++
+		case "CHANGES_REQUESTED":
+			changesReq++
+		case "COMMENTED":
+			commented++
+		default:
+			pending++
+		}
+	}
+
+	var parts []string
+	if approved > 0 {
+		parts = append(parts, s(lipgloss.Green).Render(fmt.Sprintf("%s %d", iconApproved, approved)))
+	}
+	if changesReq > 0 {
+		parts = append(parts, s(lipgloss.Red).Render(fmt.Sprintf("%s %d", iconChangesRequested, changesReq)))
+	}
+	if commented > 0 {
+		parts = append(parts, s(lipgloss.Cyan).Render(fmt.Sprintf("%s %d", iconComment, commented)))
+	}
+	if pending > 0 {
+		parts = append(parts, s(lipgloss.BrightBlack).Render(fmt.Sprintf("%s %d", iconWaiting, pending)))
+	}
+	if len(parts) == 0 {
+		return s(lipgloss.BrightBlack).Render(iconWaiting)
+	}
+	sp := lipgloss.NewStyle().Inherit(base).Render(" ")
+	return strings.Join(parts, sp)
+}
+
+// renderCIIconInherited renders the CI icon with color, inheriting base for background.
+func renderCIIconInherited(pr review.PullRequest, base lipgloss.Style) string {
+	s := func(c color.Color) lipgloss.Style {
+		return lipgloss.NewStyle().Foreground(c).Inherit(base)
+	}
+	if pr.ChecksPass == nil {
+		return s(lipgloss.BrightBlack).Render(iconEmpty)
+	}
+	if *pr.ChecksPass {
+		return s(lipgloss.Green).Render(iconCISuccess)
+	}
+	return s(lipgloss.Red).Render(iconCIFailure)
+}
+
+// renderStatsPlain returns the stats line as plain text (no ANSI colors)
+// so it can be rendered as a single cell with uniform background.
+func renderStatsPlain(pr review.PullRequest) string {
+	parts := []string{
+		fmt.Sprintf("+%s -%s", formatNum(pr.Additions), formatNum(pr.Deletions)),
+		fmt.Sprintf("%s %d", iconFiles, pr.Files),
+		renderReviewPlain(pr),
+		renderCIPlain(pr),
+	}
+	if pr.CommentCount > 0 {
+		parts = append(parts, fmt.Sprintf("%s %d", iconCommentSingle, pr.CommentCount))
+	}
+	parts = append(parts,
+		fmt.Sprintf("%s %s", iconUpdated, shortTimeAgo(pr.UpdatedAt)),
+		fmt.Sprintf("%s %s", iconCreated, shortTimeAgo(pr.CreatedAt)),
+	)
+	return strings.Join(parts, " · ")
+}
+
+// renderReviewPlain returns the review porcelain as plain text.
+func renderReviewPlain(pr review.PullRequest) string {
+	if len(pr.Reviewers) == 0 {
+		switch pr.ReviewDecision {
+		case "APPROVED":
+			return iconApproved
+		case "CHANGES_REQUESTED":
+			return iconChangesRequested
+		default:
+			return iconWaiting
+		}
+	}
+
+	var approved, pending, changesReq, commented int
+	for _, r := range pr.Reviewers {
+		switch r.State {
+		case "APPROVED":
+			approved++
+		case "CHANGES_REQUESTED":
+			changesReq++
+		case "COMMENTED":
+			commented++
+		default:
+			pending++
+		}
+	}
+
+	var parts []string
+	if approved > 0 {
+		parts = append(parts, fmt.Sprintf("%s %d", iconApproved, approved))
+	}
+	if changesReq > 0 {
+		parts = append(parts, fmt.Sprintf("%s %d", iconChangesRequested, changesReq))
+	}
+	if commented > 0 {
+		parts = append(parts, fmt.Sprintf("%s %d", iconComment, commented))
+	}
+	if pending > 0 {
+		parts = append(parts, fmt.Sprintf("%s %d", iconWaiting, pending))
+	}
+	if len(parts) == 0 {
+		return iconWaiting
+	}
+	return strings.Join(parts, " ")
+}
+
+// renderCIPlain returns the CI status as plain text.
+func renderCIPlain(pr review.PullRequest) string {
+	if pr.ChecksPass == nil {
+		return iconEmpty
+	}
+	if *pr.ChecksPass {
+		return iconCISuccess
+	}
+	return iconCIFailure
+}
+
+// renderReviewStatus returns a colored porcelain review summary (used by sidebar).
+func renderReviewStatus(pr review.PullRequest) string {
+	fg := func(c color.Color) lipgloss.Style { return lipgloss.NewStyle().Foreground(c) }
+
+	if len(pr.Reviewers) == 0 {
+		switch pr.ReviewDecision {
+		case "APPROVED":
+			return fg(lipgloss.Green).Render(iconApproved)
+		case "CHANGES_REQUESTED":
+			return fg(lipgloss.Red).Render(iconChangesRequested)
+		default:
+			return fg(lipgloss.BrightBlack).Render(iconWaiting)
+		}
+	}
+
+	var approved, pending, changesReq, commented int
+	for _, r := range pr.Reviewers {
+		switch r.State {
+		case "APPROVED":
+			approved++
+		case "CHANGES_REQUESTED":
+			changesReq++
+		case "COMMENTED":
+			commented++
+		default:
+			pending++
+		}
+	}
+
+	var parts []string
+	if approved > 0 {
+		parts = append(parts, fg(lipgloss.Green).Render(fmt.Sprintf("%s %d", iconApproved, approved)))
+	}
+	if changesReq > 0 {
+		parts = append(parts, fg(lipgloss.Red).Render(fmt.Sprintf("%s %d", iconChangesRequested, changesReq)))
+	}
+	if commented > 0 {
+		parts = append(parts, fg(lipgloss.Cyan).Render(fmt.Sprintf("%s %d", iconComment, commented)))
+	}
+	if pending > 0 {
+		parts = append(parts, fg(lipgloss.BrightBlack).Render(fmt.Sprintf("%s %d", iconWaiting, pending)))
+	}
+
+	if len(parts) == 0 {
+		return fg(lipgloss.BrightBlack).Render(iconWaiting)
+	}
+	return strings.Join(parts, " ")
+}
+
+// renderCIIcon returns the icon and color for CI status.
+func renderCIIcon(pr review.PullRequest) (string, color.Color) {
+	if pr.ChecksPass == nil {
+		return iconEmpty, lipgloss.BrightBlack
+	}
+	if *pr.ChecksPass {
+		return iconCISuccess, lipgloss.Green
+	}
+	return iconCIFailure, lipgloss.Red
+}
+
+// formatNum formats a number with k suffix for large values.
+func formatNum(n int) string {
+	if n >= 10000 {
+		return fmt.Sprintf("%.0fk", float64(n)/1000)
+	}
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+// shortTimeAgo returns a compact relative time string.
+func shortTimeAgo(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d < 7*24*time.Hour:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	case d < 30*24*time.Hour:
+		return fmt.Sprintf("%dw", int(d.Hours()/(24*7)))
+	default:
+		return fmt.Sprintf("%dmo", int(d.Hours()/(24*30)))
+	}
 }
 
 // stripOrgPrefix removes the "org/" prefix from a team slug like "org/team-name".

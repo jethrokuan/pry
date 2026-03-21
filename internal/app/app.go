@@ -30,7 +30,6 @@ type Model struct {
 	ctx     *appctx.Context
 	cfg     config.Config
 	filters []review.PRFilter
-	columns []string
 	screen  Screen
 	width   int
 	height  int
@@ -47,20 +46,19 @@ type Model struct {
 }
 
 // New creates the application model.
-func New(svc review.Service, cfg config.Config, filters []review.PRFilter, columns []string) Model {
+func New(svc review.Service, cfg config.Config, filters []review.PRFilter) Model {
 	ctx := &appctx.Context{Svc: svc}
 	return Model{
 		ctx:     ctx,
 		cfg:     cfg,
 		filters: filters,
-		columns: columns,
 		screen:  ScreenPRList,
-		prList:  prlist.New(svc, filters, columns),
+		prList:  prlist.New(svc, filters),
 	}
 }
 
 // NewWithPR creates the application model starting at a specific PR.
-func NewWithPR(svc review.Service, cfg config.Config, prNumber int, filters []review.PRFilter, columns []string) Model {
+func NewWithPR(svc review.Service, cfg config.Config, prNumber int, filters []review.PRFilter) Model {
 	ctx := &appctx.Context{Svc: svc}
 	pr := &review.PullRequest{Number: prNumber}
 	pr.StartReview()
@@ -68,9 +66,8 @@ func NewWithPR(svc review.Service, cfg config.Config, prNumber int, filters []re
 		ctx:        ctx,
 		cfg:        cfg,
 		filters:    filters,
-		columns:    columns,
 		screen:     ScreenDiffView,
-		prList:     prlist.New(svc, filters, columns),
+		prList:     prlist.New(svc, filters),
 		selectedPR: pr,
 		initialPR:  prNumber,
 	}
@@ -265,7 +262,7 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case diffview.BackMsg:
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		m.prList = prlist.New(m.ctx.Svc, m.filters, m.columns)
+		m.prList = prlist.New(m.ctx.Svc, m.filters)
 		return m, tea.Batch(m.prList.Init(), m.windowSizeCmd())
 	case prBodyLoadedMsg:
 		if msg.err == nil && msg.pr != nil {
@@ -293,7 +290,7 @@ func (m Model) updateSubmit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case submit.SubmittedMsg:
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		m.prList = prlist.New(m.ctx.Svc, m.filters, m.columns)
+		m.prList = prlist.New(m.ctx.Svc, m.filters)
 		return m, tea.Batch(m.prList.Init(), m.windowSizeCmd())
 	case submit.CancelledMsg:
 		m.screen = ScreenDiffView

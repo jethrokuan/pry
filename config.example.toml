@@ -58,10 +58,24 @@
 # ---------------------------------------------------------------------------
 
 # Columns to display in the PR list and their order.
-# Available: "number", "title", "author", "changes", "my_review",
-#            "my_teams", "updated"
+# Available: "state", "number", "title", "author", "changes", "ci",
+#            "my_review", "my_teams", "pending_teams", "updated"
 #
-# columns = ["number", "title", "author", "changes", "my_review", "my_teams", "updated"]
+# columns = ["state", "number", "title", "author", "changes", "ci", "my_review", "my_teams", "updated"]
+
+# ---------------------------------------------------------------------------
+# File Tree
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# PR List Layout
+# ---------------------------------------------------------------------------
+
+# [pr_list]
+# Width of the sidebar preview pane in columns.
+# sidebar_width = 50
+# Whether the sidebar starts visible (toggle with 'p').
+# sidebar_visible = false
 
 # ---------------------------------------------------------------------------
 # File Tree
