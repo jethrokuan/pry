@@ -126,7 +126,9 @@ func (c *Client) ListPRs(_ context.Context, filter review.PRFilter) ([]review.Pu
 func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 	query := fmt.Sprintf("is:pr is:open repo:%s/%s %s sort:updated-desc", c.owner, c.repo, qualifier)
 
-	// Fields for the list view — enough for the expanded 2-line row format.
+	// Lightweight list query — only fields needed for the table rows.
+	// Heavy nested data (check runs, reviews, review requests) are fetched
+	// lazily via GetPR when the sidebar preview is shown.
 	graphqlQuery := `
 	query($query: String!) {
 		viewer { login }
@@ -156,41 +158,8 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 							commit {
 								statusCheckRollup {
 									state
-									contexts(first: 50) {
-										nodes {
-											__typename
-											... on CheckRun {
-												name
-												status
-												conclusion
-												startedAt
-												completedAt
-												detailsUrl
-											}
-											... on StatusContext {
-												context
-												state
-												targetUrl
-												createdAt
-											}
-										}
-									}
 								}
 							}
-						}
-					}
-					reviewRequests(first: 20) {
-						nodes {
-							requestedReviewer {
-								... on Team { slug organization { login } }
-								... on User { login }
-							}
-						}
-					}
-					latestReviews(first: 30) {
-						nodes {
-							author { login }
-							state
 						}
 					}
 				}
@@ -239,10 +208,16 @@ func (c *Client) listPRsForTeams(filter review.PRFilter) ([]review.PullRequest, 
 	results := make([]result, len(teams))
 	var wg sync.WaitGroup
 
+	// Cap concurrency to avoid firing too many heavy queries in parallel.
+	const maxConcurrent = 5
+	sem := make(chan struct{}, maxConcurrent)
+
 	for i, team := range teams {
 		wg.Add(1)
 		go func(idx int, teamSlug string) {
 			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			qualifier := strings.ReplaceAll(filter.Qualifier, myTeamsPlaceholder, teamSlug)
 			prs, err := c.searchPRs(qualifier)
 			results[idx] = result{prs: prs, err: err}
@@ -457,7 +432,7 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 						commit {
 							statusCheckRollup {
 								state
-								contexts(first: 50) {
+								contexts(first: 25) {
 									nodes {
 										__typename
 										... on CheckRun {
@@ -488,7 +463,7 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 						}
 					}
 				}
-				latestReviews(first: 30) {
+				latestReviews(first: 10) {
 					nodes {
 						author { login }
 						state

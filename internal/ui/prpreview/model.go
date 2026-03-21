@@ -55,10 +55,13 @@ func (m Model) View() string {
 	return m.sidebar.View()
 }
 
-// BodyLoadedMsg carries the result of an async PR body fetch.
+// BodyLoadedMsg carries the result of an async PR detail fetch.
+// The full PR is included so the caller can merge detailed fields
+// (check runs, reviewers, etc.) back into the list-level PR data.
 type BodyLoadedMsg struct {
 	PRNumber int
 	Body     string
+	FullPR   *review.PullRequest // full PR from GetPR (nil on error)
 	Err      error
 }
 
@@ -76,7 +79,7 @@ func (m *Model) Refresh(pr *review.PullRequest) func() BodyLoadedMsg {
 			if err != nil {
 				return BodyLoadedMsg{PRNumber: prNumber, Err: err}
 			}
-			return BodyLoadedMsg{PRNumber: prNumber, Body: full.Body}
+			return BodyLoadedMsg{PRNumber: prNumber, Body: full.Body, FullPR: full}
 		}
 	}
 	return nil
@@ -173,8 +176,13 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 	}
 	b.WriteString(mergeStatus + "\n")
 
-	// Blocking reasons (when not clean)
-	if pr.MergeState == "BLOCKED" || pr.MergeState == "UNSTABLE" || pr.MergeState == "DIRTY" {
+	// Blocking reasons / clean status detail.
+	// These sections depend on check runs and reviewers which are only
+	// available after the full PR detail (GetPR) loads. Show a loading
+	// indicator until then to avoid misleading empty data.
+	if m.loading {
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("  Loading details...") + "\n")
+	} else if pr.MergeState == "BLOCKED" || pr.MergeState == "UNSTABLE" || pr.MergeState == "DIRTY" {
 		if pr.Mergeable == "CONFLICTING" {
 			b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Merge conflicts") + "\n")
 		}

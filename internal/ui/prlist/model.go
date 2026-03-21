@@ -219,7 +219,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case prpreview.BodyLoadedMsg:
 		if len(m.prs) > 0 && m.cursor < len(m.prs) {
-			m.preview.HandleBodyLoaded(msg, &m.prs[m.cursor])
+			pr := &m.prs[m.cursor]
+			// Merge detailed fields from GetPR into the list-level PR.
+			// The list query is lightweight (no check runs, reviews, etc.)
+			// so we enrich the PR when the sidebar fetches full details.
+			if msg.FullPR != nil && msg.PRNumber == pr.Number {
+				pr.CheckRuns = msg.FullPR.CheckRuns
+				pr.ChecksPass = msg.FullPR.ChecksPass
+				pr.Reviewers = msg.FullPR.Reviewers
+				pr.PendingTeams = msg.FullPR.PendingTeams
+				pr.MyReviewState = msg.FullPR.MyReviewState
+				pr.Labels = msg.FullPR.Labels
+				pr.Body = msg.FullPR.Body
+				pr.Commits = msg.FullPR.Commits
+				pr.HeadSHA = msg.FullPR.HeadSHA
+			}
+			m.preview.HandleBodyLoaded(msg, pr)
 		}
 
 	case flashExpiredMsg:
