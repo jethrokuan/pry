@@ -1,10 +1,11 @@
-// Package clipboard provides platform-specific clipboard image reading.
+// Package clipboard provides platform-specific clipboard operations.
 package clipboard
 
 import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strings"
 )
 
 // ReadImage reads image data from the system clipboard.
@@ -133,6 +134,22 @@ return tmpPath`
 		return nil, fmt.Errorf("failed to read converted PNG: %w", err)
 	}
 	return data, nil
+}
+
+// WriteText writes text to the system clipboard.
+func WriteText(text string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(text)
+		return cmd.Run()
+	case "linux":
+		cmd := exec.Command("xclip", "-selection", "clipboard")
+		cmd.Stdin = strings.NewReader(text)
+		return cmd.Run()
+	default:
+		return fmt.Errorf("clipboard write not supported on %s", runtime.GOOS)
+	}
 }
 
 // readImageLinux reads clipboard image data on Linux using xclip.

@@ -17,6 +17,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/appctx"
+	"github.com/jethrokuan/pry/internal/clipboard"
 	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/scrollbar"
@@ -42,6 +43,8 @@ type userTeamsLoadedMsg struct {
 	teams []string
 }
 
+type flashExpiredMsg struct{}
+
 // KeyMap defines the key bindings for the PR list.
 type KeyMap struct {
 	Up          key.Binding
@@ -54,8 +57,10 @@ type KeyMap struct {
 	SidebarDown key.Binding
 	SidebarUp   key.Binding
 	OpenInBrowser key.Binding
-	Quit          key.Binding
-	Help          key.Binding
+	CopyNumber   key.Binding
+	CopyURL      key.Binding
+	Quit         key.Binding
+	Help         key.Binding
 }
 
 var keys = KeyMap{
@@ -69,8 +74,10 @@ var keys = KeyMap{
 	SidebarDown: key.NewBinding(key.WithKeys("J"), key.WithHelp("J", "scroll preview down")),
 	SidebarUp:   key.NewBinding(key.WithKeys("K"), key.WithHelp("K", "scroll preview up")),
 	OpenInBrowser: key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "open in browser")),
-	Quit:          key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
-	Help:          key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+	CopyNumber:   key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy PR number")),
+	CopyURL:      key.NewBinding(key.WithKeys("Y"), key.WithHelp("Y", "copy PR URL")),
+	Quit:         key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+	Help:         key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 }
 
 // Model is the Bubble Tea model for the PR list screen.
@@ -100,6 +107,9 @@ type Model struct {
 
 	// Help overlay
 	showHelp bool
+
+	// Flash message (ephemeral status)
+	flashMsg string
 }
 
 // New creates a new PR list model.
@@ -208,6 +218,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.preview.HandleBodyLoaded(msg, &m.prs[m.cursor])
 		}
 
+	case flashExpiredMsg:
+		m.flashMsg = ""
+		return m, nil
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -303,6 +317,23 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			m.loading = true
 			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+		case key.Matches(msg, keys.CopyNumber):
+			if len(m.prs) > 0 {
+				pr := m.prs[m.cursor]
+				text := fmt.Sprintf("%d", pr.Number)
+				if err := clipboard.WriteText(text); err != nil {
+					return m, m.setFlash("Copy failed: " + err.Error())
+				}
+				return m, m.setFlash(fmt.Sprintf("Copied #%d", pr.Number))
+			}
+		case key.Matches(msg, keys.CopyURL):
+			if len(m.prs) > 0 {
+				pr := m.prs[m.cursor]
+				if err := clipboard.WriteText(pr.URL); err != nil {
+					return m, m.setFlash("Copy failed: " + err.Error())
+				}
+				return m, m.setFlash("Copied PR URL")
+			}
 		case key.Matches(msg, keys.Help):
 			m.showHelp = true
 			return m, nil
@@ -436,13 +467,19 @@ func (m Model) View() string {
 	// Footer
 	b.WriteString("\n")
 	repoLabel := fmt.Sprintf("%s/%s", m.svc.RepoOwner(), m.svc.RepoName())
-	helpText := styles.HelpStyle.Render("↑/k up  ↓/j down  enter select  tab switch  / search  J/K scroll preview  w open  r refresh  ? help")
 	repo := lipgloss.NewStyle().Foreground(styles.Primary).Render(repoLabel)
-	gap := m.width - lipgloss.Width(helpText) - lipgloss.Width(repo)
+
+	var footerLeft string
+	if m.flashMsg != "" {
+		footerLeft = lipgloss.NewStyle().Foreground(styles.Success).Render(m.flashMsg)
+	} else {
+		footerLeft = styles.HelpStyle.Render("↑/k up  ↓/j down  enter select  tab switch  / search  y copy #  Y copy URL  ? help")
+	}
+	gap := m.width - lipgloss.Width(footerLeft) - lipgloss.Width(repo)
 	if gap < 1 {
 		gap = 1
 	}
-	b.WriteString(helpText + strings.Repeat(" ", gap) + repo)
+	b.WriteString(footerLeft + strings.Repeat(" ", gap) + repo)
 
 	result := b.String()
 	if m.showHelp {
@@ -458,8 +495,17 @@ func helpSections() []helppopup.Section {
 		helppopup.Bind("Navigation", keys.Up, keys.Down, keys.Select),
 		helppopup.Bind("Tabs & Filters", keys.NextTab, keys.PrevTab, keys.EditFilter),
 		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp),
+		helppopup.Bind("Copy", keys.CopyNumber, keys.CopyURL),
 		helppopup.Bind("Other", keys.OpenInBrowser, keys.Refresh, keys.Help, keys.Quit),
 	}
+}
+
+// setFlash sets a flash message and returns a command that clears it after a delay.
+func (m *Model) setFlash(msg string) tea.Cmd {
+	m.flashMsg = msg
+	return tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
+		return flashExpiredMsg{}
+	})
 }
 
 // renderTable renders the PR table with multi-line rows (gh-dash style).
