@@ -140,6 +140,7 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 					title
 					state
 					isDraft
+					url
 					createdAt
 					updatedAt
 					additions
