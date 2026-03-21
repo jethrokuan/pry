@@ -241,7 +241,9 @@ func truncateLines(s string, max int) string {
 	if len(lines) <= max {
 		return s
 	}
-	return strings.Join(lines[:max], "\n") + "\n" + lipgloss.NewStyle().Foreground(styles.Muted).Render("  ⋯") + "\n"
+	remaining := len(lines) - max
+	label := fmt.Sprintf("  ⋯ %d more lines", remaining)
+	return strings.Join(lines[:max], "\n") + "\n" + lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render(label) + "\n"
 }
 
 func stripOrgPrefix(slug string) string {
