@@ -20,7 +20,7 @@ import (
 
 // PRSelectedMsg is sent when the user selects a PR.
 type PRSelectedMsg struct {
-	PR review.PullRequest
+	PR *review.PullRequest
 }
 
 // FilterChangedMsg is sent when the filter changes.
@@ -231,8 +231,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.Select):
 			if len(m.prs) > 0 {
+				pr := m.prs[m.cursor]
 				return m, func() tea.Msg {
-					return PRSelectedMsg{PR: m.prs[m.cursor]}
+					return PRSelectedMsg{PR: &pr}
 				}
 			}
 		case key.Matches(msg, keys.Filter):

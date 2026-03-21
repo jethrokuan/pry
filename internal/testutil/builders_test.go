@@ -113,14 +113,14 @@ var _ = ginkgo.Describe("Model factories", func() {
 	})
 
 	ginkgo.It("NewDiffViewModelWithPR uses the provided PR", func() {
-		pr := testutil.NewPR().Number(99).Title("Custom").Build()
+		pr := testutil.NewPR().BuildPtr()
 		m := testutil.NewDiffViewModelWithPR(svc, pr)
 		_ = m.View()
 	})
 
 	ginkgo.It("NewDiffViewModelWithReview uses the provided review", func() {
-		pr := testutil.NewPR().Build()
-		rev := review.NewPendingReview(pr.Number, pr.NodeID, pr.HeadSHA)
+		pr := testutil.NewPR().BuildPtr()
+		rev := review.NewPendingReview()
 		rev.AddComment("test.go", 10, "looks good")
 		m := testutil.NewDiffViewModelWithReview(svc, pr, rev)
 		_ = m.View()
@@ -140,14 +140,15 @@ var _ = ginkgo.Describe("Model factories", func() {
 	})
 
 	ginkgo.It("NewPRDetailModel creates a model for a PR", func() {
-		pr := testutil.NewPR().Body("## Description\nSome changes").Build()
+		pr := testutil.NewPR().Body("## Description\nSome changes").BuildPtr()
 		m := testutil.NewPRDetailModel(pr)
 		_ = m.View()
 	})
 
 	ginkgo.It("NewSubmitModel creates a model with review", func() {
-		rev := review.NewPendingReview(42, "PR_node42", "abc123")
-		m := testutil.NewSubmitModel(svc, rev)
+		pr := testutil.NewPR().BuildPtr()
+		pr.StartReview()
+		m := testutil.NewSubmitModel(svc, pr)
 		_ = m.View()
 	})
 })

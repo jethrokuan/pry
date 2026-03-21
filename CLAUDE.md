@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A terminal UI (TUI) for reviewing GitHub pull requests with inline comments and code suggestions. Built with Go and the Bubble Tea framework.
 
+## Developer Guide
+
+See **[dev.md](dev.md)** for detailed documentation of the domain model, architecture, state ownership, and async patterns. Keep `dev.md` up to date when making changes to domain types, screen flow, or architectural patterns.
+
 ## Build & Run
 
 ```bash

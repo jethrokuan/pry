@@ -18,12 +18,12 @@ import (
 
 // StartReviewMsg signals to transition to the diff view.
 type StartReviewMsg struct {
-	PR review.PullRequest
+	PR *review.PullRequest
 }
 
 // CheckoutMsg signals to checkout the PR.
 type CheckoutMsg struct {
-	PR review.PullRequest
+	PR *review.PullRequest
 }
 
 // BackMsg signals to go back to the PR list.
@@ -51,7 +51,7 @@ var keys = KeyMap{
 
 // Model is the PR detail screen model.
 type Model struct {
-	pr              review.PullRequest
+	pr              *review.PullRequest
 	viewport        viewport.Model
 	ready           bool
 	bodyLoaded      bool
@@ -74,7 +74,7 @@ func (m *Model) SetCheckoutSuccess() {
 }
 
 // SetPR updates the PR data and marks the body as loaded.
-func (m *Model) SetPR(pr review.PullRequest) {
+func (m *Model) SetPR(pr *review.PullRequest) {
 	m.pr = pr
 	m.bodyLoaded = true
 	if m.ready {
@@ -83,7 +83,7 @@ func (m *Model) SetPR(pr review.PullRequest) {
 }
 
 // New creates a new PR detail model.
-func New(pr review.PullRequest) Model {
+func New(pr *review.PullRequest) Model {
 	return Model{
 		pr: pr,
 	}
@@ -122,9 +122,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.Quit):
 			return m, tea.Quit
 		case key.Matches(msg, keys.Review):
-			return m, func() tea.Msg { return StartReviewMsg{PR: m.pr} }
+			pr := m.pr
+			return m, func() tea.Msg { return StartReviewMsg{PR: pr} }
 		case key.Matches(msg, keys.Checkout):
-			return m, func() tea.Msg { return CheckoutMsg{PR: m.pr} }
+			pr := m.pr
+			return m, func() tea.Msg { return CheckoutMsg{PR: pr} }
 		case key.Matches(msg, keys.Web):
 			return m, tea.ExecProcess(exec.Command("open", m.pr.URL), nil)
 		}

@@ -211,16 +211,16 @@ func (c *Client) EditReviewComment(_ context.Context, prNumber, commentID int, b
 // SubmitReview submits the pending review to GitHub.
 // If ReviewID > 0, submits the existing pending review (comments are already synced).
 // Otherwise, creates a new review with all comments and submits it in one shot (fallback).
-func (c *Client) SubmitReview(_ context.Context, rev *review.PendingReview) error {
+func (c *Client) SubmitReview(_ context.Context, pr *review.PullRequest, rev *review.PendingReview) error {
 	if rev.ReviewID > 0 {
-		return c.submitExistingReview(rev)
+		return c.submitExistingReview(pr, rev)
 	}
-	return c.createAndSubmitReview(rev)
+	return c.createAndSubmitReview(pr, rev)
 }
 
-func (c *Client) submitExistingReview(rev *review.PendingReview) error {
+func (c *Client) submitExistingReview(pr *review.PullRequest, rev *review.PendingReview) error {
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews/%d/events",
-		c.owner, c.repo, rev.PRNumber, rev.ReviewID)
+		c.owner, c.repo, pr.Number, rev.ReviewID)
 
 	payload := map[string]string{
 		"event": string(rev.Event),
@@ -259,8 +259,8 @@ type reviewPayloadComment struct {
 	Body      string `json:"body"`
 }
 
-func (c *Client) createAndSubmitReview(rev *review.PendingReview) error {
-	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", c.owner, c.repo, rev.PRNumber)
+func (c *Client) createAndSubmitReview(pr *review.PullRequest, rev *review.PendingReview) error {
+	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", c.owner, c.repo, pr.Number)
 
 	comments := make([]reviewPayloadComment, len(rev.Comments))
 	for i, rc := range rev.Comments {
@@ -274,7 +274,7 @@ func (c *Client) createAndSubmitReview(rev *review.PendingReview) error {
 	}
 
 	payload := createReviewPayload{
-		CommitID: rev.CommitID,
+		CommitID: pr.HeadSHA,
 		Body:     rev.Body,
 		Event:    string(rev.Event),
 		Comments: comments,
@@ -285,13 +285,13 @@ func (c *Client) createAndSubmitReview(rev *review.PendingReview) error {
 		return fmt.Errorf("failed to marshal review: %w", err)
 	}
 
-	slog.Debug("creating and submitting review", "prNumber", rev.PRNumber, "event", rev.Event, "commentCount", len(rev.Comments))
+	slog.Debug("creating and submitting review", "prNumber", pr.Number, "event", rev.Event, "commentCount", len(rev.Comments))
 	err = c.rest.Do(http.MethodPost, endpoint, bytes.NewReader(body), nil)
 	if err != nil {
-		slog.Error("failed to create and submit review", "prNumber", rev.PRNumber, "event", rev.Event, "error", err)
+		slog.Error("failed to create and submit review", "prNumber", pr.Number, "event", rev.Event, "error", err)
 		return fmt.Errorf("failed to submit review: %w", err)
 	}
-	slog.Info("review created and submitted", "prNumber", rev.PRNumber, "event", rev.Event)
+	slog.Info("review created and submitted", "prNumber", pr.Number, "event", rev.Event)
 
 	return nil
 }

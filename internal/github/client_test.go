@@ -655,13 +655,13 @@ var _ = Describe("SubmitReview", func() {
 			return nil
 		}
 
+		pr := &review.PullRequest{Number: 42, HeadSHA: "abc123"}
 		rev := &review.PendingReview{
-			PRNumber: 42,
 			ReviewID: 99,
 			Event:    review.ReviewEventApprove,
 			Body:     "LGTM",
 		}
-		err := c.SubmitReview(ctx, rev)
+		err := c.SubmitReview(ctx, pr, rev)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rest.calls).To(HaveLen(1))
 	})
@@ -674,16 +674,15 @@ var _ = Describe("SubmitReview", func() {
 			return nil
 		}
 
+		pr := &review.PullRequest{Number: 42, HeadSHA: "abc123"}
 		rev := &review.PendingReview{
-			PRNumber: 42,
 			ReviewID: 0,
-			CommitID: "abc123",
 			Event:    review.ReviewEventComment,
 			Comments: []review.InlineComment{
 				{Path: "main.go", Line: 10, Side: "RIGHT", Body: "nit"},
 			},
 		}
-		err := c.SubmitReview(ctx, rev)
+		err := c.SubmitReview(ctx, pr, rev)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -692,8 +691,9 @@ var _ = Describe("SubmitReview", func() {
 			return errors.New("forbidden")
 		}
 
-		rev := &review.PendingReview{PRNumber: 42, ReviewID: 99, Event: review.ReviewEventComment}
-		err := c.SubmitReview(ctx, rev)
+		pr := &review.PullRequest{Number: 42}
+		rev := &review.PendingReview{ReviewID: 99, Event: review.ReviewEventComment}
+		err := c.SubmitReview(ctx, pr, rev)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("failed to submit review"))
 	})

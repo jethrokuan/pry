@@ -239,7 +239,7 @@ func (m Model) toggleAllFolds() Model {
 	for _, c := range m.comments.forgeComments {
 		allCommentKeys[commentKey(c.Path, c.Line)] = true
 	}
-	for _, c := range m.review.Comments {
+	for _, c := range m.pr.PendingReview.Comments {
 		allCommentKeys[commentKey(c.Path, c.Line)] = true
 	}
 	for ck := range allCommentKeys {
@@ -451,7 +451,7 @@ func (m *Model) navigateFile(forward, unviewedOnly bool) tea.Cmd {
 		if !m.filter.isIncluded(i) {
 			return false
 		}
-		return !unviewedOnly || !m.review.ViewedFiles[m.files[i].Path]
+		return !unviewedOnly || !m.pr.PendingReview.ViewedFiles[m.files[i].Path]
 	})
 	if idx < 0 {
 		return nil
@@ -487,7 +487,7 @@ func (m *Model) moveToUnviewedFileInTree(forward bool) tea.Cmd {
 	start := m.nav.treeCursor
 	idx := cyclicSearch(start, n, forward, func(i int) bool {
 		row := m.nav.treeRows[i]
-		return row.node.fileIdx >= 0 && !m.review.ViewedFiles[m.files[row.node.fileIdx].Path]
+		return row.node.fileIdx >= 0 && !m.pr.PendingReview.ViewedFiles[m.files[row.node.fileIdx].Path]
 	})
 	if idx < 0 {
 		return nil

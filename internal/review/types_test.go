@@ -13,14 +13,11 @@ var _ = Describe("PendingReview", func() {
 	var rev *review.PendingReview
 
 	BeforeEach(func() {
-		rev = review.NewPendingReview(42, "PR_node123", "abc123")
+		rev = review.NewPendingReview()
 	})
 
 	Describe("NewPendingReview", func() {
 		It("initializes with correct defaults", func() {
-			Expect(rev.PRNumber).To(Equal(42))
-			Expect(rev.PRNodeID).To(Equal("PR_node123"))
-			Expect(rev.CommitID).To(Equal("abc123"))
 			Expect(rev.Comments).To(BeEmpty())
 			Expect(rev.Event).To(Equal(review.ReviewEventComment))
 			Expect(rev.ViewedFiles).NotTo(BeNil())

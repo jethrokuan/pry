@@ -7,6 +7,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
+	"github.com/jkuan/pr-review/internal/appctx"
 	"github.com/jkuan/pr-review/internal/review"
 )
 
@@ -18,7 +19,7 @@ var _ = ginkgo.Describe("PR Info Popup Scrolling", func() {
 		}
 		longBody := strings.Join(lines, "\n")
 
-		pr := review.PullRequest{
+		pr := &review.PullRequest{
 			Number: 1,
 			Title:  "Test PR",
 			Author: "test",
@@ -26,8 +27,8 @@ var _ = ginkgo.Describe("PR Info Popup Scrolling", func() {
 			Body:   longBody,
 		}
 
-		rev := review.NewPendingReview(1, "node1", "sha1")
-		m := New(nil, pr, rev)
+		pr.StartReview()
+		m := New(&appctx.Context{}, pr)
 		m.loading = false
 
 		// Set window size

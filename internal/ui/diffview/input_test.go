@@ -5,6 +5,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
+	"github.com/jkuan/pr-review/internal/appctx"
 	"github.com/jkuan/pr-review/internal/diff"
 	"github.com/jkuan/pr-review/internal/review"
 )
@@ -71,14 +72,14 @@ func testFiles() []diff.DiffFile {
 // newInputTestModel creates a Model pre-loaded with test files and initialized viewports.
 // The model starts in diff focus on the first file.
 func newInputTestModel() Model {
-	pr := review.PullRequest{
+	pr := &review.PullRequest{
 		Number: 1,
 		Title:  "Test PR",
 		Author: "test",
 		Base:   "main",
 	}
-	rev := review.NewPendingReview(1, "node1", "sha1")
-	m := New(nil, pr, rev)
+	pr.StartReview()
+	m := New(&appctx.Context{}, pr)
 	m.loading = false
 
 	// Inject test files
@@ -641,7 +642,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
 			// Add a pending comment so hasUnsavedWork returns true
-			m.review.Comments = append(m.review.Comments, review.InlineComment{
+			m.pr.PendingReview.Comments = append(m.pr.PendingReview.Comments, review.InlineComment{
 				Path: "src/main.go",
 				Line: 1,
 				Body: "test comment",

@@ -48,7 +48,9 @@ func (s *stubService) DeleteReviewComment(_ context.Context, _, _ int) error { r
 func (s *stubService) EditReviewComment(_ context.Context, _, _ int, _ string) error {
 	return nil
 }
-func (s *stubService) SubmitReview(_ context.Context, _ *review.PendingReview) error { return nil }
+func (s *stubService) SubmitReview(_ context.Context, _ *review.PullRequest, _ *review.PendingReview) error {
+	return nil
+}
 func (s *stubService) FetchViewedFiles(_ context.Context, _ string) (map[string]bool, error) {
 	return nil, nil
 }
@@ -68,8 +70,8 @@ func newTestModel() Model {
 	return New(&stubService{}, config.Config{}, defaultFilters, nil)
 }
 
-func testPR() review.PullRequest {
-	return review.PullRequest{
+func testPR() *review.PullRequest {
+	return &review.PullRequest{
 		Number:  42,
 		NodeID:  "PR_node42",
 		Title:   "Test PR",
@@ -100,7 +102,7 @@ var _ = Describe("App message routing", func() {
 		})
 
 		It("has no pending review", func() {
-			Expect(m.review).To(BeNil())
+			Expect(m.selectedPR).To(BeNil())
 		})
 	})
 
@@ -119,10 +121,8 @@ var _ = Describe("App message routing", func() {
 		})
 
 		It("creates a pending review for the selected PR", func() {
-			Expect(m.review).NotTo(BeNil())
-			Expect(m.review.PRNumber).To(Equal(42))
-			Expect(m.review.PRNodeID).To(Equal("PR_node42"))
-			Expect(m.review.CommitID).To(Equal("abc123"))
+			Expect(m.selectedPR.PendingReview).NotTo(BeNil())
+			Expect(m.selectedPR.PendingReview.Event).To(Equal(review.ReviewEventComment))
 		})
 	})
 
@@ -145,50 +145,23 @@ var _ = Describe("App message routing", func() {
 				Expect(m.screen).To(Equal(ScreenPRList))
 			})
 
-			It("clears the pending review", func() {
-				m = update(m, diffview.BackMsg{})
-				Expect(m.review).To(BeNil())
-			})
-
-			It("clears the selected PR", func() {
+			It("clears the selected PR and pending review", func() {
 				m = update(m, diffview.BackMsg{})
 				Expect(m.selectedPR).To(BeNil())
 			})
 		})
 
 		Describe("prBodyLoadedMsg", func() {
-			It("backfills review fields from the loaded PR", func() {
-				m.review.PRNodeID = ""
-				m.review.CommitID = ""
-
-				fullPR := testPR()
-				fullPR.NodeID = "PR_full_node"
-				fullPR.HeadSHA = "def456"
-				m = update(m, prBodyLoadedMsg{pr: &fullPR})
-
-				Expect(m.review.PRNodeID).To(Equal("PR_full_node"))
-				Expect(m.review.CommitID).To(Equal("def456"))
-			})
-
-			It("does not overwrite existing review fields", func() {
-				m.review.PRNodeID = "existing_node"
-				m.review.CommitID = "existing_sha"
-
-				fullPR := testPR()
-				fullPR.NodeID = "new_node"
-				fullPR.HeadSHA = "new_sha"
-				m = update(m, prBodyLoadedMsg{pr: &fullPR})
-
-				Expect(m.review.PRNodeID).To(Equal("existing_node"))
-				Expect(m.review.CommitID).To(Equal("existing_sha"))
-			})
-
-			It("updates the selected PR", func() {
+			It("updates the selected PR in-place", func() {
 				fullPR := testPR()
 				fullPR.Title = "Updated Title"
-				m = update(m, prBodyLoadedMsg{pr: &fullPR})
+				fullPR.NodeID = "PR_full_node"
+				fullPR.HeadSHA = "def456"
+				m = update(m, prBodyLoadedMsg{pr: fullPR})
 
 				Expect(m.selectedPR.Title).To(Equal("Updated Title"))
+				Expect(m.selectedPR.NodeID).To(Equal("PR_full_node"))
+				Expect(m.selectedPR.HeadSHA).To(Equal("def456"))
 			})
 		})
 	})
@@ -206,12 +179,7 @@ var _ = Describe("App message routing", func() {
 				Expect(m.screen).To(Equal(ScreenPRList))
 			})
 
-			It("clears the pending review", func() {
-				m = update(m, submit.SubmittedMsg{})
-				Expect(m.review).To(BeNil())
-			})
-
-			It("clears the selected PR", func() {
+			It("clears the selected PR and pending review", func() {
 				m = update(m, submit.SubmittedMsg{})
 				Expect(m.selectedPR).To(BeNil())
 			})
@@ -228,7 +196,7 @@ var _ = Describe("App message routing", func() {
 	Describe("PRDetail transitions", func() {
 		BeforeEach(func() {
 			pr := testPR()
-			m.selectedPR = &pr
+			m.selectedPR = pr
 			m.prDetail = prdetail.New(pr)
 			m.screen = ScreenPRDetail
 		})
@@ -241,8 +209,8 @@ var _ = Describe("App message routing", func() {
 
 			It("creates a pending review", func() {
 				m = update(m, prdetail.StartReviewMsg{PR: testPR()})
-				Expect(m.review).NotTo(BeNil())
-				Expect(m.review.PRNumber).To(Equal(42))
+				Expect(m.selectedPR.PendingReview).NotTo(BeNil())
+				Expect(m.selectedPR.PendingReview.Event).To(Equal(review.ReviewEventComment))
 			})
 		})
 
@@ -257,7 +225,7 @@ var _ = Describe("App message routing", func() {
 			It("updates the selected PR when successful", func() {
 				fullPR := testPR()
 				fullPR.Body = "Full body text"
-				m = update(m, prBodyLoadedMsg{pr: &fullPR})
+				m = update(m, prBodyLoadedMsg{pr: fullPR})
 
 				Expect(m.selectedPR.Body).To(Equal("Full body text"))
 			})
@@ -272,14 +240,14 @@ var _ = Describe("App message routing", func() {
 			}
 			m = update(m, userIdentityMsg{identity: identity})
 
-			Expect(m.userIdentity).NotTo(BeNil())
-			Expect(m.userIdentity.Login).To(Equal("testuser"))
-			Expect(m.userIdentity.Teams).To(ConsistOf("org/team1"))
+			Expect(m.ctx.UserIdentity).NotTo(BeNil())
+			Expect(m.ctx.UserIdentity.Login).To(Equal("testuser"))
+			Expect(m.ctx.UserIdentity.Teams).To(ConsistOf("org/team1"))
 		})
 
 		It("ignores errors", func() {
 			m = update(m, userIdentityMsg{err: context.DeadlineExceeded})
-			Expect(m.userIdentity).To(BeNil())
+			Expect(m.ctx.UserIdentity).To(BeNil())
 		})
 
 		It("forwards identity to diffview when on diff screen", func() {
@@ -292,8 +260,8 @@ var _ = Describe("App message routing", func() {
 			}
 			m = update(m, userIdentityMsg{identity: identity})
 
-			Expect(m.userIdentity).NotTo(BeNil())
-			Expect(m.userIdentity.Login).To(Equal("testuser"))
+			Expect(m.ctx.UserIdentity).NotTo(BeNil())
+			Expect(m.ctx.UserIdentity.Login).To(Equal("testuser"))
 		})
 	})
 
@@ -303,8 +271,8 @@ var _ = Describe("App message routing", func() {
 
 			Expect(m.screen).To(Equal(ScreenDiffView))
 			Expect(m.initialPR).To(Equal(99))
-			Expect(m.review).NotTo(BeNil())
-			Expect(m.review.PRNumber).To(Equal(99))
+			Expect(m.selectedPR.PendingReview).NotTo(BeNil())
+			Expect(m.selectedPR.PendingReview.Event).To(Equal(review.ReviewEventComment))
 		})
 	})
 

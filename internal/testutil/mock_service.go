@@ -24,7 +24,7 @@ type MockService struct {
 	AddReviewCommentFn      func(ctx context.Context, reviewNodeID string, comment review.InlineComment) (int, error)
 	DeleteReviewCommentFn   func(ctx context.Context, prNumber, commentID int) error
 	EditReviewCommentFn     func(ctx context.Context, prNumber, commentID int, body string) error
-	SubmitReviewFn          func(ctx context.Context, review *review.PendingReview) error
+	SubmitReviewFn          func(ctx context.Context, pr *review.PullRequest, review *review.PendingReview) error
 	FetchViewedFilesFn      func(ctx context.Context, prNodeID string) (map[string]bool, error)
 	MarkFileAsViewedFn      func(ctx context.Context, prNodeID, path string) error
 	UnmarkFileAsViewedFn    func(ctx context.Context, prNodeID, path string) error
@@ -126,9 +126,9 @@ func (m *MockService) EditReviewComment(ctx context.Context, prNumber, commentID
 	return nil
 }
 
-func (m *MockService) SubmitReview(ctx context.Context, rev *review.PendingReview) error {
+func (m *MockService) SubmitReview(ctx context.Context, pr *review.PullRequest, rev *review.PendingReview) error {
 	if m.SubmitReviewFn != nil {
-		return m.SubmitReviewFn(ctx, rev)
+		return m.SubmitReviewFn(ctx, pr, rev)
 	}
 	return nil
 }

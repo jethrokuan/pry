@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jkuan/pr-review/internal/appctx"
 	"github.com/jkuan/pr-review/internal/config"
 	"github.com/jkuan/pr-review/internal/diff"
 	"github.com/jkuan/pr-review/internal/review"
@@ -60,6 +61,12 @@ func (b *PRBuilder) ReviewDecision(d string) *PRBuilder { b.pr.ReviewDecision = 
 // Build returns the constructed PullRequest.
 func (b *PRBuilder) Build() review.PullRequest { return b.pr }
 
+// BuildPtr returns a pointer to the constructed PullRequest.
+func (b *PRBuilder) BuildPtr() *review.PullRequest {
+	pr := b.pr
+	return &pr
+}
+
 // --- DiffFile helpers ---
 
 // SimpleDiffFile creates a DiffFile with a single hunk containing the given added lines.
@@ -89,23 +96,32 @@ func SimpleDiffFile(path string, addedLines ...string) diff.DiffFile {
 
 // --- Model factories ---
 
+// TestContext creates an AppContext wrapping the given service for test use.
+func TestContext(svc review.Service) *appctx.Context {
+	return &appctx.Context{Svc: svc}
+}
+
 // NewDiffViewModel creates a diffview.Model with a mock service and test PR.
 // The returned model is in its initial loading state.
 func NewDiffViewModel(svc review.Service, opts ...diffview.Option) diffview.Model {
-	pr := NewPR().Build()
-	rev := review.NewPendingReview(pr.Number, pr.NodeID, pr.HeadSHA)
-	return diffview.New(svc, pr, rev, opts...)
+	pr := NewPR().BuildPtr()
+	pr.StartReview()
+	return diffview.New(TestContext(svc), pr, opts...)
 }
 
 // NewDiffViewModelWithPR creates a diffview.Model with a specific PR.
-func NewDiffViewModelWithPR(svc review.Service, pr review.PullRequest, opts ...diffview.Option) diffview.Model {
-	rev := review.NewPendingReview(pr.Number, pr.NodeID, pr.HeadSHA)
-	return diffview.New(svc, pr, rev, opts...)
+func NewDiffViewModelWithPR(svc review.Service, pr *review.PullRequest, opts ...diffview.Option) diffview.Model {
+	if pr.PendingReview == nil {
+		pr.StartReview()
+	}
+	return diffview.New(TestContext(svc), pr, opts...)
 }
 
 // NewDiffViewModelWithReview creates a diffview.Model with a specific PR and pending review.
-func NewDiffViewModelWithReview(svc review.Service, pr review.PullRequest, rev *review.PendingReview, opts ...diffview.Option) diffview.Model {
-	return diffview.New(svc, pr, rev, opts...)
+// Deprecated: Use NewDiffViewModelWithPR instead. The review is now owned by the PR.
+func NewDiffViewModelWithReview(svc review.Service, pr *review.PullRequest, rev *review.PendingReview, opts ...diffview.Option) diffview.Model {
+	pr.PendingReview = rev
+	return diffview.New(TestContext(svc), pr, opts...)
 }
 
 // NewPRListModel creates a prlist.Model with a mock service and optional filters.
@@ -119,11 +135,14 @@ func NewPRListModel(svc review.Service, filters ...review.PRFilter) prlist.Model
 }
 
 // NewPRDetailModel creates a prdetail.Model for the given PR.
-func NewPRDetailModel(pr review.PullRequest) prdetail.Model {
+func NewPRDetailModel(pr *review.PullRequest) prdetail.Model {
 	return prdetail.New(pr)
 }
 
-// NewSubmitModel creates a submit.Model with a mock service and pending review.
-func NewSubmitModel(svc review.Service, rev *review.PendingReview) submit.Model {
-	return submit.New(svc, rev)
+// NewSubmitModel creates a submit.Model with a mock service and PR.
+func NewSubmitModel(svc review.Service, pr *review.PullRequest) submit.Model {
+	if pr.PendingReview == nil {
+		pr.StartReview()
+	}
+	return submit.New(TestContext(svc), pr)
 }

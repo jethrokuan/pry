@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/jkuan/pr-review/internal/appctx"
 	"github.com/jkuan/pr-review/internal/config"
 	gitpkg "github.com/jkuan/pr-review/internal/git"
 	"github.com/jkuan/pr-review/internal/review"
@@ -26,7 +27,7 @@ const (
 
 // Model is the top-level application model.
 type Model struct {
-	svc     review.Service
+	ctx     *appctx.Context
 	cfg     config.Config
 	filters []review.PRFilter
 	columns []string
@@ -41,16 +42,15 @@ type Model struct {
 	submit   submit.Model
 
 	// State
-	selectedPR   *review.PullRequest
-	review       *review.PendingReview
-	initialPR    int // PR number passed via CLI argument (0 = none)
-	userIdentity *review.UserIdentity
+	selectedPR *review.PullRequest
+	initialPR  int // PR number passed via CLI argument (0 = none)
 }
 
 // New creates the application model.
 func New(svc review.Service, cfg config.Config, filters []review.PRFilter, columns []string) Model {
+	ctx := &appctx.Context{Svc: svc}
 	return Model{
-		svc:     svc,
+		ctx:     ctx,
 		cfg:     cfg,
 		filters: filters,
 		columns: columns,
@@ -61,28 +61,26 @@ func New(svc review.Service, cfg config.Config, filters []review.PRFilter, colum
 
 // NewWithPR creates the application model starting at a specific PR.
 func NewWithPR(svc review.Service, cfg config.Config, prNumber int, filters []review.PRFilter, columns []string) Model {
-	pr := review.PullRequest{Number: prNumber}
-	rev := review.NewPendingReview(prNumber, "", "")
+	ctx := &appctx.Context{Svc: svc}
+	pr := &review.PullRequest{Number: prNumber}
+	pr.StartReview()
 	m := Model{
-		svc:       svc,
-		cfg:       cfg,
-		filters:   filters,
-		columns:   columns,
-		screen:    ScreenDiffView,
-		prList:    prlist.New(svc, filters, columns),
-		review:    rev,
-		initialPR: prNumber,
+		ctx:        ctx,
+		cfg:        cfg,
+		filters:    filters,
+		columns:    columns,
+		screen:     ScreenDiffView,
+		prList:     prlist.New(svc, filters, columns),
+		selectedPR: pr,
+		initialPR:  prNumber,
 	}
-	m.diffView = diffview.New(svc, pr, rev, m.diffviewOpts()...)
+	m.diffView = diffview.New(ctx, pr, m.diffviewOpts()...)
 	return m
 }
 
-// diffviewOpts converts config and app state to diffview options.
+// diffviewOpts converts config to diffview options.
 func (m Model) diffviewOpts() []diffview.Option {
 	var opts []diffview.Option
-	if m.userIdentity != nil {
-		opts = append(opts, diffview.WithUserIdentity(m.userIdentity))
-	}
 	if m.cfg.FileTree.OwnerFilter != nil && !*m.cfg.FileTree.OwnerFilter {
 		opts = append(opts, diffview.WithOwnerFilterDisabled())
 	}
@@ -99,11 +97,11 @@ type userIdentityMsg struct {
 func (m Model) loadUserIdentity() tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		login, err := m.svc.CurrentUser(ctx)
+		login, err := m.ctx.Svc.CurrentUser(ctx)
 		if err != nil {
 			return userIdentityMsg{err: err}
 		}
-		teams, err := m.svc.UserTeams(ctx)
+		teams, err := m.ctx.Svc.UserTeams(ctx)
 		if err != nil {
 			return userIdentityMsg{err: err}
 		}
@@ -124,7 +122,7 @@ func (m Model) Init() tea.Cmd {
 			m.diffView.Init(),
 			m.loadUserIdentity(),
 			func() tea.Msg {
-				full, err := m.svc.GetPR(context.Background(), prNumber)
+				full, err := m.ctx.Svc.GetPR(context.Background(), prNumber)
 				return prBodyLoadedMsg{pr: full, err: err}
 			},
 		)
@@ -156,7 +154,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 	case userIdentityMsg:
 		if msg.err == nil && msg.identity != nil {
-			m.userIdentity = msg.identity
+			m.ctx.UserIdentity = msg.identity
 			// Forward to diffview if it's active
 			if m.screen == ScreenDiffView {
 				var cmd tea.Cmd
@@ -195,16 +193,17 @@ type checkoutResultMsg struct {
 func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case prlist.PRSelectedMsg:
-		m.selectedPR = &msg.PR
 		pr := msg.PR
-		m.review = review.NewPendingReview(pr.Number, pr.NodeID, pr.HeadSHA)
-		m.diffView = diffview.New(m.svc, pr, m.review, m.diffviewOpts()...)
+		m.selectedPR = pr
+		pr.StartReview()
+		m.diffView = diffview.New(m.ctx, pr, m.diffviewOpts()...)
 		m.screen = ScreenDiffView
+		prNumber := pr.Number
 		return m, tea.Batch(
 			m.diffView.Init(),
 			m.windowSizeCmd(),
 			func() tea.Msg {
-				full, err := m.svc.GetPR(context.Background(), pr.Number)
+				full, err := m.ctx.Svc.GetPR(context.Background(), prNumber)
 				return prBodyLoadedMsg{pr: full, err: err}
 			},
 		)
@@ -220,16 +219,18 @@ func (m Model) updatePRDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prBodyLoadedMsg:
 		if msg.err == nil && msg.pr != nil {
 			m.selectedPR = msg.pr
-			m.prDetail.SetPR(*msg.pr)
+			m.prDetail.SetPR(msg.pr)
 		} else if m.selectedPR != nil {
 			// Body fetch failed; show what we have
-			m.prDetail.SetPR(*m.selectedPR)
+			m.prDetail.SetPR(m.selectedPR)
 		}
 		return m, nil
 
 	case prdetail.StartReviewMsg:
-		m.review = review.NewPendingReview(msg.PR.Number, msg.PR.NodeID, msg.PR.HeadSHA)
-		m.diffView = diffview.New(m.svc, msg.PR, m.review, m.diffviewOpts()...)
+		pr := msg.PR
+		m.selectedPR = pr
+		pr.StartReview()
+		m.diffView = diffview.New(m.ctx, pr, m.diffviewOpts()...)
 		m.screen = ScreenDiffView
 		return m, tea.Batch(m.diffView.Init(), m.windowSizeCmd())
 	case prdetail.CheckoutMsg:
@@ -258,33 +259,27 @@ func (m Model) updatePRDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case diffview.SubmitReviewMsg:
-		m.submit = submit.New(m.svc, m.review)
+		m.submit = submit.New(m.ctx, m.selectedPR)
 		m.screen = ScreenSubmit
 		return m, tea.Batch(m.submit.Init(), m.windowSizeCmd())
 	case diffview.BackMsg:
-		m.review = nil
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		m.prList = prlist.New(m.svc, m.filters, m.columns)
+		m.prList = prlist.New(m.ctx.Svc, m.filters, m.columns)
 		return m, tea.Batch(m.prList.Init(), m.windowSizeCmd())
 	case prBodyLoadedMsg:
 		if msg.err == nil && msg.pr != nil {
-			m.selectedPR = msg.pr
-			// Backfill review fields that may have been empty at creation
-			// (e.g., when launched via CLI with just a PR number).
-			if m.review != nil {
-				if m.review.PRNodeID == "" {
-					m.review.PRNodeID = msg.pr.NodeID
-				}
-				if m.review.CommitID == "" {
-					m.review.CommitID = msg.pr.HeadSHA
-				}
-			}
+			// Update the shared PR in-place so diffview sees the change.
+			// Preserve review state that the new PR data doesn't carry.
+			pendingReview := m.selectedPR.PendingReview
+			existingComments := m.selectedPR.ExistingComments
+			*m.selectedPR = *msg.pr
+			m.selectedPR.PendingReview = pendingReview
+			m.selectedPR.ExistingComments = existingComments
 		}
 		// Forward to diffview as PRBodyLoadedMsg
-		pr := m.selectedPR
 		var dvCmd tea.Cmd
-		m.diffView, dvCmd = m.diffView.Update(diffview.PRBodyLoadedMsg{PR: pr, Err: msg.err})
+		m.diffView, dvCmd = m.diffView.Update(diffview.PRBodyLoadedMsg{PR: m.selectedPR, Err: msg.err})
 		return m, dvCmd
 	}
 
@@ -296,10 +291,9 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateSubmit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg.(type) {
 	case submit.SubmittedMsg:
-		m.review = nil
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		m.prList = prlist.New(m.svc, m.filters, m.columns)
+		m.prList = prlist.New(m.ctx.Svc, m.filters, m.columns)
 		return m, tea.Batch(m.prList.Init(), m.windowSizeCmd())
 	case submit.CancelledMsg:
 		m.screen = ScreenDiffView

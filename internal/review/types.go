@@ -49,6 +49,10 @@ type PullRequest struct {
 	ReviewDecision string   // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
 	PendingTeams   []string // Team slugs with outstanding review requests
 	MyReviewState  string   // Authenticated user's latest review: APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, or ""
+
+	// Review state (populated when user enters review)
+	PendingReview    *PendingReview    // nil until user starts reviewing
+	ExistingComments []ExistingComment // populated from forge
 }
 
 
@@ -90,11 +94,8 @@ type ExistingComment struct {
 
 // PendingReview accumulates comments before submission.
 type PendingReview struct {
-	PRNumber     int
 	ReviewID     int    // Forge review ID (0 if not yet created)
 	ReviewNodeID string // Forge-specific GraphQL ID for the review
-	PRNodeID     string // Forge-specific ID for mutations
-	CommitID     string // HEAD SHA of the PR
 	Comments     []InlineComment
 	Body         string
 	Event        ReviewEvent
@@ -104,12 +105,15 @@ type PendingReview struct {
 	nextLocalID int
 }
 
+// StartReview creates a new pending review on this PR and returns it.
+func (pr *PullRequest) StartReview() *PendingReview {
+	pr.PendingReview = NewPendingReview()
+	return pr.PendingReview
+}
+
 // NewPendingReview creates a new empty pending review.
-func NewPendingReview(prNumber int, prNodeID, commitID string) *PendingReview {
+func NewPendingReview() *PendingReview {
 	return &PendingReview{
-		PRNumber:    prNumber,
-		PRNodeID:    prNodeID,
-		CommitID:    commitID,
 		Comments:    make([]InlineComment, 0),
 		Event:       ReviewEventComment,
 		ViewedFiles: make(map[string]bool),

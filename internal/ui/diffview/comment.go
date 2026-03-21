@@ -21,7 +21,7 @@ import (
 
 // commentRef identifies a single comment in the rendered comment list for a diff line.
 type commentRef struct {
-	isLocal bool // true for local pending (m.review.Comments)
+	isLocal bool // true for local pending (m.pr.PendingReview.Comments)
 	localID int  // InlineComment.LocalID (only meaningful when isLocal)
 }
 
@@ -74,7 +74,7 @@ func (m Model) editSelectedComment() (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	c := m.review.FindByLocalID(ref.localID)
+	c := m.pr.PendingReview.FindByLocalID(ref.localID)
 	if c == nil {
 		return m, nil
 	}
@@ -113,7 +113,7 @@ func (m Model) deleteSelectedComment() (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	c := m.review.FindByLocalID(ref.localID)
+	c := m.pr.PendingReview.FindByLocalID(ref.localID)
 	if c == nil {
 		return m, nil
 	}
@@ -250,7 +250,7 @@ func (m *Model) setForgeComments(comments []review.ExistingComment) {
 // addLocalComment adds a new local pending comment and rebuilds the index.
 // Returns the assigned LocalID.
 func (m *Model) addLocalComment(c review.InlineComment) int {
-	id := m.review.AddCommentDirect(c)
+	id := m.pr.PendingReview.AddCommentDirect(c)
 	m.rebuildCommentIndex()
 	return id
 }
@@ -258,7 +258,7 @@ func (m *Model) addLocalComment(c review.InlineComment) int {
 // removeLocalComment removes a local pending comment by LocalID and rebuilds
 // the index. Returns the removed comment's ForgeID.
 func (m *Model) removeLocalComment(localID int) int {
-	forgeID := m.review.RemoveCommentByLocalID(localID)
+	forgeID := m.pr.PendingReview.RemoveCommentByLocalID(localID)
 	m.rebuildCommentIndex()
 	return forgeID
 }
@@ -266,7 +266,7 @@ func (m *Model) removeLocalComment(localID int) int {
 // updateLocalComment finds a comment by LocalID and applies the given mutation,
 // then rebuilds the index.
 func (m *Model) updateLocalComment(localID int, fn func(*review.InlineComment)) {
-	if c := m.review.FindByLocalID(localID); c != nil {
+	if c := m.pr.PendingReview.FindByLocalID(localID); c != nil {
 		fn(c)
 		m.rebuildCommentIndex()
 	}
@@ -276,7 +276,7 @@ func (m *Model) updateLocalComment(localID int, fn func(*review.InlineComment)) 
 // and sets forgeComments, rebuilding the index once at the end.
 func (m *Model) restoreForgeComments(pendingComments []review.ExistingComment, forgeComments []review.ExistingComment) {
 	for _, ec := range pendingComments {
-		m.review.AddCommentDirect(review.InlineComment{
+		m.pr.PendingReview.AddCommentDirect(review.InlineComment{
 			Path:       ec.Path,
 			Line:       ec.Line,
 			Side:       ec.Side,
@@ -307,7 +307,7 @@ func (m *Model) rebuildCommentIndex() {
 	}
 
 	m.comments.localPendingIndex = make(map[string][]review.InlineComment)
-	for _, c := range m.review.Comments {
+	for _, c := range m.pr.PendingReview.Comments {
 		k := commentIndexKey(c.Path, c.Line, c.Side)
 		m.comments.localPendingIndex[k] = append(m.comments.localPendingIndex[k], c)
 		m.comments.fileCommentIndex[c.Path] = true
@@ -395,7 +395,7 @@ func (m Model) toggleAllComments() Model {
 	for _, c := range m.comments.forgeComments {
 		allKeys[commentKey(c.Path, c.Line)] = true
 	}
-	for _, c := range m.review.Comments {
+	for _, c := range m.pr.PendingReview.Comments {
 		allKeys[commentKey(c.Path, c.Line)] = true
 	}
 
@@ -427,7 +427,7 @@ func (m *Model) commentKeysForFile(path string) []string {
 			add(commentKey(path, c.Line))
 		}
 	}
-	for _, c := range m.review.Comments {
+	for _, c := range m.pr.PendingReview.Comments {
 		if c.Path == path {
 			add(commentKey(c.Path, c.Line))
 		}
@@ -443,21 +443,21 @@ func (m Model) markCurrentFileViewed() (Model, tea.Cmd) {
 	}
 	file := m.files[m.nav.fileCursor]
 	path := file.Path
-	prNodeID := m.review.PRNodeID
+	prNodeID := m.pr.NodeID
 
-	if m.review.ViewedFiles[path] {
+	if m.pr.PendingReview.ViewedFiles[path] {
 		// Unmark
-		delete(m.review.ViewedFiles, path)
+		delete(m.pr.PendingReview.ViewedFiles, path)
 		m.nav.treeViewport.SetContent(m.renderFileTree())
 		m.updateDiffContent()
 		return m, func() tea.Msg {
-			err := m.svc.UnmarkFileAsViewed(context.Background(), prNodeID, path)
+			err := m.ctx.Svc.UnmarkFileAsViewed(context.Background(), prNodeID, path)
 			return markViewedMsg{path: "", err: err}
 		}
 	}
 
 	// Optimistically mark as viewed
-	m.review.ViewedFiles[path] = true
+	m.pr.PendingReview.ViewedFiles[path] = true
 
 	// Navigate to next unviewed file
 	m.navigateToNextUnviewed()
@@ -465,7 +465,7 @@ func (m Model) markCurrentFileViewed() (Model, tea.Cmd) {
 	m.nav.treeViewport.SetContent(m.renderFileTree())
 	m.updateDiffContent()
 	return m, func() tea.Msg {
-		err := m.svc.MarkFileAsViewed(context.Background(), prNodeID, path)
+		err := m.ctx.Svc.MarkFileAsViewed(context.Background(), prNodeID, path)
 		return markViewedMsg{path: path, err: err}
 	}
 }
@@ -482,7 +482,7 @@ func (m *Model) navigateToNextUnviewed() {
 		if !m.filter.isIncluded(idx) {
 			continue
 		}
-		if !m.review.ViewedFiles[m.files[idx].Path] {
+		if !m.pr.PendingReview.ViewedFiles[m.files[idx].Path] {
 			oldIdx := m.nav.fileCursor
 			m.nav.fileCursor = idx
 			m.nav.buildDiffLines(m.files)
@@ -518,13 +518,13 @@ func (m Model) markTreeItemViewed() (Model, tea.Cmd) {
 	// Check if all descendants are already viewed
 	allViewed := true
 	for _, idx := range indices {
-		if idx < len(m.files) && !m.review.ViewedFiles[m.files[idx].Path] {
+		if idx < len(m.files) && !m.pr.PendingReview.ViewedFiles[m.files[idx].Path] {
 			allViewed = false
 			break
 		}
 	}
 
-	prNodeID := m.review.PRNodeID
+	prNodeID := m.pr.NodeID
 	var cmds []tea.Cmd
 
 	if allViewed {
@@ -532,10 +532,10 @@ func (m Model) markTreeItemViewed() (Model, tea.Cmd) {
 		for _, idx := range indices {
 			if idx < len(m.files) {
 				path := m.files[idx].Path
-				delete(m.review.ViewedFiles, path)
+				delete(m.pr.PendingReview.ViewedFiles, path)
 				p := path // capture for closure
 				cmds = append(cmds, func() tea.Msg {
-					err := m.svc.UnmarkFileAsViewed(context.Background(), prNodeID, p)
+					err := m.ctx.Svc.UnmarkFileAsViewed(context.Background(), prNodeID, p)
 					return markViewedMsg{path: "", err: err}
 				})
 			}
@@ -545,11 +545,11 @@ func (m Model) markTreeItemViewed() (Model, tea.Cmd) {
 		for _, idx := range indices {
 			if idx < len(m.files) {
 				path := m.files[idx].Path
-				if !m.review.ViewedFiles[path] {
-					m.review.ViewedFiles[path] = true
+				if !m.pr.PendingReview.ViewedFiles[path] {
+					m.pr.PendingReview.ViewedFiles[path] = true
 					p := path // capture for closure
 					cmds = append(cmds, func() tea.Msg {
-						err := m.svc.MarkFileAsViewed(context.Background(), prNodeID, p)
+						err := m.ctx.Svc.MarkFileAsViewed(context.Background(), prNodeID, p)
 						return markViewedMsg{path: p, err: err}
 					})
 				}
@@ -625,7 +625,7 @@ func (m Model) saveInlineComment() (Model, tea.Cmd) {
 
 	// Editing an existing comment
 	if m.comments.inlineEditLocalID != 0 {
-		c := m.review.FindByLocalID(m.comments.inlineEditLocalID)
+		c := m.pr.PendingReview.FindByLocalID(m.comments.inlineEditLocalID)
 		if c != nil {
 			localID := c.LocalID
 			forgeID := c.ForgeID
@@ -645,7 +645,7 @@ func (m Model) saveInlineComment() (Model, tea.Cmd) {
 	}
 
 	syncStatus := review.SyncPending
-	if m.review.ReviewNodeID != "" {
+	if m.pr.PendingReview.ReviewNodeID != "" {
 		syncStatus = review.SyncInFlight
 	}
 
@@ -660,13 +660,13 @@ func (m Model) saveInlineComment() (Model, tea.Cmd) {
 	m.addLocalComment(newComment)
 
 	// Get the comment back with its assigned LocalID
-	added := m.review.Comments[len(m.review.Comments)-1]
+	added := m.pr.PendingReview.Comments[len(m.pr.PendingReview.Comments)-1]
 
 	m.closeInlineComment()
 
 	// If no pending review exists on the forge yet, create one now.
 	// The reviewCreatedMsg handler will flush all pending comments.
-	if m.review.ReviewNodeID == "" {
+	if m.pr.PendingReview.ReviewNodeID == "" {
 		return m, m.createPendingReviewCmd()
 	}
 	return m, m.syncCommentCmd(added)
@@ -730,8 +730,8 @@ func (m *Model) pendingCommentAtCursor() *review.InlineComment {
 	path := m.files[m.nav.fileCursor].Path
 	line, side := lineAndSide(dl)
 
-	for i := range m.review.Comments {
-		c := &m.review.Comments[i]
+	for i := range m.pr.PendingReview.Comments {
+		c := &m.pr.PendingReview.Comments[i]
 		if c.Path == path && c.Line == line && c.Side == side {
 			return c
 		}
@@ -790,7 +790,7 @@ func checkClipboardImageCmd() tea.Msg {
 }
 
 func (m Model) uploadImageCmd(data []byte) tea.Cmd {
-	svc := m.svc
+	svc := m.ctx.Svc
 	return func() tea.Msg {
 		url, err := svc.UploadImage(context.Background(), data, "image.png")
 		return imageUploadedMsg{url: url, err: err}

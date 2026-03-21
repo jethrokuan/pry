@@ -12,8 +12,10 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 
 	ginkgo.BeforeEach(func() {
 		m = Model{
-			review: &review.PendingReview{
-				ViewedFiles: make(map[string]bool),
+			pr: &review.PullRequest{
+				PendingReview: &review.PendingReview{
+					ViewedFiles: make(map[string]bool),
+				},
 			},
 			comments: CommentPanel{
 				expanded:          make(map[string]bool),
@@ -30,9 +32,9 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 				Path: "main.go", Line: 10, Side: "RIGHT", Body: "fix this",
 			})
 			gomega.Expect(id).To(gomega.BeNumerically(">", 0))
-			gomega.Expect(m.review.Comments).To(gomega.HaveLen(1))
-			gomega.Expect(m.review.Comments[0].LocalID).To(gomega.Equal(id))
-			gomega.Expect(m.review.Comments[0].Body).To(gomega.Equal("fix this"))
+			gomega.Expect(m.pr.PendingReview.Comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.pr.PendingReview.Comments[0].LocalID).To(gomega.Equal(id))
+			gomega.Expect(m.pr.PendingReview.Comments[0].Body).To(gomega.Equal("fix this"))
 
 			pending := m.comments.localPendingIndex[commentIndexKey("main.go", 10, "RIGHT")]
 			gomega.Expect(pending).To(gomega.HaveLen(1))
@@ -47,7 +49,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 				Path: "a.go", Line: 1, Side: "RIGHT", Body: "second",
 			})
 			gomega.Expect(id1).NotTo(gomega.Equal(id2))
-			gomega.Expect(m.review.Comments).To(gomega.HaveLen(2))
+			gomega.Expect(m.pr.PendingReview.Comments).To(gomega.HaveLen(2))
 
 			pending := m.comments.localPendingIndex[commentIndexKey("a.go", 1, "RIGHT")]
 			gomega.Expect(pending).To(gomega.HaveLen(2))
@@ -76,7 +78,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 
 			forgeID := m.removeLocalComment(id)
 			gomega.Expect(forgeID).To(gomega.Equal(0)) // not synced
-			gomega.Expect(m.review.Comments).To(gomega.BeEmpty())
+			gomega.Expect(m.pr.PendingReview.Comments).To(gomega.BeEmpty())
 
 			pending := m.comments.localPendingIndex[commentIndexKey("main.go", 10, "RIGHT")]
 			gomega.Expect(pending).To(gomega.BeEmpty())
@@ -101,8 +103,8 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 			})
 
 			m.removeLocalComment(id1)
-			gomega.Expect(m.review.Comments).To(gomega.HaveLen(1))
-			gomega.Expect(m.review.Comments[0].LocalID).To(gomega.Equal(id2))
+			gomega.Expect(m.pr.PendingReview.Comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.pr.PendingReview.Comments[0].LocalID).To(gomega.Equal(id2))
 
 			pending := m.comments.localPendingIndex[commentIndexKey("main.go", 10, "RIGHT")]
 			gomega.Expect(pending).To(gomega.HaveLen(1))
@@ -130,7 +132,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 				c.Body = "updated"
 			})
 
-			c := m.review.FindByLocalID(id)
+			c := m.pr.PendingReview.FindByLocalID(id)
 			gomega.Expect(c).NotTo(gomega.BeNil())
 			gomega.Expect(c.Body).To(gomega.Equal("updated"))
 			gomega.Expect(c.Path).To(gomega.Equal("main.go"))
@@ -161,8 +163,8 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 				c.Body = "should not happen"
 			})
 
-			gomega.Expect(m.review.Comments).To(gomega.HaveLen(1))
-			gomega.Expect(m.review.Comments[0].Body).To(gomega.Equal("original"))
+			gomega.Expect(m.pr.PendingReview.Comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.pr.PendingReview.Comments[0].Body).To(gomega.Equal("original"))
 		})
 	})
 
@@ -215,7 +217,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 				{ID: 3, Path: "b.go", Line: 5, Side: "LEFT", Body: "forge b"},
 			}
 			// Set up local pending comments
-			m.review.AddCommentDirect(review.InlineComment{
+			m.pr.PendingReview.AddCommentDirect(review.InlineComment{
 				Path: "a.go", Line: 10, Side: "RIGHT", Body: "local pending",
 			})
 
@@ -245,7 +247,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 			gomega.Expect(m.comments.fileCommentIndex["old.go"]).To(gomega.BeTrue())
 
 			// Remove via the review directly, then rebuild
-			m.review.Comments = nil
+			m.pr.PendingReview.Comments = nil
 			m.rebuildCommentIndex()
 
 			gomega.Expect(m.comments.localPendingIndex[commentIndexKey("old.go", 1, "RIGHT")]).To(gomega.BeEmpty())
@@ -265,9 +267,9 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 			m.restoreForgeComments(pending, forge)
 
 			// Pending comments are added as local comments
-			gomega.Expect(m.review.Comments).To(gomega.HaveLen(1))
-			gomega.Expect(m.review.Comments[0].ForgeID).To(gomega.Equal(50))
-			gomega.Expect(m.review.Comments[0].SyncStatus).To(gomega.Equal(review.SyncComplete))
+			gomega.Expect(m.pr.PendingReview.Comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.pr.PendingReview.Comments[0].ForgeID).To(gomega.Equal(50))
+			gomega.Expect(m.pr.PendingReview.Comments[0].SyncStatus).To(gomega.Equal(review.SyncComplete))
 
 			local := m.comments.localPendingIndex[commentIndexKey("a.go", 10, "RIGHT")]
 			gomega.Expect(local).To(gomega.HaveLen(1))

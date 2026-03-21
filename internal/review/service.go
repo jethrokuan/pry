@@ -54,7 +54,7 @@ type Service interface {
 	EditReviewComment(ctx context.Context, prNumber, commentID int, body string) error
 
 	// SubmitReview submits a review with all accumulated comments.
-	SubmitReview(ctx context.Context, review *PendingReview) error
+	SubmitReview(ctx context.Context, pr *PullRequest, review *PendingReview) error
 
 	// FetchViewedFiles returns the set of file paths already marked as viewed on a PR.
 	FetchViewedFiles(ctx context.Context, prNodeID string) (map[string]bool, error)
