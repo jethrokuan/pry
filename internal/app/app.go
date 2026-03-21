@@ -7,10 +7,8 @@ import (
 
 	"github.com/jethrokuan/pry/internal/appctx"
 	"github.com/jethrokuan/pry/internal/config"
-	gitpkg "github.com/jethrokuan/pry/internal/git"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/diffview"
-	"github.com/jethrokuan/pry/internal/ui/prdetail"
 	"github.com/jethrokuan/pry/internal/ui/prlist"
 	"github.com/jethrokuan/pry/internal/ui/submit"
 )
@@ -20,7 +18,6 @@ type Screen int
 
 const (
 	ScreenPRList Screen = iota
-	ScreenPRDetail
 	ScreenDiffView
 	ScreenSubmit
 )
@@ -36,7 +33,6 @@ type Model struct {
 
 	// Screen models
 	prList   prlist.Model
-	prDetail prdetail.Model
 	diffView diffview.Model
 	submit   submit.Model
 
@@ -165,8 +161,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case ScreenPRList:
 		return m.updatePRList(msg)
-	case ScreenPRDetail:
-		return m.updatePRDetail(msg)
 	case ScreenDiffView:
 		return m.updateDiffView(msg)
 	case ScreenSubmit:
@@ -179,11 +173,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // prBodyLoadedMsg carries the full PR data after fetching the body.
 type prBodyLoadedMsg struct {
 	pr  *review.PullRequest
-	err error
-}
-
-// checkoutResultMsg carries the result of a PR checkout operation.
-type checkoutResultMsg struct {
 	err error
 }
 
@@ -208,48 +197,6 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.prList, cmd = m.prList.Update(msg)
-	return m, cmd
-}
-
-func (m Model) updatePRDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case prBodyLoadedMsg:
-		if msg.err == nil && msg.pr != nil {
-			m.selectedPR = msg.pr
-			m.prDetail.SetPR(msg.pr)
-		} else if m.selectedPR != nil {
-			// Body fetch failed; show what we have
-			m.prDetail.SetPR(m.selectedPR)
-		}
-		return m, nil
-
-	case prdetail.StartReviewMsg:
-		pr := msg.PR
-		m.selectedPR = pr
-		pr.StartReview()
-		m.diffView = diffview.New(m.ctx, pr, m.diffviewOpts()...)
-		m.screen = ScreenDiffView
-		return m, tea.Batch(m.diffView.Init(), m.windowSizeCmd())
-	case prdetail.CheckoutMsg:
-		prNumber := msg.PR.Number
-		return m, func() tea.Msg {
-			err := gitpkg.CheckoutPR(prNumber)
-			return checkoutResultMsg{err: err}
-		}
-	case checkoutResultMsg:
-		if msg.err != nil {
-			m.prDetail.SetCheckoutErr(msg.err)
-		} else {
-			m.prDetail.SetCheckoutSuccess()
-		}
-		return m, nil
-	case prdetail.BackMsg:
-		m.screen = ScreenPRList
-		return m, nil
-	}
-
-	var cmd tea.Cmd
-	m.prDetail, cmd = m.prDetail.Update(msg)
 	return m, cmd
 }
 
@@ -308,8 +255,6 @@ func (m Model) View() tea.View {
 	switch m.screen {
 	case ScreenPRList:
 		content = m.prList.View()
-	case ScreenPRDetail:
-		content = m.prDetail.View()
 	case ScreenDiffView:
 		content = m.diffView.View()
 	case ScreenSubmit:

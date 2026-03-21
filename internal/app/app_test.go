@@ -11,7 +11,6 @@ import (
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/diffview"
-	"github.com/jethrokuan/pry/internal/ui/prdetail"
 	"github.com/jethrokuan/pry/internal/ui/prlist"
 	"github.com/jethrokuan/pry/internal/ui/submit"
 )
@@ -189,45 +188,6 @@ var _ = Describe("App message routing", func() {
 			It("transitions back to the diff view", func() {
 				m = update(m, submit.CancelledMsg{})
 				Expect(m.screen).To(Equal(ScreenDiffView))
-			})
-		})
-	})
-
-	Describe("PRDetail transitions", func() {
-		BeforeEach(func() {
-			pr := testPR()
-			m.selectedPR = pr
-			m.prDetail = prdetail.New(pr)
-			m.screen = ScreenPRDetail
-		})
-
-		Describe("StartReviewMsg", func() {
-			It("transitions to the diff view", func() {
-				m = update(m, prdetail.StartReviewMsg{PR: testPR()})
-				Expect(m.screen).To(Equal(ScreenDiffView))
-			})
-
-			It("creates a pending review", func() {
-				m = update(m, prdetail.StartReviewMsg{PR: testPR()})
-				Expect(m.selectedPR.PendingReview).NotTo(BeNil())
-				Expect(m.selectedPR.PendingReview.Event).To(Equal(review.ReviewEventComment))
-			})
-		})
-
-		Describe("BackMsg from PR detail", func() {
-			It("transitions to the PR list", func() {
-				m = update(m, prdetail.BackMsg{})
-				Expect(m.screen).To(Equal(ScreenPRList))
-			})
-		})
-
-		Describe("prBodyLoadedMsg", func() {
-			It("updates the selected PR when successful", func() {
-				fullPR := testPR()
-				fullPR.Body = "Full body text"
-				m = update(m, prBodyLoadedMsg{pr: fullPR})
-
-				Expect(m.selectedPR.Body).To(Equal("Full body text"))
 			})
 		})
 	})

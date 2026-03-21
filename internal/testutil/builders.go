@@ -8,7 +8,6 @@ import (
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/diffview"
-	"github.com/jethrokuan/pry/internal/ui/prdetail"
 	"github.com/jethrokuan/pry/internal/ui/prlist"
 	"github.com/jethrokuan/pry/internal/ui/submit"
 )
@@ -131,11 +130,6 @@ func NewPRListModel(svc review.Service, filters ...review.PRFilter) prlist.Model
 		}
 	}
 	return prlist.New(svc, filters)
-}
-
-// NewPRDetailModel creates a prdetail.Model for the given PR.
-func NewPRDetailModel(pr *review.PullRequest) prdetail.Model {
-	return prdetail.New(pr)
 }
 
 // NewSubmitModel creates a submit.Model with a mock service and PR.

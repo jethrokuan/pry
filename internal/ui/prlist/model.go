@@ -14,12 +14,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"charm.land/glamour/v2"
-
 	"github.com/jethrokuan/pry/internal/review"
-	"github.com/jethrokuan/pry/internal/ui/components/sidebar"
 	"github.com/jethrokuan/pry/internal/ui/components/tabbar"
-	"github.com/jethrokuan/pry/internal/ui/mdutil"
+	"github.com/jethrokuan/pry/internal/ui/prpreview"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
@@ -38,12 +35,6 @@ type prsLoadedMsg struct {
 
 type userTeamsLoadedMsg struct {
 	teams []string
-}
-
-type sidebarBodyLoadedMsg struct {
-	prNumber int
-	body     string
-	err      error
 }
 
 // KeyMap defines the key bindings for the PR list.
@@ -93,10 +84,7 @@ type Model struct {
 	tabBar tabbar.Model
 
 	// Sidebar preview
-	sidebar        sidebar.Model
-	sidebarWidth   int // configured width hint (used for glamour word wrap)
-	previewPRNum   int // PR number of the currently loaded preview body
-	previewLoading bool
+	preview prpreview.Model
 
 	// Filter editing
 	editing      bool            // true when the qualifier text input is active
@@ -123,10 +111,9 @@ func New(svc review.Service, filters []review.PRFilter) Model {
 		filters:      filters,
 		loading:      true,
 		spinner:      s,
-		filterInput:  ti,
-		tabBar:       tabbar.New(tabs),
-		sidebar:      sidebar.New(),
-		sidebarWidth: 50, // initial default; recalculated on WindowSizeMsg
+		filterInput: ti,
+		tabBar:      tabbar.New(tabs),
+		preview:     prpreview.New(svc),
 	}
 }
 
@@ -185,8 +172,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.height = msg.Height
 		// Pre-size sidebar so viewport is initialized before content is set
 		sw, mh := m.layoutDimensions()
-		m.sidebarWidth = sw
-		m.sidebar.SetSize(sw, mh)
+		m.preview.SetSize(sw, mh)
 
 	case prsLoadedMsg:
 		m.loading = false
@@ -195,7 +181,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.prs = msg.prs
 			m.cursor = 0
-			m.previewPRNum = 0 // reset to trigger fresh body load
+			m.preview.ResetCache()
 			m.tabBar.SetCount(m.filterIdx, len(m.prs))
 			return m, m.refreshSidebarPreview()
 		}
@@ -206,15 +192,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.userTeams[t] = true
 		}
 
-	case sidebarBodyLoadedMsg:
-		// Only apply if this is still the PR we're viewing
-		if len(m.prs) > 0 && m.cursor < len(m.prs) && m.prs[m.cursor].Number == msg.prNumber {
-			m.previewLoading = false
-			if msg.err == nil {
-				m.updateSidebarContent(&m.prs[m.cursor], msg.body)
-			} else {
-				m.updateSidebarContent(&m.prs[m.cursor], "")
-			}
+	case prpreview.BodyLoadedMsg:
+		if len(m.prs) > 0 && m.cursor < len(m.prs) {
+			m.preview.HandleBodyLoaded(msg, &m.prs[m.cursor])
 		}
 
 	case spinner.TickMsg:
@@ -293,9 +273,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.filterInput.Focus()
 			return m, nil
 		case key.Matches(msg, keys.SidebarDown):
-			m.sidebar.ScrollDown(3)
+			m.preview.ScrollDown(3)
 		case key.Matches(msg, keys.SidebarUp):
-			m.sidebar.ScrollUp(3)
+			m.preview.ScrollUp(3)
 		case key.Matches(msg, keys.Refresh):
 			m.loading = true
 			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
@@ -321,138 +301,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // and triggers an async body fetch if needed.
 func (m *Model) refreshSidebarPreview() tea.Cmd {
 	if len(m.prs) == 0 || m.cursor >= len(m.prs) {
-		m.sidebar.SetContent("No PR selected")
+		m.preview.SetNoSelection()
 		return nil
 	}
-	pr := &m.prs[m.cursor]
-	m.updateSidebarContent(pr, "")
-
-	// Fetch body async if not already loaded for this PR
-	if pr.Number != m.previewPRNum {
-		m.previewLoading = true
-		m.previewPRNum = pr.Number
-		prNumber := pr.Number
-		return func() tea.Msg {
-			full, err := m.svc.GetPR(context.Background(), prNumber)
-			if err != nil {
-				return sidebarBodyLoadedMsg{prNumber: prNumber, err: err}
-			}
-			return sidebarBodyLoadedMsg{prNumber: prNumber, body: full.Body}
-		}
+	fn := m.preview.Refresh(&m.prs[m.cursor])
+	if fn == nil {
+		return nil
 	}
-	return nil
-}
-
-// updateSidebarContent renders the sidebar preview for a PR.
-func (m *Model) updateSidebarContent(pr *review.PullRequest, body string) {
-	var b strings.Builder
-
-	// Header
-	prLabel := fmt.Sprintf("#%d", pr.Number)
-	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.BrightYellow).Bold(true).Render(prLabel) + "\n\n")
-
-	// Title
-	b.WriteString(lipgloss.NewStyle().Bold(true).Render(pr.Title) + "\n\n")
-
-	// State badge + branch info
-	var stateBadge string
-	switch {
-	case pr.Draft:
-		stateBadge = lipgloss.NewStyle().Foreground(styles.Muted).Render("◌ Draft")
-	case pr.State == "MERGED":
-		stateBadge = lipgloss.NewStyle().Foreground(styles.Secondary).Render("● Merged")
-	case pr.State == "CLOSED":
-		stateBadge = lipgloss.NewStyle().Foreground(styles.Danger).Render("● Closed")
-	default:
-		stateBadge = lipgloss.NewStyle().Foreground(styles.Success).Render("● Open")
-	}
-	branchInfo := lipgloss.NewStyle().Foreground(styles.Muted).Render(
-		fmt.Sprintf("  %s ← %s", pr.Base, pr.Branch))
-	b.WriteString(stateBadge + branchInfo + "\n")
-
-	// Author + time
-	authorLine := fmt.Sprintf("by %s · %s",
-		lipgloss.NewStyle().Foreground(styles.Cyan).Render("@"+pr.Author),
-		timeAgo(pr.UpdatedAt))
-	b.WriteString(authorLine + "\n\n")
-
-	// Review status
-	sectionHeader := lipgloss.NewStyle().Bold(true).Foreground(styles.Muted)
-	b.WriteString(sectionHeader.Render("── Reviewers ──") + "\n")
-	var reviewStatus string
-	switch pr.ReviewDecision {
-	case "APPROVED":
-		reviewStatus = lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Approved")
-	case "CHANGES_REQUESTED":
-		reviewStatus = lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ Changes requested")
-	case "REVIEW_REQUIRED":
-		reviewStatus = lipgloss.NewStyle().Foreground(styles.Warning).Render("○ Review required")
-	default:
-		reviewStatus = lipgloss.NewStyle().Foreground(styles.Muted).Render("○ Pending")
-	}
-	b.WriteString(reviewStatus + "\n")
-	if len(pr.PendingTeams) > 0 {
-		teams := strings.Join(stripOrgPrefixes(pr.PendingTeams), ", ")
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("  Waiting: "+teams) + "\n")
-	}
-	b.WriteString("\n")
-
-	// Labels
-	if len(pr.Labels) > 0 {
-		b.WriteString(sectionHeader.Render("── Labels ──") + "\n")
-		for _, l := range pr.Labels {
-			b.WriteString(styles.LabelStyle.Render(l) + " ")
-		}
-		b.WriteString("\n\n")
-	}
-
-	// Changes
-	b.WriteString(sectionHeader.Render("── Changes ──") + "\n")
-	add := lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("+%d", pr.Additions))
-	del := lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("-%d", pr.Deletions))
-	b.WriteString(fmt.Sprintf("%d files changed  %s %s", pr.Files, add, del) + "\n\n")
-
-	// CI status
-	b.WriteString(sectionHeader.Render("── Checks ──") + "\n")
-	if pr.ChecksPass == nil {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("○ No checks") + "\n")
-	} else if *pr.ChecksPass {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Checks passing") + "\n")
-	} else {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ Checks failing") + "\n")
-	}
-	if pr.ChecksSummary != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("  "+pr.ChecksSummary) + "\n")
-	}
-	b.WriteString("\n")
-
-	// Summary (markdown body)
-	if body != "" {
-		b.WriteString(sectionHeader.Render("── Summary ──") + "\n")
-		sidebarContentWidth := m.sidebarWidth - 5
-		if sidebarContentWidth < 20 {
-			sidebarContentWidth = 20
-		}
-		renderer, err := glamour.NewTermRenderer(
-			glamour.WithStylePath("dark"),
-			glamour.WithWordWrap(sidebarContentWidth),
-		)
-		if err == nil {
-			rendered, err := renderer.Render(mdutil.ReplaceImages(body))
-			if err == nil {
-				b.WriteString(rendered)
-			} else {
-				b.WriteString(body + "\n")
-			}
-		} else {
-			b.WriteString(body + "\n")
-		}
-	} else if m.previewLoading {
-		b.WriteString(sectionHeader.Render("── Summary ──") + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("Loading...") + "\n")
-	}
-
-	m.sidebar.SetContent(b.String())
+	return func() tea.Msg { return fn() }
 }
 
 // renderCtx holds extra data needed at render time.
@@ -522,8 +378,8 @@ func (m Model) View() string {
 		leftPane.WriteString(m.renderTable(tableWidth, tableHeight))
 	}
 
-	m.sidebar.SetSize(sidebarW, mainHeight)
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, leftPane.String(), m.sidebar.View()))
+	m.preview.SetSize(sidebarW, mainHeight)
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, leftPane.String(), m.preview.View()))
 
 	// Footer
 	b.WriteString("\n")
@@ -904,32 +760,3 @@ func shortTimeAgo(t time.Time) string {
 	}
 }
 
-// stripOrgPrefix removes the "org/" prefix from a team slug like "org/team-name".
-func stripOrgPrefix(slug string) string {
-	if i := strings.Index(slug, "/"); i >= 0 {
-		return slug[i+1:]
-	}
-	return slug
-}
-
-func stripOrgPrefixes(slugs []string) []string {
-	out := make([]string, len(slugs))
-	for i, s := range slugs {
-		out[i] = stripOrgPrefix(s)
-	}
-	return out
-}
-
-func timeAgo(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	}
-}

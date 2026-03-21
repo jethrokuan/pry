@@ -139,12 +139,6 @@ var _ = ginkgo.Describe("Model factories", func() {
 		_ = m.View()
 	})
 
-	ginkgo.It("NewPRDetailModel creates a model for a PR", func() {
-		pr := testutil.NewPR().Body("## Description\nSome changes").BuildPtr()
-		m := testutil.NewPRDetailModel(pr)
-		_ = m.View()
-	})
-
 	ginkgo.It("NewSubmitModel creates a model with review", func() {
 		pr := testutil.NewPR().BuildPtr()
 		pr.StartReview()
