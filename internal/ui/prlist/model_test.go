@@ -1,0 +1,325 @@
+package prlist
+
+import (
+	"fmt"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
+
+	"github.com/jkuan/pr-review/internal/review"
+	"github.com/jkuan/pr-review/internal/review/reviewtest"
+)
+
+func newTestModel(svc *reviewtest.MockService, filters ...review.PRFilter) Model {
+	if len(filters) == 0 {
+		filters = []review.PRFilter{
+			{Name: "Default", Qualifier: "is:open"},
+		}
+	}
+	columns := []string{"number", "title", "author"}
+	return New(svc, filters, columns)
+}
+
+func samplePRs(n int) []review.PullRequest {
+	prs := make([]review.PullRequest, n)
+	for i := range n {
+		prs[i] = review.PullRequest{
+			Number: i + 1,
+			Title:  fmt.Sprintf("PR %d", i+1),
+			Author: "author",
+		}
+	}
+	return prs
+}
+
+// loadModel creates a model, sends prsLoadedMsg and userTeamsLoadedMsg,
+// and returns the model in a ready (non-loading) state.
+func loadModel(svc *reviewtest.MockService, prs []review.PullRequest, filters ...review.PRFilter) Model {
+	m := newTestModel(svc, filters...)
+	m, _ = m.Update(prsLoadedMsg{prs: prs})
+	m, _ = m.Update(userTeamsLoadedMsg{teams: nil})
+	return m
+}
+
+var _ = ginkgo.Describe("PRList Model", func() {
+
+	ginkgo.Describe("prsLoadedMsg", func() {
+		ginkgo.It("stores PRs and resets cursor", func() {
+			svc := &reviewtest.MockService{}
+			m := newTestModel(svc)
+			gomega.Expect(m.loading).To(gomega.BeTrue())
+
+			prs := samplePRs(3)
+			m, _ = m.Update(prsLoadedMsg{prs: prs})
+
+			gomega.Expect(m.loading).To(gomega.BeFalse())
+			gomega.Expect(m.prs).To(gomega.HaveLen(3))
+			gomega.Expect(m.cursor).To(gomega.Equal(0))
+			gomega.Expect(m.err).To(gomega.BeNil())
+		})
+
+		ginkgo.It("tracks error state on failure", func() {
+			svc := &reviewtest.MockService{}
+			m := newTestModel(svc)
+
+			m, _ = m.Update(prsLoadedMsg{err: fmt.Errorf("API failure")})
+
+			gomega.Expect(m.loading).To(gomega.BeFalse())
+			gomega.Expect(m.err).To(gomega.MatchError("API failure"))
+			gomega.Expect(m.prs).To(gomega.BeNil())
+		})
+	})
+
+	ginkgo.Describe("userTeamsLoadedMsg", func() {
+		ginkgo.It("populates userTeams map", func() {
+			svc := &reviewtest.MockService{}
+			m := newTestModel(svc)
+
+			m, _ = m.Update(userTeamsLoadedMsg{teams: []string{"org/team-a", "org/team-b"}})
+
+			gomega.Expect(m.userTeams).To(gomega.HaveLen(2))
+			gomega.Expect(m.userTeams["org/team-a"]).To(gomega.BeTrue())
+			gomega.Expect(m.userTeams["org/team-b"]).To(gomega.BeTrue())
+		})
+
+		ginkgo.It("creates empty map when no teams", func() {
+			svc := &reviewtest.MockService{}
+			m := newTestModel(svc)
+
+			m, _ = m.Update(userTeamsLoadedMsg{teams: nil})
+
+			gomega.Expect(m.userTeams).NotTo(gomega.BeNil())
+			gomega.Expect(m.userTeams).To(gomega.BeEmpty())
+		})
+	})
+
+	ginkgo.Describe("keyboard navigation", func() {
+		ginkgo.It("moves cursor down with j", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(5))
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
+			gomega.Expect(m.cursor).To(gomega.Equal(1))
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
+			gomega.Expect(m.cursor).To(gomega.Equal(2))
+		})
+
+		ginkgo.It("moves cursor up with k", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(5))
+			m.cursor = 3
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
+			gomega.Expect(m.cursor).To(gomega.Equal(2))
+		})
+
+		ginkgo.It("clamps cursor at top", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(5))
+			gomega.Expect(m.cursor).To(gomega.Equal(0))
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
+			gomega.Expect(m.cursor).To(gomega.Equal(0))
+		})
+
+		ginkgo.It("clamps cursor at bottom", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(3))
+			m.cursor = 2
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
+			gomega.Expect(m.cursor).To(gomega.Equal(2))
+		})
+
+		ginkgo.It("ignores navigation while loading", func() {
+			svc := &reviewtest.MockService{}
+			m := newTestModel(svc) // loading=true
+			m.cursor = 0
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
+			gomega.Expect(m.cursor).To(gomega.Equal(0))
+		})
+	})
+
+	ginkgo.Describe("PR selection", func() {
+		ginkgo.It("emits PRSelectedMsg on enter", func() {
+			svc := &reviewtest.MockService{}
+			prs := samplePRs(3)
+			m := loadModel(svc, prs)
+			m.cursor = 1
+
+			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			gomega.Expect(cmd).NotTo(gomega.BeNil())
+
+			msg := cmd()
+			gomega.Expect(msg).To(gomega.BeAssignableToTypeOf(PRSelectedMsg{}))
+			gomega.Expect(msg.(PRSelectedMsg).PR.Number).To(gomega.Equal(2))
+		})
+
+		ginkgo.It("does nothing on enter with empty list", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, nil)
+
+			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			gomega.Expect(cmd).To(gomega.BeNil())
+		})
+	})
+
+	ginkgo.Describe("filter picker", func() {
+		var filters []review.PRFilter
+
+		ginkgo.BeforeEach(func() {
+			filters = []review.PRFilter{
+				{Name: "Open", Qualifier: "is:open"},
+				{Name: "Review Requested", Qualifier: "review-requested:@me"},
+				{Name: "Mine", Qualifier: "author:@me"},
+			}
+		})
+
+		ginkgo.It("opens filter picker with f", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1), filters...)
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'f'})
+			gomega.Expect(m.showFilterPicker).To(gomega.BeTrue())
+			gomega.Expect(m.filterCursor).To(gomega.Equal(0))
+		})
+
+		ginkgo.It("navigates filter picker with j/k", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1), filters...)
+			m.showFilterPicker = true
+			m.filterCursor = 0
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
+			gomega.Expect(m.filterCursor).To(gomega.Equal(1))
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
+			gomega.Expect(m.filterCursor).To(gomega.Equal(2))
+
+			// Clamp at bottom
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
+			gomega.Expect(m.filterCursor).To(gomega.Equal(2))
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
+			gomega.Expect(m.filterCursor).To(gomega.Equal(1))
+		})
+
+		ginkgo.It("selects a different filter and triggers reload", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1), filters...)
+			m.showFilterPicker = true
+			m.filterCursor = 1
+
+			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			gomega.Expect(m.showFilterPicker).To(gomega.BeFalse())
+			gomega.Expect(m.filterIdx).To(gomega.Equal(1))
+			gomega.Expect(m.loading).To(gomega.BeTrue())
+			gomega.Expect(cmd).NotTo(gomega.BeNil())
+		})
+
+		ginkgo.It("does not reload when selecting the same filter", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1), filters...)
+			m.showFilterPicker = true
+			m.filterCursor = 0 // same as filterIdx
+
+			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			gomega.Expect(m.showFilterPicker).To(gomega.BeFalse())
+			gomega.Expect(m.loading).To(gomega.BeFalse())
+			gomega.Expect(cmd).To(gomega.BeNil())
+		})
+
+		ginkgo.It("closes filter picker with esc", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1), filters...)
+			m.showFilterPicker = true
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+			gomega.Expect(m.showFilterPicker).To(gomega.BeFalse())
+		})
+	})
+
+	ginkgo.Describe("filter editing", func() {
+		ginkgo.It("enters edit mode with /", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1))
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: '/'})
+			gomega.Expect(m.editing).To(gomega.BeTrue())
+			gomega.Expect(m.customFilter).To(gomega.BeNil())
+		})
+
+		ginkgo.It("exits edit mode with esc", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1))
+			m.editing = true
+
+			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+			gomega.Expect(m.editing).To(gomega.BeFalse())
+			gomega.Expect(cmd).To(gomega.BeNil())
+		})
+
+		ginkgo.It("submits custom filter on enter", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1))
+			m.editing = true
+			m.filterInput.SetValue("author:octocat")
+
+			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			gomega.Expect(m.editing).To(gomega.BeFalse())
+			gomega.Expect(m.customFilter).NotTo(gomega.BeNil())
+			gomega.Expect(m.customFilter.Name).To(gomega.Equal("Custom"))
+			gomega.Expect(m.customFilter.Qualifier).To(gomega.Equal("author:octocat"))
+			gomega.Expect(m.loading).To(gomega.BeTrue())
+			gomega.Expect(cmd).NotTo(gomega.BeNil())
+		})
+	})
+
+	ginkgo.Describe("refresh", func() {
+		ginkgo.It("triggers reload on r", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1))
+
+			m, cmd := m.Update(tea.KeyPressMsg{Code: 'r'})
+			gomega.Expect(m.loading).To(gomega.BeTrue())
+			gomega.Expect(cmd).NotTo(gomega.BeNil())
+		})
+	})
+
+	ginkgo.Describe("window size", func() {
+		ginkgo.It("stores dimensions from WindowSizeMsg", func() {
+			svc := &reviewtest.MockService{}
+			m := newTestModel(svc)
+
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+			gomega.Expect(m.width).To(gomega.Equal(120))
+			gomega.Expect(m.height).To(gomega.Equal(40))
+		})
+	})
+
+	ginkgo.Describe("activeFilter", func() {
+		ginkgo.It("returns preset filter by default", func() {
+			svc := &reviewtest.MockService{}
+			filters := []review.PRFilter{
+				{Name: "Open", Qualifier: "is:open"},
+				{Name: "Mine", Qualifier: "author:@me"},
+			}
+			m := newTestModel(svc, filters...)
+			m.filterIdx = 1
+
+			gomega.Expect(m.activeFilter().Name).To(gomega.Equal("Mine"))
+		})
+
+		ginkgo.It("returns custom filter when set", func() {
+			svc := &reviewtest.MockService{}
+			m := newTestModel(svc)
+			m.customFilter = &review.PRFilter{Name: "Custom", Qualifier: "label:bug"}
+
+			gomega.Expect(m.activeFilter().Name).To(gomega.Equal("Custom"))
+			gomega.Expect(m.activeFilter().Qualifier).To(gomega.Equal("label:bug"))
+		})
+	})
+})
