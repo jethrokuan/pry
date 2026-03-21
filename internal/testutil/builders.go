@@ -129,7 +129,8 @@ func NewPRListModel(svc review.Service, filters ...review.PRFilter) prlist.Model
 			{Name: "Default", Qualifier: "is:open"},
 		}
 	}
-	return prlist.New(svc, filters)
+	ctx := &appctx.Context{Svc: svc}
+	return prlist.New(ctx, filters)
 }
 
 // NewSubmitModel creates a submit.Model with a mock service and PR.

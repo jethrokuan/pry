@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/jethrokuan/pry/internal/appctx"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/scrollbar"
 	"github.com/jethrokuan/pry/internal/ui/components/tabbar"
@@ -94,7 +95,8 @@ type Model struct {
 }
 
 // New creates a new PR list model.
-func New(svc review.Service, filters []review.PRFilter) Model {
+func New(ctx *appctx.Context, filters []review.PRFilter) Model {
+	svc := ctx.Svc
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
@@ -114,7 +116,7 @@ func New(svc review.Service, filters []review.PRFilter) Model {
 		spinner:      s,
 		filterInput: ti,
 		tabBar:      tabbar.New(tabs),
-		preview:     prpreview.New(svc),
+		preview:     prpreview.New(ctx),
 	}
 }
 

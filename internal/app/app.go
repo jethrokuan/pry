@@ -49,7 +49,7 @@ func New(svc review.Service, cfg config.Config, filters []review.PRFilter) Model
 		cfg:     cfg,
 		filters: filters,
 		screen:  ScreenPRList,
-		prList:  prlist.New(svc, filters),
+		prList:  prlist.New(ctx, filters),
 	}
 }
 
@@ -63,7 +63,7 @@ func NewWithPR(svc review.Service, cfg config.Config, prNumber int, filters []re
 		cfg:        cfg,
 		filters:    filters,
 		screen:     ScreenDiffView,
-		prList:     prlist.New(svc, filters),
+		prList:     prlist.New(ctx, filters),
 		selectedPR: pr,
 		initialPR:  prNumber,
 	}
@@ -209,7 +209,7 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case diffview.BackMsg:
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		m.prList = prlist.New(m.ctx.Svc, m.filters)
+		m.prList = prlist.New(m.ctx, m.filters)
 		return m, tea.Batch(m.prList.Init(), m.windowSizeCmd())
 	case prBodyLoadedMsg:
 		if msg.err == nil && msg.pr != nil {
@@ -237,7 +237,7 @@ func (m Model) updateSubmit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case submit.SubmittedMsg:
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		m.prList = prlist.New(m.ctx.Svc, m.filters)
+		m.prList = prlist.New(m.ctx, m.filters)
 		return m, tea.Batch(m.prList.Init(), m.windowSizeCmd())
 	case submit.CancelledMsg:
 		m.screen = ScreenDiffView

@@ -9,6 +9,7 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/jethrokuan/pry/internal/appctx"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/sidebar"
 	"github.com/jethrokuan/pry/internal/ui/mdutil"
@@ -17,7 +18,7 @@ import (
 
 // Model manages the PR preview sidebar content and async body fetching.
 type Model struct {
-	svc          review.Service
+	ctx          *appctx.Context
 	sidebar      sidebar.Model
 	sidebarWidth int
 	previewPRNum int
@@ -25,9 +26,9 @@ type Model struct {
 }
 
 // New creates a new PR preview model.
-func New(svc review.Service) Model {
+func New(ctx *appctx.Context) Model {
 	return Model{
-		svc:          svc,
+		ctx:          ctx,
 		sidebar:      sidebar.New(),
 		sidebarWidth: 50,
 	}
@@ -71,7 +72,7 @@ func (m *Model) Refresh(pr *review.PullRequest) func() BodyLoadedMsg {
 		m.previewPRNum = pr.Number
 		prNumber := pr.Number
 		return func() BodyLoadedMsg {
-			full, err := m.svc.GetPR(context.Background(), prNumber)
+			full, err := m.ctx.Svc.GetPR(context.Background(), prNumber)
 			if err != nil {
 				return BodyLoadedMsg{PRNumber: prNumber, Err: err}
 			}
@@ -156,8 +157,24 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 	}
 	b.WriteString(reviewStatus + "\n")
 	if len(pr.PendingTeams) > 0 {
-		teams := strings.Join(stripOrgPrefixes(pr.PendingTeams), ", ")
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("  Waiting: "+teams) + "\n")
+		userTeams := make(map[string]bool)
+		if m.ctx.UserIdentity != nil {
+			for _, t := range m.ctx.UserIdentity.Teams {
+				userTeams[t] = true
+			}
+		}
+		var teamParts []string
+		highlight := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Underline(true)
+		normal := lipgloss.NewStyle().Foreground(styles.Warning)
+		for _, t := range pr.PendingTeams {
+			name := stripOrgPrefix(t)
+			if userTeams[t] {
+				teamParts = append(teamParts, highlight.Render(name))
+			} else {
+				teamParts = append(teamParts, normal.Render(name))
+			}
+		}
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("  Waiting: ") + strings.Join(teamParts, normal.Render(", ")) + "\n")
 	}
 	b.WriteString("\n")
 
@@ -232,14 +249,6 @@ func stripOrgPrefix(slug string) string {
 		return slug[i+1:]
 	}
 	return slug
-}
-
-func stripOrgPrefixes(slugs []string) []string {
-	out := make([]string, len(slugs))
-	for i, s := range slugs {
-		out[i] = stripOrgPrefix(s)
-	}
-	return out
 }
 
 func timeAgo(t time.Time) string {
