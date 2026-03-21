@@ -29,7 +29,9 @@ type graphqlPRNode struct {
 	HeadRefName    string    `json:"headRefName"`
 	BaseRefName    string    `json:"baseRefName"`
 	HeadRefOid     string    `json:"headRefOid"`
-	ReviewDecision string    `json:"reviewDecision"`
+	ReviewDecision   string `json:"reviewDecision"`
+	MergeStateStatus string `json:"mergeStateStatus"`
+	Mergeable        string `json:"mergeable"`
 	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
@@ -55,7 +57,8 @@ type graphqlPRNode struct {
 		} `json:"nodes"`
 	} `json:"latestReviews"`
 	Commits struct {
-		Nodes []struct {
+		TotalCount int `json:"totalCount"`
+		Nodes      []struct {
 			Commit struct {
 				StatusCheckRollup struct {
 					State string `json:"state"`
@@ -123,9 +126,12 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 					headRefName
 					baseRefName
 					reviewDecision
+					mergeStateStatus
+					mergeable
 					author { login }
 					comments { totalCount }
 					commits(last: 1) {
+						totalCount
 						nodes {
 							commit {
 								statusCheckRollup {
@@ -313,11 +319,14 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		Additions:      node.Additions,
 		Deletions:      node.Deletions,
 		Files:          node.ChangedFiles,
+		Commits:        node.Commits.TotalCount,
 		CommentCount:   node.Comments.TotalCount,
 		Body:           node.Body,
 		URL:            node.URL,
 		HeadSHA:        node.HeadRefOid,
 		ChecksPass:     checksPass,
+		MergeState:     node.MergeStateStatus,
+		Mergeable:      node.Mergeable,
 		ReviewDecision: node.ReviewDecision,
 		Reviewers:      reviewers,
 		PendingTeams:   pendingTeams,
@@ -353,6 +362,7 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 				baseRefName
 				headRefOid
 				reviewDecision
+				mergeStateStatus
 				author { login }
 				labels(first: 10) { nodes { name } }
 			}

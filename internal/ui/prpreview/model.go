@@ -110,7 +110,17 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 	// Header: number + title on one line
 	prLabel := lipgloss.NewStyle().Foreground(lipgloss.BrightYellow).Bold(true).Render(fmt.Sprintf("#%d", pr.Number))
 	prTitle := lipgloss.NewStyle().Bold(true).Render(pr.Title)
-	b.WriteString(prLabel + " " + prTitle + "\n\n")
+	b.WriteString(prLabel + " " + prTitle + "\n")
+
+	// Changes summary (compact, right below title)
+	add := lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("+%d", pr.Additions))
+	del := lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("-%d", pr.Deletions))
+	muted := lipgloss.NewStyle().Foreground(styles.Muted)
+	commitLabel := "commits"
+	if pr.Commits == 1 {
+		commitLabel = "commit"
+	}
+	b.WriteString(muted.Render(fmt.Sprintf("%d %s · %d files changed  ", pr.Commits, commitLabel, pr.Files)) + add + " " + del + "\n\n")
 
 	// State badge + branch info
 	var stateBadge string
@@ -141,40 +151,72 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 		timeAgo(pr.UpdatedAt))
 	b.WriteString(authorLine + "\n\n")
 
-	// Review status
+	// Merge status
 	sectionHeader := lipgloss.NewStyle().Bold(true)
-	b.WriteString(sectionHeader.Render("☷ Reviewers") + "\n")
-	var reviewStatus string
-	switch pr.ReviewDecision {
-	case "APPROVED":
-		reviewStatus = lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Approved")
-	case "CHANGES_REQUESTED":
-		reviewStatus = lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ Changes requested")
-	case "REVIEW_REQUIRED":
-		reviewStatus = lipgloss.NewStyle().Foreground(styles.Warning).Render("○ Review required")
+	b.WriteString(sectionHeader.Render("☷ Merge Status") + "\n")
+	var mergeStatus string
+	switch pr.MergeState {
+	case "CLEAN":
+		mergeStatus = lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Ready to merge")
+	case "HAS_HOOKS":
+		mergeStatus = lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Ready (has hooks)")
+	case "DRAFT":
+		mergeStatus = lipgloss.NewStyle().Foreground(styles.Muted).Render("◌ Draft")
+	case "BLOCKED":
+		mergeStatus = lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ Blocked")
+	case "UNSTABLE":
+		mergeStatus = lipgloss.NewStyle().Foreground(styles.Warning).Render("○ Unstable")
+	case "DIRTY":
+		mergeStatus = lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ Merge conflicts")
 	default:
-		reviewStatus = lipgloss.NewStyle().Foreground(styles.Muted).Render("○ Pending")
+		mergeStatus = lipgloss.NewStyle().Foreground(styles.Muted).Render("○ Unknown")
 	}
-	b.WriteString(reviewStatus + "\n")
-	if len(pr.PendingTeams) > 0 {
-		userTeams := make(map[string]bool)
-		if m.ctx.UserIdentity != nil {
-			for _, t := range m.ctx.UserIdentity.Teams {
-				userTeams[t] = true
+	b.WriteString(mergeStatus + "\n")
+	// Blocking reasons (when not clean)
+	if pr.MergeState == "BLOCKED" || pr.MergeState == "UNSTABLE" || pr.MergeState == "DIRTY" {
+		detail := lipgloss.NewStyle().Foreground(styles.Muted)
+		if pr.Mergeable == "CONFLICTING" {
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Has merge conflicts") + "\n")
+		}
+		if pr.ReviewDecision == "REVIEW_REQUIRED" {
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("  ○ Awaiting required reviews") + "\n")
+		} else if pr.ReviewDecision == "CHANGES_REQUESTED" {
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Changes requested") + "\n")
+		}
+		if pr.ChecksPass != nil && !*pr.ChecksPass {
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Checks failing") + "\n")
+			if pr.ChecksSummary != "" {
+				b.WriteString(detail.Render("    "+pr.ChecksSummary) + "\n")
 			}
 		}
-		var teamParts []string
-		highlight := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Underline(true)
-		normal := lipgloss.NewStyle().Foreground(styles.Warning)
-		for _, t := range pr.PendingTeams {
-			name := stripOrgPrefix(t)
-			if userTeams[t] {
-				teamParts = append(teamParts, highlight.Render(name))
-			} else {
-				teamParts = append(teamParts, normal.Render(name))
+		if len(pr.PendingTeams) > 0 {
+			userTeams := make(map[string]bool)
+			if m.ctx.UserIdentity != nil {
+				for _, t := range m.ctx.UserIdentity.Teams {
+					userTeams[t] = true
+				}
 			}
+			var teamParts []string
+			highlight := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Underline(true)
+			normal := lipgloss.NewStyle().Foreground(styles.Warning)
+			for _, t := range pr.PendingTeams {
+				name := stripOrgPrefix(t)
+				if userTeams[t] {
+					teamParts = append(teamParts, highlight.Render(name))
+				} else {
+					teamParts = append(teamParts, normal.Render(name))
+				}
+			}
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("  Waiting: ") + strings.Join(teamParts, normal.Render(", ")) + "\n")
 		}
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("  Waiting: ") + strings.Join(teamParts, normal.Render(", ")) + "\n")
+	} else if pr.MergeState == "CLEAN" || pr.MergeState == "HAS_HOOKS" {
+		// Show checks summary even when clean
+		if pr.ChecksPass != nil && *pr.ChecksPass {
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render("  ✓ Checks passing") + "\n")
+		}
+		if pr.ReviewDecision == "APPROVED" {
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render("  ✓ Approved") + "\n")
+		}
 	}
 	b.WriteString("\n")
 
@@ -186,26 +228,6 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 		}
 		b.WriteString("\n\n")
 	}
-
-	// Changes
-	b.WriteString(sectionHeader.Render("△ Changes") + "\n")
-	add := lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("+%d", pr.Additions))
-	del := lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("-%d", pr.Deletions))
-	b.WriteString(fmt.Sprintf("%d files changed  %s %s", pr.Files, add, del) + "\n\n")
-
-	// CI status
-	b.WriteString(sectionHeader.Render("◈ Checks") + "\n")
-	if pr.ChecksPass == nil {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("○ No checks") + "\n")
-	} else if *pr.ChecksPass {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Checks passing") + "\n")
-	} else {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ Checks failing") + "\n")
-	}
-	if pr.ChecksSummary != "" {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("  "+pr.ChecksSummary) + "\n")
-	}
-	b.WriteString("\n")
 
 	// Summary (markdown body)
 	if body != "" {

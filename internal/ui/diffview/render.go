@@ -640,18 +640,27 @@ func (m *Model) buildPRInfoContent(width int) string {
 		b.WriteString("Labels: " + strings.Join(labels, " ") + "\n")
 	}
 
-	// Review status
-	reviewStatus := "pending"
-	reviewStyle := lipgloss.NewStyle().Foreground(styles.Warning)
-	switch m.pr.ReviewDecision {
-	case "APPROVED":
-		reviewStatus = "approved"
-		reviewStyle = lipgloss.NewStyle().Foreground(styles.Success)
-	case "CHANGES_REQUESTED":
-		reviewStatus = "changes requested"
-		reviewStyle = lipgloss.NewStyle().Foreground(styles.Danger)
+	// Merge status
+	mergeLabel := "unknown"
+	mergeStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	switch m.pr.MergeState {
+	case "CLEAN", "HAS_HOOKS":
+		mergeLabel = "ready to merge"
+		mergeStyle = lipgloss.NewStyle().Foreground(styles.Success)
+	case "BLOCKED":
+		mergeLabel = "blocked"
+		mergeStyle = lipgloss.NewStyle().Foreground(styles.Danger)
+	case "UNSTABLE":
+		mergeLabel = "unstable"
+		mergeStyle = lipgloss.NewStyle().Foreground(styles.Warning)
+	case "DIRTY":
+		mergeLabel = "merge conflicts"
+		mergeStyle = lipgloss.NewStyle().Foreground(styles.Danger)
+	case "DRAFT":
+		mergeLabel = "draft"
+		mergeStyle = lipgloss.NewStyle().Foreground(styles.Muted)
 	}
-	b.WriteString(labelStyle.Render("Review: ") + reviewStyle.Render(reviewStatus) + "\n")
+	b.WriteString(labelStyle.Render("Merge: ") + mergeStyle.Render(mergeLabel) + "\n")
 
 	b.WriteString(separator + "\n\n")
 

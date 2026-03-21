@@ -44,6 +44,7 @@ type PullRequest struct {
 	Additions int
 	Deletions int
 	Files        int
+	Commits      int
 	CommentCount int
 	Body         string
 	URL       string
@@ -53,7 +54,9 @@ type PullRequest struct {
 	ChecksPass    *bool
 	ChecksSummary string
 
-	// Review status
+	// Merge & review status
+	MergeState     string     // BLOCKED, CLEAN, DIRTY, DRAFT, HAS_HOOKS, UNKNOWN, UNSTABLE
+	Mergeable      string     // MERGEABLE, CONFLICTING, UNKNOWN
 	ReviewDecision string     // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
 	Reviewers      []Reviewer // Individual reviewer statuses
 	PendingTeams   []string   // Team slugs with outstanding review requests

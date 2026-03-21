@@ -495,9 +495,7 @@ func (m Model) renderTable(width, height int) string {
 			dot +
 			s(lipgloss.BrightCyan).Render(iconFiles) + muted.Render(fmt.Sprintf(" %d", pr.Files)) +
 			dot +
-			renderReviewStatusInherited(pr, base) +
-			muted.Render(" ") +
-			renderCIIconInherited(pr, base)
+			renderMergeIconInherited(pr, base)
 		if pr.CommentCount > 0 {
 			statsContent += dot +
 				s(lipgloss.BrightBlue).Render(iconCommentSingle) + muted.Render(fmt.Sprintf(" %d", pr.CommentCount))
@@ -529,13 +527,7 @@ var (
 	iconApproved         = "\U000f012c" // nf-md-check_circle
 	iconChangesRequested = "\ueb43"     // nf-cod-request_changes
 	iconWaiting          = "\ue641"     // nf-seti-clock
-	iconComment          = "\uf0e6"     // nf-fa-comments
 	iconCommentSingle    = "\uf27b"     // nf-fa-commenting
-
-	iconCISuccess = "\uf058"     // nf-fa-check_circle
-	iconCIFailure = "\U000f0159" // nf-md-close_circle
-	iconCIPending = "\ue641"     // nf-seti-clock
-	iconEmpty     = "\ueabd"     // nf-cod-circle_slash
 
 	iconFiles   = "\uf440" // nf-oct-diff
 	iconUpdated = "\uf472" // nf-oct-history
@@ -557,69 +549,25 @@ func renderStateIcon(pr review.PullRequest) (string, color.Color) {
 	}
 }
 
-// renderReviewStatusInherited renders the review porcelain with colors, inheriting base for background.
-func renderReviewStatusInherited(pr review.PullRequest, base lipgloss.Style) string {
+// renderMergeIconInherited renders the merge state icon with color, inheriting base for background.
+func renderMergeIconInherited(pr review.PullRequest, base lipgloss.Style) string {
 	s := func(c color.Color) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(c).Inherit(base)
 	}
-
-	if len(pr.Reviewers) == 0 {
-		switch pr.ReviewDecision {
-		case "APPROVED":
-			return s(lipgloss.Green).Render(iconApproved)
-		case "CHANGES_REQUESTED":
-			return s(lipgloss.Red).Render(iconChangesRequested)
-		default:
-			return s(lipgloss.BrightBlack).Render(iconWaiting)
-		}
-	}
-
-	var approved, pending, changesReq, commented int
-	for _, r := range pr.Reviewers {
-		switch r.State {
-		case "APPROVED":
-			approved++
-		case "CHANGES_REQUESTED":
-			changesReq++
-		case "COMMENTED":
-			commented++
-		default:
-			pending++
-		}
-	}
-
-	var parts []string
-	if approved > 0 {
-		parts = append(parts, s(lipgloss.Green).Render(fmt.Sprintf("%s %d", iconApproved, approved)))
-	}
-	if changesReq > 0 {
-		parts = append(parts, s(lipgloss.Red).Render(fmt.Sprintf("%s %d", iconChangesRequested, changesReq)))
-	}
-	if commented > 0 {
-		parts = append(parts, s(lipgloss.Cyan).Render(fmt.Sprintf("%s %d", iconComment, commented)))
-	}
-	if pending > 0 {
-		parts = append(parts, s(lipgloss.BrightBlack).Render(fmt.Sprintf("%s %d", iconWaiting, pending)))
-	}
-	if len(parts) == 0 {
+	switch pr.MergeState {
+	case "CLEAN", "HAS_HOOKS":
+		return s(lipgloss.Green).Render(iconApproved)
+	case "BLOCKED":
+		return s(lipgloss.Red).Render(iconChangesRequested)
+	case "UNSTABLE":
+		return s(lipgloss.BrightYellow).Render(iconWaiting)
+	case "DIRTY":
+		return s(lipgloss.Red).Render(iconChangesRequested)
+	case "DRAFT":
+		return s(lipgloss.BrightBlack).Render(iconWaiting)
+	default:
 		return s(lipgloss.BrightBlack).Render(iconWaiting)
 	}
-	sp := lipgloss.NewStyle().Inherit(base).Render(" ")
-	return strings.Join(parts, sp)
-}
-
-// renderCIIconInherited renders the CI icon with color, inheriting base for background.
-func renderCIIconInherited(pr review.PullRequest, base lipgloss.Style) string {
-	s := func(c color.Color) lipgloss.Style {
-		return lipgloss.NewStyle().Foreground(c).Inherit(base)
-	}
-	if pr.ChecksPass == nil {
-		return s(lipgloss.BrightBlack).Render(iconEmpty)
-	}
-	if *pr.ChecksPass {
-		return s(lipgloss.Green).Render(iconCISuccess)
-	}
-	return s(lipgloss.Red).Render(iconCIFailure)
 }
 
 // renderStatsPlain returns the stats line as plain text (no ANSI colors)
@@ -628,8 +576,7 @@ func renderStatsPlain(pr review.PullRequest) string {
 	parts := []string{
 		fmt.Sprintf("+%s -%s", formatNum(pr.Additions), formatNum(pr.Deletions)),
 		fmt.Sprintf("%s %d", iconFiles, pr.Files),
-		renderReviewPlain(pr),
-		renderCIPlain(pr),
+		renderMergePlain(pr),
 	}
 	if pr.CommentCount > 0 {
 		parts = append(parts, fmt.Sprintf("%s %d", iconCommentSingle, pr.CommentCount))
@@ -641,121 +588,16 @@ func renderStatsPlain(pr review.PullRequest) string {
 	return strings.Join(parts, " · ")
 }
 
-// renderReviewPlain returns the review porcelain as plain text.
-func renderReviewPlain(pr review.PullRequest) string {
-	if len(pr.Reviewers) == 0 {
-		switch pr.ReviewDecision {
-		case "APPROVED":
-			return iconApproved
-		case "CHANGES_REQUESTED":
-			return iconChangesRequested
-		default:
-			return iconWaiting
-		}
-	}
-
-	var approved, pending, changesReq, commented int
-	for _, r := range pr.Reviewers {
-		switch r.State {
-		case "APPROVED":
-			approved++
-		case "CHANGES_REQUESTED":
-			changesReq++
-		case "COMMENTED":
-			commented++
-		default:
-			pending++
-		}
-	}
-
-	var parts []string
-	if approved > 0 {
-		parts = append(parts, fmt.Sprintf("%s %d", iconApproved, approved))
-	}
-	if changesReq > 0 {
-		parts = append(parts, fmt.Sprintf("%s %d", iconChangesRequested, changesReq))
-	}
-	if commented > 0 {
-		parts = append(parts, fmt.Sprintf("%s %d", iconComment, commented))
-	}
-	if pending > 0 {
-		parts = append(parts, fmt.Sprintf("%s %d", iconWaiting, pending))
-	}
-	if len(parts) == 0 {
+// renderMergePlain returns the merge state as plain text.
+func renderMergePlain(pr review.PullRequest) string {
+	switch pr.MergeState {
+	case "CLEAN", "HAS_HOOKS":
+		return iconApproved
+	case "BLOCKED", "DIRTY":
+		return iconChangesRequested
+	default:
 		return iconWaiting
 	}
-	return strings.Join(parts, " ")
-}
-
-// renderCIPlain returns the CI status as plain text.
-func renderCIPlain(pr review.PullRequest) string {
-	if pr.ChecksPass == nil {
-		return iconEmpty
-	}
-	if *pr.ChecksPass {
-		return iconCISuccess
-	}
-	return iconCIFailure
-}
-
-// renderReviewStatus returns a colored porcelain review summary (used by sidebar).
-func renderReviewStatus(pr review.PullRequest) string {
-	fg := func(c color.Color) lipgloss.Style { return lipgloss.NewStyle().Foreground(c) }
-
-	if len(pr.Reviewers) == 0 {
-		switch pr.ReviewDecision {
-		case "APPROVED":
-			return fg(lipgloss.Green).Render(iconApproved)
-		case "CHANGES_REQUESTED":
-			return fg(lipgloss.Red).Render(iconChangesRequested)
-		default:
-			return fg(lipgloss.BrightBlack).Render(iconWaiting)
-		}
-	}
-
-	var approved, pending, changesReq, commented int
-	for _, r := range pr.Reviewers {
-		switch r.State {
-		case "APPROVED":
-			approved++
-		case "CHANGES_REQUESTED":
-			changesReq++
-		case "COMMENTED":
-			commented++
-		default:
-			pending++
-		}
-	}
-
-	var parts []string
-	if approved > 0 {
-		parts = append(parts, fg(lipgloss.Green).Render(fmt.Sprintf("%s %d", iconApproved, approved)))
-	}
-	if changesReq > 0 {
-		parts = append(parts, fg(lipgloss.Red).Render(fmt.Sprintf("%s %d", iconChangesRequested, changesReq)))
-	}
-	if commented > 0 {
-		parts = append(parts, fg(lipgloss.Cyan).Render(fmt.Sprintf("%s %d", iconComment, commented)))
-	}
-	if pending > 0 {
-		parts = append(parts, fg(lipgloss.BrightBlack).Render(fmt.Sprintf("%s %d", iconWaiting, pending)))
-	}
-
-	if len(parts) == 0 {
-		return fg(lipgloss.BrightBlack).Render(iconWaiting)
-	}
-	return strings.Join(parts, " ")
-}
-
-// renderCIIcon returns the icon and color for CI status.
-func renderCIIcon(pr review.PullRequest) (string, color.Color) {
-	if pr.ChecksPass == nil {
-		return iconEmpty, lipgloss.BrightBlack
-	}
-	if *pr.ChecksPass {
-		return iconCISuccess, lipgloss.Green
-	}
-	return iconCIFailure, lipgloss.Red
 }
 
 // formatNum formats a number with k suffix for large values.
