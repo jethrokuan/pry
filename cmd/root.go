@@ -51,9 +51,6 @@ func main() {
 	} else {
 		cfg = config.Load()
 	}
-	// Theme is derived from the terminal's ANSI palette — no config needed.
-	_ = cfg
-
 	// Detect repo context
 	owner, repo, err := gitpkg.GetRepoInfo()
 	if err != nil {
