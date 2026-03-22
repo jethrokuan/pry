@@ -232,8 +232,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.enrichMap = make(map[int]enrichState)
 			m.preview.ResetCache()
 			m.tabBar.SetCount(m.filterIdx, len(m.prs))
-			m.refreshSidebarPreview()
-			return m, m.enrichVisible()
+			sidebarCmd := m.refreshSidebarPreview()
+			enrichCmd := m.enrichVisible()
+			return m, tea.Batch(sidebarCmd, enrichCmd)
 		}
 
 	case userTeamsLoadedMsg:
