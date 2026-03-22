@@ -312,10 +312,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 
-		if m.loading {
-			return m, nil
-		}
-
 		// Normal mode
 		switch {
 		case key.Matches(msg, keys.Quit):
