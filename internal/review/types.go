@@ -102,6 +102,20 @@ type PullRequest struct {
 	ExistingComments []ExistingComment // populated from forge
 }
 
+// MergeEnriched replaces all fields in pr with those from enriched,
+// then restores any active review state (PendingReview, ExistingComments)
+// that was already set on the receiver.
+func (pr *PullRequest) MergeEnriched(enriched *PullRequest) {
+	savedReview := pr.PendingReview
+	savedComments := pr.ExistingComments
+	*pr = *enriched
+	if savedReview != nil {
+		pr.PendingReview = savedReview
+	}
+	if savedComments != nil {
+		pr.ExistingComments = savedComments
+	}
+}
 
 // ReviewEvent is the type of review action.
 type ReviewEvent string

@@ -255,7 +255,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.enrichMap[msg.PRNumber] = enrichDone
 		for i := range m.prs {
 			if m.prs[i].Number == msg.PRNumber {
-				mergePRDetails(&m.prs[i], msg.FullPR)
+				m.prs[i].MergeEnriched(msg.FullPR)
 				break
 			}
 		}
@@ -505,23 +505,6 @@ func (m *Model) enrichVisible() tea.Cmd {
 	}
 	cmds = append(cmds, m.spinner.Tick)
 	return tea.Batch(cmds...)
-}
-
-// mergePRDetails copies enriched fields from src into dst.
-func mergePRDetails(dst, src *review.PullRequest) {
-	dst.CheckRuns = src.CheckRuns
-	dst.ChecksPass = src.ChecksPass
-	dst.ChecksSummary = src.ChecksSummary
-	dst.MergeState = src.MergeState
-	dst.Mergeable = src.Mergeable
-	dst.ReviewDecision = src.ReviewDecision
-	dst.Reviewers = src.Reviewers
-	dst.PendingTeams = src.PendingTeams
-	dst.MyReviewState = src.MyReviewState
-	dst.Labels = src.Labels
-	dst.Body = src.Body
-	dst.Commits = src.Commits
-	dst.HeadSHA = src.HeadSHA
 }
 
 // hasEnrichmentPending returns true if any PR enrichment is in flight.
