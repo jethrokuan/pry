@@ -86,6 +86,12 @@ type userIdentityMsg struct {
 	err      error
 }
 
+// mentionableUsersMsg carries the result of the async mentionable users fetch.
+type mentionableUsersMsg struct {
+	users []string
+	err   error
+}
+
 // loadUserIdentity fetches the current user's login and teams.
 func (m Model) loadUserIdentity() tea.Cmd {
 	return func() tea.Msg {
@@ -107,6 +113,14 @@ func (m Model) loadUserIdentity() tea.Cmd {
 	}
 }
 
+// loadMentionableUsers fetches @-mentionable usernames in the background at startup.
+func (m Model) loadMentionableUsers() tea.Cmd {
+	return func() tea.Msg {
+		users, err := m.ctx.Svc.ListMentionableUsers(context.Background())
+		return mentionableUsersMsg{users: users, err: err}
+	}
+}
+
 // Init starts the application.
 func (m Model) Init() tea.Cmd {
 	if m.initialPR > 0 {
@@ -114,6 +128,7 @@ func (m Model) Init() tea.Cmd {
 		return tea.Batch(
 			m.diffView.Init(),
 			m.loadUserIdentity(),
+			m.loadMentionableUsers(),
 			func() tea.Msg {
 				full, err := m.ctx.Svc.GetPR(context.Background(), prNumber)
 				return prBodyLoadedMsg{pr: full, err: err}
@@ -123,6 +138,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.prList.Init(),
 		m.loadUserIdentity(),
+		m.loadMentionableUsers(),
 	)
 }
 
@@ -152,6 +168,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.screen == ScreenDiffView {
 				var cmd tea.Cmd
 				m.diffView, cmd = m.diffView.Update(diffview.UserIdentityMsg{Identity: msg.identity})
+				return m, cmd
+			}
+		}
+		return m, nil
+	case mentionableUsersMsg:
+		if msg.err == nil {
+			m.ctx.MentionableUsers = msg.users
+			// Forward to diffview if it's active
+			if m.screen == ScreenDiffView {
+				var cmd tea.Cmd
+				m.diffView, cmd = m.diffView.Update(diffview.MentionableUsersMsg{Users: msg.users})
 				return m, cmd
 			}
 		}

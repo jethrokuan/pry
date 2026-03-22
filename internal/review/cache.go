@@ -181,6 +181,58 @@ func (c *CachingService) writeDiskCache(qualifier string, prs []PullRequest) {
 	}
 }
 
+const mentionableCacheTTL = 24 * time.Hour
+
+// mentionableDiskEntry is the JSON-serializable form for mentionable users.
+type mentionableDiskEntry struct {
+	FetchedAt time.Time `json:"fetched_at"`
+	Users     []string  `json:"users"`
+}
+
+func (c *CachingService) mentionableCachePath() string {
+	if c.cacheDir == "" {
+		return ""
+	}
+	return filepath.Join(c.cacheDir, "mentionable_users.json")
+}
+
+func (c *CachingService) readMentionableCache() ([]string, bool) {
+	path := c.mentionableCachePath()
+	if path == "" {
+		return nil, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var entry mentionableDiskEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		return nil, false
+	}
+	if time.Since(entry.FetchedAt) >= mentionableCacheTTL {
+		return nil, false
+	}
+	return entry.Users, true
+}
+
+func (c *CachingService) writeMentionableCache(users []string) {
+	path := c.mentionableCachePath()
+	if path == "" {
+		return
+	}
+	if err := os.MkdirAll(c.cacheDir, 0o755); err != nil {
+		return
+	}
+	data, err := json.Marshal(mentionableDiskEntry{
+		FetchedAt: time.Now(),
+		Users:     users,
+	})
+	if err != nil {
+		return
+	}
+	os.WriteFile(path, data, 0o644)
+}
+
 // clearDiskCache removes all cache files from the cache directory.
 func (c *CachingService) clearDiskCache() {
 	if c.cacheDir == "" {
@@ -243,7 +295,19 @@ func (c *CachingService) UnmarkFileAsViewed(ctx context.Context, prNodeID, path 
 	return c.inner.UnmarkFileAsViewed(ctx, prNodeID, path)
 }
 func (c *CachingService) ListMentionableUsers(ctx context.Context) ([]string, error) {
-	return c.inner.ListMentionableUsers(ctx)
+	if c.cacheDir != "" {
+		if users, ok := c.readMentionableCache(); ok {
+			return users, nil
+		}
+	}
+	users, err := c.inner.ListMentionableUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if c.cacheDir != "" {
+		c.writeMentionableCache(users)
+	}
+	return users, nil
 }
 func (c *CachingService) UploadImage(ctx context.Context, data []byte, filename string) (string, error) {
 	return c.inner.UploadImage(ctx, data, filename)

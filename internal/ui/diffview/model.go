@@ -101,9 +101,9 @@ type imageUploadedMsg struct {
 
 type flashExpiredMsg struct{}
 
-type mentionableUsersMsg struct {
-	users []string
-	err   error
+// MentionableUsersMsg carries mentionable usernames from the app layer.
+type MentionableUsersMsg struct {
+	Users []string
 }
 
 // UserIdentityMsg carries the resolved user identity from the app layer.
@@ -340,22 +340,19 @@ func New(ctx *appctx.Context, pr *review.PullRequest, opts ...Option) Model {
 // --- Init ---
 
 func (m Model) Init() tea.Cmd {
+	// Seed mentionable users from context if already loaded at startup.
+	if users := m.ctx.MentionableUsers; len(users) > 0 {
+		m.comments.mentionAll = users
+	}
 	return tea.Batch(
 		m.loadFiles(),
 		m.loadComments(),
 		m.loadPendingReview(),
 		m.loadViewedFiles(),
-		m.loadMentionableUsers(),
 		m.spinner.Tick,
 	)
 }
 
-func (m Model) loadMentionableUsers() tea.Cmd {
-	return func() tea.Msg {
-		users, err := m.ctx.Svc.ListMentionableUsers(context.Background())
-		return mentionableUsersMsg{users: users, err: err}
-	}
-}
 
 func (m Model) loadViewedFiles() tea.Cmd {
 	if m.pr.NodeID == "" {
@@ -616,9 +613,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 
-	case mentionableUsersMsg:
-		if msg.err == nil {
-			m.comments.mentionAll = msg.users
+	case MentionableUsersMsg:
+		if len(msg.Users) > 0 {
+			m.comments.mentionAll = msg.Users
 		}
 
 	case clipboardImageMsg:
