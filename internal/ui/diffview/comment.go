@@ -188,7 +188,7 @@ func (m *Model) buildCommentPopupContent(width int) string {
 				b.WriteString(" " + draftStyle.Render("(draft)"))
 			}
 			b.WriteString("\n\n")
-			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
+			rendered := m.renderMarkdown(c.Body, width)
 			b.WriteString(bodyStyle.Render(rendered) + "\n\n")
 			b.WriteString(separator + "\n\n")
 		}
@@ -205,7 +205,7 @@ func (m *Model) buildCommentPopupContent(width int) string {
 				syncLabel = " ✗"
 			}
 			b.WriteString("📝 " + pendingStyle.Render("(pending)") + syncLabel + "\n\n")
-			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
+			rendered := m.renderMarkdown(c.Body, width)
 			b.WriteString(bodyStyle.Render(rendered) + "\n\n")
 			b.WriteString(separator + "\n\n")
 		}

@@ -26,7 +26,7 @@ type mdCacheKey struct {
 // renderMarkdown renders a markdown string using Glamour with caching.
 // Falls back to the raw text on any error. The result is trimmed of
 // leading/trailing whitespace.
-func (m *Model) renderMarkdown(body string, width int, bgColor ...color.Color) string {
+func (m *Model) renderMarkdown(body string, width int) string {
 	if width < 10 {
 		width = 10
 	}
@@ -40,17 +40,8 @@ func (m *Model) renderMarkdown(body string, width int, bgColor ...color.Color) s
 
 	opts := []glamour.TermRendererOption{
 		glamour.WithWordWrap(width),
+		glamour.WithStyles(mdStyleConfig()),
 	}
-
-	sc := mdStyleConfig()
-	if len(bgColor) > 0 && bgColor[0] != nil {
-		hexStr := colorToHex(bgColor[0])
-		sc.Document.BackgroundColor = stringPtr(hexStr)
-		sc.Document.StylePrimitive.BackgroundColor = stringPtr(hexStr)
-		sc.Text.BackgroundColor = stringPtr(hexStr)
-		sc.Paragraph.StylePrimitive.BackgroundColor = stringPtr(hexStr)
-	}
-	opts = append(opts, glamour.WithStyles(sc))
 
 	renderer, err := glamour.NewTermRenderer(opts...)
 	if err != nil {
@@ -68,12 +59,6 @@ func (m *Model) renderMarkdown(body string, width int, bgColor ...color.Color) s
 func stringPtr(s string) *string { return &s }
 func boolPtr(b bool) *bool    { return &b }
 func uintPtr(u uint) *uint    { return &u }
-
-// colorToHex converts a color.Color to a hex string (e.g. "#ff0000").
-func colorToHex(c color.Color) string {
-	r, g, b, _ := c.RGBA()
-	return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
-}
 
 // mdStyleConfig returns a glamour style that uses ANSI 0-15 colors.
 // No 256-color or hex backgrounds — everything adapts to the terminal theme.
@@ -161,8 +146,7 @@ func mdStyleConfig() ansi.StyleConfig {
 		},
 		Code: ansi.StyleBlock{
 			StylePrimitive: ansi.StylePrimitive{
-				Color:           stringPtr("3"), // yellow
-				BackgroundColor: stringPtr(""),  // explicitly clear background
+				Color: stringPtr("3"), // yellow
 			},
 		},
 		CodeBlock: ansi.StyleCodeBlock{
@@ -668,7 +652,7 @@ func (m *Model) buildPRInfoContent(width int) string {
 	if m.pr.Body == "" {
 		b.WriteString(labelStyle.Render("No description provided."))
 	} else {
-		rendered := m.renderMarkdown(m.pr.Body, width, styles.BgOverlay)
+		rendered := m.renderMarkdown(m.pr.Body, width)
 		b.WriteString(rendered)
 	}
 
@@ -692,7 +676,7 @@ func (m *Model) buildPRInfoContent(width int) string {
 				b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", c.Path, c.Line)))
 			}
 			b.WriteString("\n")
-			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
+			rendered := m.renderMarkdown(c.Body, width)
 			b.WriteString(bodyStyle.Render(rendered) + "\n")
 			b.WriteString(innerSep + "\n\n")
 		}
@@ -703,7 +687,7 @@ func (m *Model) buildPRInfoContent(width int) string {
 				b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", c.Path, c.Line)))
 			}
 			b.WriteString("\n")
-			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
+			rendered := m.renderMarkdown(c.Body, width)
 			b.WriteString(bodyStyle.Render(rendered) + "\n")
 			b.WriteString(innerSep + "\n\n")
 		}
