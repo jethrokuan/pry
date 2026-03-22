@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/jethrokuan/pry/internal/cache"
 	"github.com/jethrokuan/pry/internal/review"
 )
 
@@ -81,13 +82,14 @@ func (m *mockGraphQL) Do(query string, vars map[string]interface{}, resp interfa
 	return nil
 }
 
-// newTestClient creates a Client with mock REST and GraphQL clients.
+// newTestClient creates a Client with mock REST and GraphQL clients and a noop cache.
 func newTestClient(rest *mockREST, gql *mockGraphQL) *Client {
 	return &Client{
 		rest:    rest,
 		graphql: gql,
 		owner:   "testowner",
 		repo:    "testrepo",
+		cache:   cache.Noop{},
 	}
 }
 
@@ -735,6 +737,15 @@ var _ = Describe("UserTeams", func() {
 	})
 
 	It("caches results after the first call", func() {
+		dir := GinkgoT().TempDir()
+		c = &Client{
+			rest:    rest,
+			graphql: gql,
+			owner:   "testowner",
+			repo:    "testrepo",
+			cache:   cache.NewDisk(dir),
+		}
+
 		callCount := 0
 		rest.getHandler = func(path string, resp interface{}) error {
 			callCount++
@@ -750,7 +761,7 @@ var _ = Describe("UserTeams", func() {
 		Expect(err1).NotTo(HaveOccurred())
 		Expect(err2).NotTo(HaveOccurred())
 		Expect(teams1).To(Equal(teams2))
-		Expect(callCount).To(Equal(1)) // Only called once due to sync.Once
+		Expect(callCount).To(Equal(1)) // Only called once due to disk cache
 	})
 
 	It("paginates teams", func() {

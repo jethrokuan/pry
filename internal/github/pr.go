@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -112,14 +113,35 @@ type graphqlPRResponse struct {
 	} `json:"search"`
 }
 
+// listPRsCacheKey returns the cache key for a ListPRs qualifier.
+func listPRsCacheKey(qualifier string) string {
+	h := sha256.Sum256([]byte(qualifier))
+	return fmt.Sprintf("listprs__%x", h[:8])
+}
+
 // ListPRs fetches PRs based on the given filter.
 // If the qualifier contains @my-teams, it expands into one query per team
 // the authenticated user belongs to (in the repo's org) and deduplicates.
 func (c *Client) ListPRs(_ context.Context, filter review.PRFilter) ([]review.PullRequest, error) {
-	if strings.Contains(filter.Qualifier, myTeamsPlaceholder) {
-		return c.listPRsForTeams(filter)
+	key := listPRsCacheKey(filter.Qualifier)
+	var cached []review.PullRequest
+	if c.cache.Get(key, &cached) {
+		return cached, nil
 	}
-	return c.searchPRs(filter.Qualifier)
+
+	var prs []review.PullRequest
+	var err error
+	if strings.Contains(filter.Qualifier, myTeamsPlaceholder) {
+		prs, err = c.listPRsForTeams(filter)
+	} else {
+		prs, err = c.searchPRs(filter.Qualifier)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	c.cache.Set(key, prs, c.prTTL)
+	return prs, nil
 }
 
 // searchPRs runs a single GitHub search query and returns matching PRs.
@@ -396,6 +418,12 @@ func graphqlContextToCheckRun(ctx graphqlCheckContext) review.CheckRun {
 
 // GetPR fetches a single PR by number, including the full body.
 func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, error) {
+	key := fmt.Sprintf("pr__%d", number)
+	var cached review.PullRequest
+	if c.cache.Get(key, &cached) {
+		return &cached, nil
+	}
+
 	var resp struct {
 		Repository struct {
 			PullRequest graphqlPRNode `json:"pullRequest"`
@@ -487,5 +515,7 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 
 	pr := nodeToPR(resp.Repository.PullRequest, "")
 	slog.Debug("fetched PR", "number", pr.Number, "nodeID", pr.NodeID, "title", pr.Title)
+
+	c.cache.Set(key, pr, c.prTTL)
 	return &pr, nil
 }

@@ -4,15 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
+	"time"
 )
-
-// mentionableUsersCache holds cached mentionable usernames.
-type mentionableUsersCache struct {
-	once  sync.Once
-	users []string
-	err   error
-}
 
 // collaborator represents a GitHub user from the collaborators API.
 type collaborator struct {
@@ -20,12 +13,20 @@ type collaborator struct {
 }
 
 // ListMentionableUsers returns usernames that can be @mentioned in the repo.
-// Implements review.Service. Results are cached after the first call.
+// Implements review.Service. Results are cached (24h TTL).
 func (c *Client) ListMentionableUsers(_ context.Context) ([]string, error) {
-	c.mentionable.once.Do(func() {
-		c.mentionable.users, c.mentionable.err = c.fetchMentionableUsers()
-	})
-	return c.mentionable.users, c.mentionable.err
+	var users []string
+	if c.cache.Get("mentionable_users", &users) {
+		return users, nil
+	}
+
+	users, err := c.fetchMentionableUsers()
+	if err != nil {
+		return nil, err
+	}
+
+	c.cache.Set("mentionable_users", users, 24*time.Hour)
+	return users, nil
 }
 
 func (c *Client) fetchMentionableUsers() ([]string, error) {

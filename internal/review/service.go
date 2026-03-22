@@ -12,6 +12,12 @@ type UserIdentity struct {
 	Teams []string // e.g. ["@org/team1", "@org/team2"]
 }
 
+// CacheInvalidator is implemented by services that support cache invalidation.
+type CacheInvalidator interface {
+	// InvalidateListPRs clears all cached PR list and detail results.
+	InvalidateListPRs()
+}
+
 // Service defines what the application needs from a code review platform.
 // Implementations adapt forge-specific APIs (GitHub, GitLab, etc.) to this interface.
 type Service interface {

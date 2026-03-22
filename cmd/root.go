@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/jethrokuan/pry/internal/app"
+	"github.com/jethrokuan/pry/internal/cache"
 	"github.com/jethrokuan/pry/internal/config"
 	gitpkg "github.com/jethrokuan/pry/internal/git"
 	gh "github.com/jethrokuan/pry/internal/github"
@@ -61,20 +62,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Set up disk cache scoped per forge repo.
+	// If TTL is 0, use a noop cache (disables caching).
+	prTTL := cfg.CacheTTLDuration()
+	var c cache.Cache
+	if prTTL > 0 {
+		if dir, err := os.UserCacheDir(); err == nil {
+			c = cache.NewDisk(filepath.Join(dir, "pry", owner, repo))
+		} else {
+			c = cache.Noop{}
+		}
+	} else {
+		c = cache.Noop{}
+	}
+
 	// Create GitHub client (implements review.Service directly)
-	ghClient, err := gh.NewClient(owner, repo)
+	ghClient, err := gh.NewClient(owner, repo, c, prTTL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Wrap with caching layer (on by default with 5m TTL).
-	// Cache is scoped per forge repo to avoid cross-repo collisions.
-	var cacheDir string
-	if dir, err := os.UserCacheDir(); err == nil {
-		cacheDir = filepath.Join(dir, "pry", owner, repo)
-	}
-	var svc review.Service = review.NewCachingService(ghClient, cfg.CacheTTLDuration(), cacheDir)
+	var svc review.Service = ghClient
 
 	// Load filters and columns from config (falls back to defaults)
 	filters := cfg.PRFilters()
