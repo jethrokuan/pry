@@ -8,26 +8,16 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/jethrokuan/pry/internal/diff"
+	"github.com/viccon/sturdyc"
 )
 
 // CacheInvalidator is implemented by services that support cache invalidation.
 type CacheInvalidator interface {
 	// InvalidateListPRs clears all cached ListPRs results.
 	InvalidateListPRs()
-}
-
-type cacheEntry struct {
-	prs       []PullRequest
-	fetchedAt time.Time
-}
-
-type prCacheEntry struct {
-	pr        *PullRequest
-	fetchedAt time.Time
 }
 
 // diskCacheEntry is the JSON-serializable form written to disk.
@@ -37,46 +27,48 @@ type diskCacheEntry struct {
 	PRs       []PullRequest `json:"prs"`
 }
 
-// CachingService wraps a Service and caches ListPRs and GetPR results with a TTL.
-// It maintains an in-memory cache as a fast path and optionally persists
-// ListPRs cache entries to disk so they survive process restarts.
+// CachingService wraps a Service and caches ListPRs and GetPR results.
+// ListPRs results are also persisted to disk so they survive process restarts.
 // All other methods are delegated directly to the inner service.
 type CachingService struct {
 	inner    Service
 	ttl      time.Duration
 	cacheDir string // empty = no disk persistence
 
-	mu    sync.Mutex
-	cache map[string]cacheEntry
-
-	prMu    sync.Mutex
-	prCache map[int]prCacheEntry
+	listCache *sturdyc.Client[[]PullRequest]
+	prCache   *sturdyc.Client[*PullRequest]
 }
 
-// NewCachingService wraps the given service with ListPRs caching.
+const (
+	cacheCapacity     = 100
+	cacheShards       = 4
+	evictionPercent   = 10
+)
+
+// NewCachingService wraps the given service with ListPRs and GetPR caching.
 // If ttl <= 0, caching is disabled (all calls pass through).
-// If cacheDir is non-empty, cache entries are persisted to disk.
+// If cacheDir is non-empty, ListPRs entries are persisted to disk.
 func NewCachingService(inner Service, ttl time.Duration, cacheDir string) *CachingService {
-	return &CachingService{
+	cs := &CachingService{
 		inner:    inner,
 		ttl:      ttl,
 		cacheDir: cacheDir,
-		cache:    make(map[string]cacheEntry),
-		prCache:  make(map[int]prCacheEntry),
 	}
+	if ttl > 0 {
+		cs.listCache = sturdyc.New[[]PullRequest](cacheCapacity, cacheShards, ttl, evictionPercent)
+		cs.prCache = sturdyc.New[*PullRequest](cacheCapacity, cacheShards, ttl, evictionPercent)
+	}
+	return cs
 }
 
-// InvalidateListPRs clears all cached filter results (memory and disk)
-// and also clears the GetPR cache since the data may have changed.
+// InvalidateListPRs clears all cached results (memory and disk).
 func (c *CachingService) InvalidateListPRs() {
-	c.mu.Lock()
-	c.cache = make(map[string]cacheEntry)
-	c.mu.Unlock()
-
-	c.prMu.Lock()
-	c.prCache = make(map[int]prCacheEntry)
-	c.prMu.Unlock()
-
+	for _, key := range c.listCache.ScanKeys() {
+		c.listCache.Delete(key)
+	}
+	for _, key := range c.prCache.ScanKeys() {
+		c.prCache.Delete(key)
+	}
 	c.clearDiskCache()
 }
 
@@ -87,50 +79,46 @@ func (c *CachingService) ListPRs(ctx context.Context, filter PRFilter) ([]PullRe
 
 	key := filter.Qualifier
 
-	c.mu.Lock()
-	if entry, ok := c.cache[key]; ok && time.Since(entry.fetchedAt) < c.ttl {
-		// Return a copy so callers can't mutate the cache.
-		result := make([]PullRequest, len(entry.prs))
-		copy(result, entry.prs)
-		c.mu.Unlock()
-		return result, nil
-	}
-	c.mu.Unlock()
+	// Check disk cache on miss (sturdyc doesn't know about disk).
+	prs, err := c.listCache.GetOrFetch(ctx, key, func(ctx context.Context) ([]PullRequest, error) {
+		if prs, fetchedAt, ok := c.readDiskCache(key); ok && time.Since(fetchedAt) < c.ttl {
+			return prs, nil
+		}
 
-	// Check disk cache before hitting the network.
-	if prs, fetchedAt, ok := c.readDiskCache(key); ok && time.Since(fetchedAt) < c.ttl {
-		// Populate in-memory cache from disk.
-		cached := make([]PullRequest, len(prs))
-		copy(cached, prs)
-		c.mu.Lock()
-		c.cache[key] = cacheEntry{prs: cached, fetchedAt: fetchedAt}
-		c.mu.Unlock()
+		prs, err := c.inner.ListPRs(ctx, filter)
+		if err != nil {
+			return nil, err
+		}
 
-		result := make([]PullRequest, len(prs))
-		copy(result, prs)
-		return result, nil
-	}
-
-	prs, err := c.inner.ListPRs(ctx, filter)
+		c.writeDiskCache(key, prs)
+		return prs, nil
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Store a copy in the cache so callers can't mutate it.
-	cached := make([]PullRequest, len(prs))
-	copy(cached, prs)
-	now := time.Now()
+	// Return a copy so callers can't mutate the cache.
+	result := make([]PullRequest, len(prs))
+	copy(result, prs)
+	return result, nil
+}
 
-	c.mu.Lock()
-	c.cache[key] = cacheEntry{
-		prs:       cached,
-		fetchedAt: now,
+func (c *CachingService) GetPR(ctx context.Context, number int) (*PullRequest, error) {
+	if c.ttl <= 0 {
+		return c.inner.GetPR(ctx, number)
 	}
-	c.mu.Unlock()
 
-	c.writeDiskCache(key, prs, now)
+	key := fmt.Sprintf("pr:%d", number)
 
-	return prs, nil
+	pr, err := c.prCache.GetOrFetch(ctx, key, func(ctx context.Context) (*PullRequest, error) {
+		return c.inner.GetPR(ctx, number)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	result := *pr // shallow copy
+	return &result, nil
 }
 
 // cacheFilePath returns the disk path for a given cache key (qualifier).
@@ -165,7 +153,7 @@ func (c *CachingService) readDiskCache(qualifier string) ([]PullRequest, time.Ti
 }
 
 // writeDiskCache persists a cache entry to disk. Errors are logged but non-fatal.
-func (c *CachingService) writeDiskCache(qualifier string, prs []PullRequest, fetchedAt time.Time) {
+func (c *CachingService) writeDiskCache(qualifier string, prs []PullRequest) {
 	path := c.cacheFilePath(qualifier)
 	if path == "" {
 		return
@@ -178,7 +166,7 @@ func (c *CachingService) writeDiskCache(qualifier string, prs []PullRequest, fet
 
 	entry := diskCacheEntry{
 		Qualifier: qualifier,
-		FetchedAt: fetchedAt,
+		FetchedAt: time.Now(),
 		PRs:       prs,
 	}
 
@@ -213,38 +201,13 @@ func (c *CachingService) clearDiskCache() {
 
 // Delegated methods — pass through to inner service.
 
-func (c *CachingService) RepoOwner() string                    { return c.inner.RepoOwner() }
-func (c *CachingService) RepoName() string                     { return c.inner.RepoName() }
+func (c *CachingService) RepoOwner() string { return c.inner.RepoOwner() }
+func (c *CachingService) RepoName() string  { return c.inner.RepoName() }
 func (c *CachingService) CurrentUser(ctx context.Context) (string, error) {
 	return c.inner.CurrentUser(ctx)
 }
 func (c *CachingService) UserTeams(ctx context.Context) ([]string, error) {
 	return c.inner.UserTeams(ctx)
-}
-func (c *CachingService) GetPR(ctx context.Context, number int) (*PullRequest, error) {
-	if c.ttl <= 0 {
-		return c.inner.GetPR(ctx, number)
-	}
-
-	c.prMu.Lock()
-	if entry, ok := c.prCache[number]; ok && time.Since(entry.fetchedAt) < c.ttl {
-		pr := *entry.pr // shallow copy
-		c.prMu.Unlock()
-		return &pr, nil
-	}
-	c.prMu.Unlock()
-
-	pr, err := c.inner.GetPR(ctx, number)
-	if err != nil {
-		return nil, err
-	}
-
-	cached := *pr // shallow copy
-	c.prMu.Lock()
-	c.prCache[number] = prCacheEntry{pr: &cached, fetchedAt: time.Now()}
-	c.prMu.Unlock()
-
-	return pr, nil
 }
 func (c *CachingService) FetchDiffFiles(ctx context.Context, number int) ([]diff.DiffFile, error) {
 	return c.inner.FetchDiffFiles(ctx, number)
