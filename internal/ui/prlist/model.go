@@ -45,6 +45,25 @@ type userTeamsLoadedMsg struct {
 
 type flashExpiredMsg struct{}
 
+// enrichState tracks per-PR background enrichment status.
+type enrichState int
+
+const (
+	enrichNone    enrichState = iota // not yet fetched
+	enrichPending                    // GetPR in flight
+	enrichDone                       // full data merged
+)
+
+// prEnrichedMsg carries the result of a background GetPR call.
+type prEnrichedMsg struct {
+	PRNumber int
+	FullPR   *review.PullRequest
+	Err      error
+}
+
+// maxEnrichPRs is the number of PRs to background-enrich after list load.
+const maxEnrichPRs = 10
+
 // KeyMap defines the key bindings for the PR list.
 type KeyMap struct {
 	Up          key.Binding
@@ -114,6 +133,9 @@ type Model struct {
 
 	// Flash message (ephemeral status)
 	flashMsg string
+
+	// Background enrichment: tracks GetPR fetch state per PR number
+	enrichMap map[int]enrichState
 }
 
 // New creates a new PR list model.
@@ -139,6 +161,7 @@ func New(ctx *appctx.Context, filters []review.PRFilter) Model {
 		filterInput: ti,
 		tabBar:      tabbar.New(tabs),
 		preview:     prpreview.New(ctx),
+		enrichMap:   make(map[int]enrichState),
 	}
 }
 
@@ -206,9 +229,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			m.prs = msg.prs
 			m.cursor = 0
+			m.enrichMap = make(map[int]enrichState)
 			m.preview.ResetCache()
 			m.tabBar.SetCount(m.filterIdx, len(m.prs))
-			return m, m.refreshSidebarPreview()
+			m.refreshSidebarPreview()
+			return m, m.enrichVisible()
 		}
 
 	case userTeamsLoadedMsg:
@@ -217,34 +242,43 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.userTeams[t] = true
 		}
 
-	case prpreview.BodyLoadedMsg:
-		if len(m.prs) > 0 && m.cursor < len(m.prs) {
-			pr := &m.prs[m.cursor]
-			// Merge detailed fields from GetPR into the list-level PR.
-			// The list query is lightweight (no check runs, reviews, etc.)
-			// so we enrich the PR when the sidebar fetches full details.
-			if msg.FullPR != nil && msg.PRNumber == pr.Number {
-				pr.CheckRuns = msg.FullPR.CheckRuns
-				pr.ChecksPass = msg.FullPR.ChecksPass
-				pr.Reviewers = msg.FullPR.Reviewers
-				pr.PendingTeams = msg.FullPR.PendingTeams
-				pr.MyReviewState = msg.FullPR.MyReviewState
-				pr.Labels = msg.FullPR.Labels
-				pr.Body = msg.FullPR.Body
-				pr.Commits = msg.FullPR.Commits
-				pr.HeadSHA = msg.FullPR.HeadSHA
-			}
-			m.preview.HandleBodyLoaded(msg, pr)
+	case prEnrichedMsg:
+		// Ignore stale messages from a previous filter/list load.
+		if _, tracked := m.enrichMap[msg.PRNumber]; !tracked {
+			return m, nil
 		}
+		if msg.Err != nil {
+			slog.Warn("enrichment failed", "pr", msg.PRNumber, "error", msg.Err)
+			delete(m.enrichMap, msg.PRNumber)
+			return m, nil
+		}
+		m.enrichMap[msg.PRNumber] = enrichDone
+		for i := range m.prs {
+			if m.prs[i].Number == msg.PRNumber {
+				mergePRDetails(&m.prs[i], msg.FullPR)
+				break
+			}
+		}
+		// Update sidebar if this is the currently selected PR.
+		if len(m.prs) > 0 && m.cursor < len(m.prs) && m.prs[m.cursor].Number == msg.PRNumber {
+			m.preview.HandleBodyLoaded(prpreview.BodyLoadedMsg{
+				PRNumber: msg.PRNumber,
+				Body:     msg.FullPR.Body,
+				FullPR:   msg.FullPR,
+			}, &m.prs[m.cursor])
+		}
+		return m, nil
 
 	case flashExpiredMsg:
 		m.flashMsg = ""
 		return m, nil
 
 	case spinner.TickMsg:
-		var cmd tea.Cmd
-		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
+		if m.loading || m.hasEnrichmentPending() {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
 
 	case tea.KeyPressMsg:
 		// Filter editing mode: forward keys to the text input
@@ -405,17 +439,99 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 // refreshSidebarPreview updates the sidebar with the current PR's metadata
-// and triggers an async body fetch if needed.
+// and ensures the selected PR is being enriched.
 func (m *Model) refreshSidebarPreview() tea.Cmd {
 	if len(m.prs) == 0 || m.cursor >= len(m.prs) {
 		m.preview.SetNoSelection()
 		return nil
 	}
-	fn := m.preview.Refresh(&m.prs[m.cursor])
-	if fn == nil {
+	pr := &m.prs[m.cursor]
+	m.preview.Refresh(pr)
+
+	// Ensure selected PR gets enriched even if outside the initial batch.
+	num := pr.Number
+	if m.enrichMap[num] == enrichNone {
+		m.enrichMap[num] = enrichPending
+		svc := m.svc
+		return tea.Batch(func() tea.Msg {
+			full, err := svc.GetPR(context.Background(), num)
+			return prEnrichedMsg{PRNumber: num, FullPR: full, Err: err}
+		}, m.spinner.Tick)
+	}
+	return nil
+}
+
+// enrichVisible kicks off background GetPR fetches for the first N PRs,
+// prioritizing the cursor PR. Returns a batched command or nil.
+func (m *Model) enrichVisible() tea.Cmd {
+	if len(m.prs) == 0 {
 		return nil
 	}
-	return func() tea.Msg { return fn() }
+
+	limit := maxEnrichPRs
+	if limit > len(m.prs) {
+		limit = len(m.prs)
+	}
+
+	// Build fetch list: cursor PR first, then others up to limit.
+	var toFetch []int
+	if m.cursor < len(m.prs) {
+		num := m.prs[m.cursor].Number
+		if m.enrichMap[num] == enrichNone {
+			toFetch = append(toFetch, num)
+			m.enrichMap[num] = enrichPending
+		}
+	}
+	for i := 0; i < limit && len(toFetch) < limit; i++ {
+		num := m.prs[i].Number
+		if m.enrichMap[num] == enrichNone {
+			toFetch = append(toFetch, num)
+			m.enrichMap[num] = enrichPending
+		}
+	}
+
+	if len(toFetch) == 0 {
+		return nil
+	}
+
+	svc := m.svc
+	cmds := make([]tea.Cmd, 0, len(toFetch)+1)
+	for _, num := range toFetch {
+		n := num
+		cmds = append(cmds, func() tea.Msg {
+			full, err := svc.GetPR(context.Background(), n)
+			return prEnrichedMsg{PRNumber: n, FullPR: full, Err: err}
+		})
+	}
+	cmds = append(cmds, m.spinner.Tick)
+	return tea.Batch(cmds...)
+}
+
+// mergePRDetails copies enriched fields from src into dst.
+func mergePRDetails(dst, src *review.PullRequest) {
+	dst.CheckRuns = src.CheckRuns
+	dst.ChecksPass = src.ChecksPass
+	dst.ChecksSummary = src.ChecksSummary
+	dst.MergeState = src.MergeState
+	dst.Mergeable = src.Mergeable
+	dst.ReviewDecision = src.ReviewDecision
+	dst.Reviewers = src.Reviewers
+	dst.PendingTeams = src.PendingTeams
+	dst.MyReviewState = src.MyReviewState
+	dst.Labels = src.Labels
+	dst.Body = src.Body
+	dst.Commits = src.Commits
+	dst.HeadSHA = src.HeadSHA
+}
+
+// hasEnrichmentPending returns true if any PR enrichment is in flight.
+func (m Model) hasEnrichmentPending() bool {
+	for _, state := range m.enrichMap {
+		if state == enrichPending {
+			return true
+		}
+	}
+	return false
 }
 
 // renderCtx holds extra data needed at render time.
@@ -633,6 +749,9 @@ func (m Model) renderTable(width, height int) string {
 		}
 		statsContent += dot +
 			s(lipgloss.BrightMagenta).Render(iconUpdated) + muted.Render(" "+shortTimeAgo(pr.UpdatedAt))
+		if m.enrichMap[pr.Number] == enrichPending {
+			statsContent += dot + muted.Render(m.spinner.View())
+		}
 
 		mergeIcon, mergeLabel, mergeColor := mergeStateLabel(pr)
 		mergeTag := s(mergeColor).Render(mergeIcon+" "+mergeLabel) + " "

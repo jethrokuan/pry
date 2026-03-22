@@ -1,7 +1,6 @@
 package prpreview
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -66,23 +65,14 @@ type BodyLoadedMsg struct {
 }
 
 // Refresh updates the sidebar preview for the given PR.
-// It renders metadata immediately and returns a command to fetch the body if needed.
-func (m *Model) Refresh(pr *review.PullRequest) func() BodyLoadedMsg {
-	m.renderContent(pr, "")
-
-	if pr.Number != m.previewPRNum {
-		m.loading = true
-		m.previewPRNum = pr.Number
-		prNumber := pr.Number
-		return func() BodyLoadedMsg {
-			full, err := m.ctx.Svc.GetPR(context.Background(), prNumber)
-			if err != nil {
-				return BodyLoadedMsg{PRNumber: prNumber, Err: err}
-			}
-			return BodyLoadedMsg{PRNumber: prNumber, Body: full.Body, FullPR: full}
-		}
-	}
-	return nil
+// It renders with whatever data is currently available on the PR.
+// Background enrichment (via prEnrichedMsg) will call HandleBodyLoaded
+// when full data arrives.
+func (m *Model) Refresh(pr *review.PullRequest) {
+	m.previewPRNum = pr.Number
+	// If check runs are loaded, the PR has been enriched.
+	m.loading = pr.CheckRuns == nil
+	m.renderContent(pr, pr.Body)
 }
 
 // HandleBodyLoaded processes a BodyLoadedMsg, updating the sidebar if it matches the current PR.
@@ -313,10 +303,8 @@ func renderReviewStatus(b *strings.Builder, pr *review.PullRequest, ctx *appctx.
 // renderCheckRunsDetail renders the check runs summary and detail lines.
 func renderCheckRunsDetail(b *strings.Builder, pr *review.PullRequest) {
 	if len(pr.CheckRuns) == 0 {
-		// Fall back to simple boolean display
-		if pr.ChecksPass != nil && !*pr.ChecksPass {
-			b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Checks failing") + "\n")
-		}
+		// No detailed check runs yet — don't render from the summary boolean
+		// as it may be stale. Enrichment will provide real data.
 		return
 	}
 
