@@ -25,6 +25,11 @@ type cacheEntry struct {
 	fetchedAt time.Time
 }
 
+type prCacheEntry struct {
+	pr        *PullRequest
+	fetchedAt time.Time
+}
+
 // diskCacheEntry is the JSON-serializable form written to disk.
 type diskCacheEntry struct {
 	Qualifier string        `json:"qualifier"`
@@ -32,9 +37,9 @@ type diskCacheEntry struct {
 	PRs       []PullRequest `json:"prs"`
 }
 
-// CachingService wraps a Service and caches ListPRs results with a TTL.
+// CachingService wraps a Service and caches ListPRs and GetPR results with a TTL.
 // It maintains an in-memory cache as a fast path and optionally persists
-// cache entries to disk so they survive process restarts.
+// ListPRs cache entries to disk so they survive process restarts.
 // All other methods are delegated directly to the inner service.
 type CachingService struct {
 	inner    Service
@@ -43,6 +48,9 @@ type CachingService struct {
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
+
+	prMu    sync.Mutex
+	prCache map[int]prCacheEntry
 }
 
 // NewCachingService wraps the given service with ListPRs caching.
@@ -54,14 +62,20 @@ func NewCachingService(inner Service, ttl time.Duration, cacheDir string) *Cachi
 		ttl:      ttl,
 		cacheDir: cacheDir,
 		cache:    make(map[string]cacheEntry),
+		prCache:  make(map[int]prCacheEntry),
 	}
 }
 
-// InvalidateListPRs clears all cached filter results (memory and disk).
+// InvalidateListPRs clears all cached filter results (memory and disk)
+// and also clears the GetPR cache since the data may have changed.
 func (c *CachingService) InvalidateListPRs() {
 	c.mu.Lock()
 	c.cache = make(map[string]cacheEntry)
 	c.mu.Unlock()
+
+	c.prMu.Lock()
+	c.prCache = make(map[int]prCacheEntry)
+	c.prMu.Unlock()
 
 	c.clearDiskCache()
 }
@@ -208,7 +222,29 @@ func (c *CachingService) UserTeams(ctx context.Context) ([]string, error) {
 	return c.inner.UserTeams(ctx)
 }
 func (c *CachingService) GetPR(ctx context.Context, number int) (*PullRequest, error) {
-	return c.inner.GetPR(ctx, number)
+	if c.ttl <= 0 {
+		return c.inner.GetPR(ctx, number)
+	}
+
+	c.prMu.Lock()
+	if entry, ok := c.prCache[number]; ok && time.Since(entry.fetchedAt) < c.ttl {
+		pr := *entry.pr // shallow copy
+		c.prMu.Unlock()
+		return &pr, nil
+	}
+	c.prMu.Unlock()
+
+	pr, err := c.inner.GetPR(ctx, number)
+	if err != nil {
+		return nil, err
+	}
+
+	cached := *pr // shallow copy
+	c.prMu.Lock()
+	c.prCache[number] = prCacheEntry{pr: &cached, fetchedAt: time.Now()}
+	c.prMu.Unlock()
+
+	return pr, nil
 }
 func (c *CachingService) FetchDiffFiles(ctx context.Context, number int) ([]diff.DiffFile, error) {
 	return c.inner.FetchDiffFiles(ctx, number)
