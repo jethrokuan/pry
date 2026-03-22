@@ -558,7 +558,24 @@ func (m Model) View() string {
 	sidebarW, mainHeight := m.layoutDimensions()
 	tableWidth := m.width - sidebarW
 
-	// Left pane: search bar + PR table
+	// Main content: left pane + sidebar preview
+	m.preview.SetSize(sidebarW, mainHeight)
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, m.renderLeftPane(tableWidth, mainHeight), m.preview.View()))
+
+	// Footer
+	b.WriteString("\n")
+	b.WriteString(m.renderFooter())
+
+	result := b.String()
+	if m.showHelp {
+		popup := helppopup.Render(helpSections(), m.width)
+		result = helppopup.Overlay(result, popup, m.width, m.height)
+	}
+	return result
+}
+
+// renderLeftPane renders the search bar, PR table, and scrollbar.
+func (m Model) renderLeftPane(tableWidth, mainHeight int) string {
 	var leftPane strings.Builder
 
 	// Search bar (scoped to left pane width)
@@ -617,11 +634,11 @@ func (m Model) View() string {
 		}
 	}
 
-	m.preview.SetSize(sidebarW, mainHeight)
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, leftPane.String(), m.preview.View()))
+	return leftPane.String()
+}
 
-	// Footer
-	b.WriteString("\n")
+// renderFooter renders the bottom bar with help text and repo label.
+func (m Model) renderFooter() string {
 	repoLabel := fmt.Sprintf("%s/%s", m.svc.RepoOwner(), m.svc.RepoName())
 	repo := lipgloss.NewStyle().Foreground(styles.Primary).Render(repoLabel)
 
@@ -635,14 +652,7 @@ func (m Model) View() string {
 	if gap < 1 {
 		gap = 1
 	}
-	b.WriteString(footerLeft + strings.Repeat(" ", gap) + repo)
-
-	result := b.String()
-	if m.showHelp {
-		popup := helppopup.Render(helpSections(), m.width)
-		result = helppopup.Overlay(result, popup, m.width, m.height)
-	}
-	return result
+	return footerLeft + strings.Repeat(" ", gap) + repo
 }
 
 // helpSections returns the keybinding sections for the help popup.
