@@ -33,25 +33,36 @@ type PRListConfig struct {
 	SidebarVisible bool `koanf:"sidebar_visible"` // whether sidebar starts visible
 }
 
+// CacheConfig holds caching settings.
+type CacheConfig struct {
+	Enabled bool   `koanf:"enabled"`
+	TTL     string `koanf:"ttl"`
+}
+
 // Config holds user configuration for the tool.
 type Config struct {
 	Editor   string         `koanf:"editor"`
 	UseDelta bool           `koanf:"use_delta"`
 	PageSize int            `koanf:"page_size"`
-	CacheTTL string         `koanf:"cache_ttl"`
 	Filters  []FilterConfig `koanf:"filters"`
 	Columns  []string       `koanf:"columns"`
 	FileTree FileTreeConfig `koanf:"file_tree"`
 	PRList   PRListConfig   `koanf:"pr_list"`
+	Cache    CacheConfig    `koanf:"cache"`
 }
 
-// CacheTTLDuration parses the CacheTTL string into a time.Duration.
-// Returns 5 minutes by default. Set to "0" to disable caching.
+// CacheEnabled returns whether caching is enabled (default: true).
+func (c Config) CacheEnabled() bool {
+	return c.Cache.Enabled
+}
+
+// CacheTTLDuration parses the cache TTL string into a time.Duration.
+// Returns 5 minutes by default.
 func (c Config) CacheTTLDuration() time.Duration {
-	if c.CacheTTL == "" {
+	if c.Cache.TTL == "" {
 		return 5 * time.Minute
 	}
-	d, err := time.ParseDuration(c.CacheTTL)
+	d, err := time.ParseDuration(c.Cache.TTL)
 	if err != nil {
 		return 5 * time.Minute
 	}
@@ -72,9 +83,10 @@ func (c Config) PRColumns() []string {
 }
 
 var defaults = confmap.Provider(map[string]interface{}{
-	"use_delta":            true,
-	"page_size":            50,
+	"use_delta":             true,
+	"page_size":             50,
 	"pr_list.sidebar_width": 50,
+	"cache.enabled":         true,
 }, ".")
 
 // Load reads config from ~/.config/pry/config.toml.

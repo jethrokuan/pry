@@ -63,10 +63,9 @@ func main() {
 	}
 
 	// Set up disk cache scoped per forge repo.
-	// If TTL is 0, use a noop cache (disables caching).
 	prTTL := cfg.CacheTTLDuration()
 	var c cache.Cache
-	if prTTL > 0 {
+	if cfg.CacheEnabled() {
 		if dir, err := os.UserCacheDir(); err == nil {
 			c = cache.NewDisk(filepath.Join(dir, "pry", owner, repo))
 		} else {
