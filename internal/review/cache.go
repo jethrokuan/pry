@@ -8,10 +8,10 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/jethrokuan/pry/internal/diff"
-	"github.com/viccon/sturdyc"
 )
 
 // CacheInvalidator is implemented by services that support cache invalidation.
@@ -27,6 +27,16 @@ type diskCacheEntry struct {
 	PRs       []PullRequest `json:"prs"`
 }
 
+type listCacheEntry struct {
+	prs       []PullRequest
+	fetchedAt time.Time
+}
+
+type prCacheEntry struct {
+	pr        *PullRequest
+	fetchedAt time.Time
+}
+
 // CachingService wraps a Service and caches ListPRs and GetPR results.
 // ListPRs results are also persisted to disk so they survive process restarts.
 // All other methods are delegated directly to the inner service.
@@ -35,40 +45,36 @@ type CachingService struct {
 	ttl      time.Duration
 	cacheDir string // empty = no disk persistence
 
-	listCache *sturdyc.Client[[]PullRequest]
-	prCache   *sturdyc.Client[*PullRequest]
-}
+	mu        sync.Mutex
+	listCache map[string]listCacheEntry
 
-const (
-	cacheCapacity     = 100
-	cacheShards       = 4
-	evictionPercent   = 10
-)
+	prMu    sync.Mutex
+	prCache map[int]prCacheEntry
+}
 
 // NewCachingService wraps the given service with ListPRs and GetPR caching.
 // If ttl <= 0, caching is disabled (all calls pass through).
 // If cacheDir is non-empty, ListPRs entries are persisted to disk.
 func NewCachingService(inner Service, ttl time.Duration, cacheDir string) *CachingService {
-	cs := &CachingService{
-		inner:    inner,
-		ttl:      ttl,
-		cacheDir: cacheDir,
+	return &CachingService{
+		inner:     inner,
+		ttl:       ttl,
+		cacheDir:  cacheDir,
+		listCache: make(map[string]listCacheEntry),
+		prCache:   make(map[int]prCacheEntry),
 	}
-	if ttl > 0 {
-		cs.listCache = sturdyc.New[[]PullRequest](cacheCapacity, cacheShards, ttl, evictionPercent)
-		cs.prCache = sturdyc.New[*PullRequest](cacheCapacity, cacheShards, ttl, evictionPercent)
-	}
-	return cs
 }
 
 // InvalidateListPRs clears all cached results (memory and disk).
 func (c *CachingService) InvalidateListPRs() {
-	for _, key := range c.listCache.ScanKeys() {
-		c.listCache.Delete(key)
-	}
-	for _, key := range c.prCache.ScanKeys() {
-		c.prCache.Delete(key)
-	}
+	c.mu.Lock()
+	c.listCache = make(map[string]listCacheEntry)
+	c.mu.Unlock()
+
+	c.prMu.Lock()
+	c.prCache = make(map[int]prCacheEntry)
+	c.prMu.Unlock()
+
 	c.clearDiskCache()
 }
 
@@ -79,25 +85,40 @@ func (c *CachingService) ListPRs(ctx context.Context, filter PRFilter) ([]PullRe
 
 	key := filter.Qualifier
 
-	// Check disk cache on miss (sturdyc doesn't know about disk).
-	prs, err := c.listCache.GetOrFetch(ctx, key, func(ctx context.Context) ([]PullRequest, error) {
-		if prs, fetchedAt, ok := c.readDiskCache(key); ok && time.Since(fetchedAt) < c.ttl {
-			return prs, nil
-		}
+	// Check in-memory cache.
+	c.mu.Lock()
+	if entry, ok := c.listCache[key]; ok && time.Since(entry.fetchedAt) < c.ttl {
+		result := make([]PullRequest, len(entry.prs))
+		copy(result, entry.prs)
+		c.mu.Unlock()
+		return result, nil
+	}
+	c.mu.Unlock()
 
-		prs, err := c.inner.ListPRs(ctx, filter)
-		if err != nil {
-			return nil, err
-		}
+	// Check disk cache.
+	if prs, fetchedAt, ok := c.readDiskCache(key); ok && time.Since(fetchedAt) < c.ttl {
+		c.mu.Lock()
+		c.listCache[key] = listCacheEntry{prs: prs, fetchedAt: fetchedAt}
+		c.mu.Unlock()
 
-		c.writeDiskCache(key, prs)
-		return prs, nil
-	})
+		result := make([]PullRequest, len(prs))
+		copy(result, prs)
+		return result, nil
+	}
+
+	// Fetch from upstream.
+	prs, err := c.inner.ListPRs(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 
-	// Return a copy so callers can't mutate the cache.
+	now := time.Now()
+	c.mu.Lock()
+	c.listCache[key] = listCacheEntry{prs: prs, fetchedAt: now}
+	c.mu.Unlock()
+
+	c.writeDiskCache(key, prs)
+
 	result := make([]PullRequest, len(prs))
 	copy(result, prs)
 	return result, nil
@@ -108,14 +129,24 @@ func (c *CachingService) GetPR(ctx context.Context, number int) (*PullRequest, e
 		return c.inner.GetPR(ctx, number)
 	}
 
-	key := fmt.Sprintf("pr:%d", number)
+	// Check in-memory cache.
+	c.prMu.Lock()
+	if entry, ok := c.prCache[number]; ok && time.Since(entry.fetchedAt) < c.ttl {
+		result := *entry.pr // shallow copy
+		c.prMu.Unlock()
+		return &result, nil
+	}
+	c.prMu.Unlock()
 
-	pr, err := c.prCache.GetOrFetch(ctx, key, func(ctx context.Context) (*PullRequest, error) {
-		return c.inner.GetPR(ctx, number)
-	})
+	// Fetch from upstream.
+	pr, err := c.inner.GetPR(ctx, number)
 	if err != nil {
 		return nil, err
 	}
+
+	c.prMu.Lock()
+	c.prCache[number] = prCacheEntry{pr: pr, fetchedAt: time.Now()}
+	c.prMu.Unlock()
 
 	result := *pr // shallow copy
 	return &result, nil
