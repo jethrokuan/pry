@@ -188,7 +188,7 @@ func (m *Model) buildCommentPopupContent(width int) string {
 				b.WriteString(" " + draftStyle.Render("(draft)"))
 			}
 			b.WriteString("\n\n")
-			rendered := m.renderMarkdown(c.Body, width)
+			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
 			b.WriteString(bodyStyle.Render(rendered) + "\n\n")
 			b.WriteString(separator + "\n\n")
 		}
@@ -205,7 +205,7 @@ func (m *Model) buildCommentPopupContent(width int) string {
 				syncLabel = " ✗"
 			}
 			b.WriteString("📝 " + pendingStyle.Render("(pending)") + syncLabel + "\n\n")
-			rendered := m.renderMarkdown(c.Body, width)
+			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
 			b.WriteString(bodyStyle.Render(rendered) + "\n\n")
 			b.WriteString(separator + "\n\n")
 		}
@@ -238,12 +238,6 @@ func commentIndexKey(path string, line int, side string) string {
 // setExistingComments replaces the existing comments and rebuilds the index.
 func (m *Model) setExistingComments(comments []review.ExistingComment) {
 	m.comments.existing = comments
-	m.rebuildCommentIndex()
-}
-
-// setForgeComments replaces the forge comments and rebuilds the index.
-func (m *Model) setForgeComments(comments []review.ExistingComment) {
-	m.comments.forgeComments = comments
 	m.rebuildCommentIndex()
 }
 
@@ -370,37 +364,6 @@ func (m Model) toggleCommentAtCursor() Model {
 		for _, ck := range keys {
 			m.comments.expanded[ck] = !anyExpanded
 		}
-	}
-
-	m.updateDiffContent()
-	return m
-}
-
-func (m Model) toggleAllComments() Model {
-	m.comments.cursor = -1
-	// Global cycle: if any comment is expanded → collapse all, else expand all
-	anyExpanded := false
-	for _, v := range m.comments.expanded {
-		if v {
-			anyExpanded = true
-			break
-		}
-	}
-
-	// Collect all comment keys across all files
-	allKeys := make(map[string]bool)
-	for _, c := range m.comments.existing {
-		allKeys[commentKey(c.Path, c.Line)] = true
-	}
-	for _, c := range m.comments.forgeComments {
-		allKeys[commentKey(c.Path, c.Line)] = true
-	}
-	for _, c := range m.pr.PendingReview.Comments {
-		allKeys[commentKey(c.Path, c.Line)] = true
-	}
-
-	for ck := range allKeys {
-		m.comments.expanded[ck] = !anyExpanded
 	}
 
 	m.updateDiffContent()
@@ -717,69 +680,6 @@ func (m *Model) startComment() tea.Cmd {
 		return m.openInlineComment(path, endLine, startLine, endSide, commentModeComment, "")
 	}
 	return m.openInlineComment(path, line, 0, side, commentModeComment, "")
-}
-
-// --- Delete / Edit comment at cursor ---
-
-// pendingCommentAtCursor returns the local pending comment at the current diff cursor, if any.
-func (m *Model) pendingCommentAtCursor() *review.InlineComment {
-	if len(m.nav.diffLines) == 0 || m.nav.diffCursor >= len(m.nav.diffLines) {
-		return nil
-	}
-	dl := m.nav.diffLines[m.nav.diffCursor]
-	path := m.files[m.nav.fileCursor].Path
-	line, side := lineAndSide(dl)
-
-	for i := range m.pr.PendingReview.Comments {
-		c := &m.pr.PendingReview.Comments[i]
-		if c.Path == path && c.Line == line && c.Side == side {
-			return c
-		}
-	}
-	return nil
-}
-
-func (m Model) deleteCommentAtCursor() (Model, tea.Cmd) {
-	c := m.pendingCommentAtCursor()
-	if c == nil {
-		return m, nil
-	}
-	localID := c.LocalID
-	forgeID := c.ForgeID
-
-	m.removeLocalComment(localID)
-	m.updateDiffContent()
-
-	return m, m.deleteCommentCmd(localID, forgeID)
-}
-
-func (m Model) editCommentAtCursor() (Model, tea.Cmd) {
-	c := m.pendingCommentAtCursor()
-	if c == nil {
-		return m, nil
-	}
-
-	// Open inline editor pre-filled with existing comment body
-	m.comments.inlineActive = true
-	m.comments.inlinePath = c.Path
-	m.comments.inlineLine = c.Line
-	m.comments.inlineStartLine = c.StartLine
-	m.comments.inlineSide = c.Side
-	m.comments.inlineMode = commentModeComment
-	m.comments.inlineEditLocalID = c.LocalID
-
-	ta := textarea.New()
-	ta.Placeholder = "Edit your comment..."
-	ta.Focus()
-	ta.CharLimit = 0
-	ta.SetWidth(m.inlineTextareaWidth() - 4)
-	ta.SetHeight(5)
-	ta.SetValue(c.Body)
-
-	m.comments.inlineTextarea = ta
-	m.updateViewports()
-
-	return m, textarea.Blink
 }
 
 // --- Image paste support ---

@@ -71,11 +71,6 @@ func (s *errorStore) count(cat errCategory) int {
 	return 0
 }
 
-// has returns true if the category has any errors.
-func (s *errorStore) has(cat errCategory) bool {
-	return s.count(cat) > 0
-}
-
 // renderSyncErrors renders non-load errors (review, viewed, comment sync)
 // as styled error lines for display in the header area.
 func (s *errorStore) renderSyncErrors() string {

@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
 )
 
 const logFileName = "debug.log"
@@ -46,12 +45,4 @@ func Setup(verbose bool) (cleanup func(), err error) {
 	slog.Info("pry started", "verbose", verbose, "logFile", logPath)
 
 	return func() { f.Close() }, nil
-}
-
-// ErrorWithStack logs an error message along with a stack trace at Error level.
-func ErrorWithStack(msg string, args ...any) {
-	buf := make([]byte, 4096)
-	n := runtime.Stack(buf, false)
-	args = append(args, "stack", string(buf[:n]))
-	slog.Error(msg, args...)
 }

@@ -25,8 +25,9 @@ type mdCacheKey struct {
 
 // renderMarkdown renders a markdown string using Glamour with caching.
 // Falls back to the raw text on any error. The result is trimmed of
-// leading/trailing whitespace.
-func (m *Model) renderMarkdown(body string, width int) string {
+// leading/trailing whitespace. An optional bgColor sets the background
+// on all Glamour style elements so it matches the surrounding container.
+func (m *Model) renderMarkdown(body string, width int, bgColor ...color.Color) string {
 	if width < 10 {
 		width = 10
 	}
@@ -38,9 +39,14 @@ func (m *Model) renderMarkdown(body string, width int) string {
 		return cached
 	}
 
+	sc := mdStyleConfig()
+	if len(bgColor) > 0 && bgColor[0] != nil {
+		applyBackground(&sc, colorToANSIString(bgColor[0]))
+	}
+
 	opts := []glamour.TermRendererOption{
 		glamour.WithWordWrap(width),
-		glamour.WithStyles(mdStyleConfig()),
+		glamour.WithStyles(sc),
 	}
 
 	renderer, err := glamour.NewTermRenderer(opts...)
@@ -59,6 +65,46 @@ func (m *Model) renderMarkdown(body string, width int) string {
 func stringPtr(s string) *string { return &s }
 func boolPtr(b bool) *bool    { return &b }
 func uintPtr(u uint) *uint    { return &u }
+
+// colorToANSIString converts a color.Color to a Glamour-compatible color
+// string, preserving ANSI color indices so they match the terminal theme.
+func colorToANSIString(c color.Color) string {
+	switch v := c.(type) {
+	case lipgloss.ANSIColor:
+		return fmt.Sprintf("%d", v)
+	default:
+		r, g, b, _ := v.RGBA()
+		return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+	}
+}
+
+// applyBackground sets the background color on all Glamour style elements.
+func applyBackground(sc *ansi.StyleConfig, bg string) {
+	bgp := &bg
+	sc.Document.BackgroundColor = bgp
+	sc.Document.StylePrimitive.BackgroundColor = bgp
+	sc.Text.BackgroundColor = bgp
+	sc.Paragraph.StylePrimitive.BackgroundColor = bgp
+	sc.Heading.StylePrimitive.BackgroundColor = bgp
+	sc.H1.StylePrimitive.BackgroundColor = bgp
+	sc.H2.StylePrimitive.BackgroundColor = bgp
+	sc.H3.StylePrimitive.BackgroundColor = bgp
+	sc.H4.StylePrimitive.BackgroundColor = bgp
+	sc.H5.StylePrimitive.BackgroundColor = bgp
+	sc.H6.StylePrimitive.BackgroundColor = bgp
+	sc.Strikethrough.BackgroundColor = bgp
+	sc.Emph.BackgroundColor = bgp
+	sc.Strong.BackgroundColor = bgp
+	sc.HorizontalRule.BackgroundColor = bgp
+	sc.Item.BackgroundColor = bgp
+	sc.Enumeration.BackgroundColor = bgp
+	sc.Link.BackgroundColor = bgp
+	sc.LinkText.BackgroundColor = bgp
+	sc.ImageText.BackgroundColor = bgp
+	sc.Code.StylePrimitive.BackgroundColor = bgp
+	sc.CodeBlock.StyleBlock.StylePrimitive.BackgroundColor = bgp
+	sc.BlockQuote.StylePrimitive.BackgroundColor = bgp
+}
 
 // mdStyleConfig returns a glamour style that uses ANSI 0-15 colors.
 // No 256-color or hex backgrounds — everything adapts to the terminal theme.
@@ -652,7 +698,7 @@ func (m *Model) buildPRInfoContent(width int) string {
 	if m.pr.Body == "" {
 		b.WriteString(labelStyle.Render("No description provided."))
 	} else {
-		rendered := m.renderMarkdown(m.pr.Body, width)
+		rendered := m.renderMarkdown(m.pr.Body, width, styles.BgOverlay)
 		b.WriteString(rendered)
 	}
 
@@ -676,7 +722,7 @@ func (m *Model) buildPRInfoContent(width int) string {
 				b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", c.Path, c.Line)))
 			}
 			b.WriteString("\n")
-			rendered := m.renderMarkdown(c.Body, width)
+			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
 			b.WriteString(bodyStyle.Render(rendered) + "\n")
 			b.WriteString(innerSep + "\n\n")
 		}
@@ -687,7 +733,7 @@ func (m *Model) buildPRInfoContent(width int) string {
 				b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", c.Path, c.Line)))
 			}
 			b.WriteString("\n")
-			rendered := m.renderMarkdown(c.Body, width)
+			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
 			b.WriteString(bodyStyle.Render(rendered) + "\n")
 			b.WriteString(innerSep + "\n\n")
 		}

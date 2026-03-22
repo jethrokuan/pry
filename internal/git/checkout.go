@@ -6,16 +6,6 @@ import (
 	"strings"
 )
 
-// CheckoutPR checks out a PR locally using gh pr checkout.
-func CheckoutPR(number int) error {
-	cmd := exec.Command("gh", "pr", "checkout", fmt.Sprintf("%d", number))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to checkout PR #%d: %s", number, string(out))
-	}
-	return nil
-}
-
 // GetRepoInfo returns the owner and repo name from the current git directory.
 func GetRepoInfo() (owner, repo string, err error) {
 	cmd := exec.Command("gh", "repo", "view", "--json", "owner,name", "-q", ".owner.login + \"/\" + .name")

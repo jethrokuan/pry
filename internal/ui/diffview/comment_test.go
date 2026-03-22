@@ -183,28 +183,6 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 		})
 	})
 
-	ginkgo.Describe("setForgeComments", func() {
-		ginkgo.It("indexes forge comments into the existing index", func() {
-			m.setForgeComments([]review.ExistingComment{
-				{ID: 100, Path: "api.go", Line: 20, Side: "RIGHT", Body: "draft note", Author: "me", IsPending: true},
-			})
-
-			gomega.Expect(m.comments.existingIndex[commentIndexKey("api.go", 20, "RIGHT")]).To(gomega.HaveLen(1))
-			gomega.Expect(m.comments.fileCommentIndex["api.go"]).To(gomega.BeTrue())
-		})
-
-		ginkgo.It("merges with existing comments in the index", func() {
-			m.setExistingComments([]review.ExistingComment{
-				{ID: 1, Path: "api.go", Line: 20, Side: "RIGHT", Body: "existing", Author: "alice"},
-			})
-			m.setForgeComments([]review.ExistingComment{
-				{ID: 100, Path: "api.go", Line: 20, Side: "RIGHT", Body: "forge", Author: "me"},
-			})
-
-			gomega.Expect(m.comments.existingIndex[commentIndexKey("api.go", 20, "RIGHT")]).To(gomega.HaveLen(2))
-		})
-	})
-
 	ginkgo.Describe("rebuildCommentIndex", func() {
 		ginkgo.It("produces correct mappings from all comment sources", func() {
 			// Set up existing comments

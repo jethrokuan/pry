@@ -827,30 +827,6 @@ func mergeStateLabel(pr review.PullRequest) (string, string, color.Color) {
 	}
 }
 
-// renderStatsPlain returns the stats line as plain text (no ANSI colors)
-// so it can be rendered as a single cell with uniform background.
-func renderStatsPlain(pr review.PullRequest) string {
-	parts := []string{
-		fmt.Sprintf("+%s -%s", formatNum(pr.Additions), formatNum(pr.Deletions)),
-		fmt.Sprintf("%s %d", iconFiles, pr.Files),
-		renderMergePlain(pr),
-	}
-	if pr.CommentCount > 0 {
-		parts = append(parts, fmt.Sprintf("%s %d", iconCommentSingle, pr.CommentCount))
-	}
-	parts = append(parts,
-		fmt.Sprintf("%s %s", iconUpdated, shortTimeAgo(pr.UpdatedAt)),
-		fmt.Sprintf("%s %s", iconCreated, shortTimeAgo(pr.CreatedAt)),
-	)
-	return strings.Join(parts, " · ")
-}
-
-// renderMergePlain returns the merge state as plain text.
-func renderMergePlain(pr review.PullRequest) string {
-	icon, label, _ := mergeStateLabel(pr)
-	return icon + " " + label
-}
-
 // formatNum formats a number with k suffix for large values.
 func formatNum(n int) string {
 	if n >= 10000 {
