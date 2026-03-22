@@ -604,18 +604,9 @@ func (m Model) View() string {
 		sb := scrollbar.New()
 		sb.Height = tableHeight
 		sb.TotalItems = len(m.prs)
-		rowHeight := 4
-		sb.VisibleItems = tableHeight / rowHeight
+		sb.VisibleItems = tableHeight / 4
 		sb.ThumbColor = styles.Primary
-		// Compute offset (same logic as renderTable)
-		visibleRows := tableHeight / rowHeight
-		if visibleRows < 1 {
-			visibleRows = 1
-		}
-		start := 0
-		if m.cursor >= visibleRows {
-			start = m.cursor - visibleRows + 1
-		}
+		start, _ := m.visibleRange(tableHeight)
 		sb.Offset = start
 
 		sbView := sb.View()
@@ -673,6 +664,25 @@ func (m *Model) setFlash(msg string) tea.Cmd {
 	})
 }
 
+// visibleRange computes the start and end indices of visible PR rows given
+// the available height in terminal lines. Each PR row is 4 lines tall.
+func (m Model) visibleRange(height int) (start, end int) {
+	rowHeight := 4
+	visibleRows := height / rowHeight
+	if visibleRows < 1 {
+		visibleRows = 1
+	}
+	start = 0
+	if m.cursor >= visibleRows {
+		start = m.cursor - visibleRows + 1
+	}
+	end = start + visibleRows
+	if end > len(m.prs) {
+		end = len(m.prs)
+	}
+	return start, end
+}
+
 // renderTable renders the PR table with multi-line rows (gh-dash style).
 // Each PR gets three lines:
 //
@@ -680,20 +690,7 @@ func (m *Model) setFlash(msg string) tea.Cmd {
 //	Line 2:             bold title
 //	Line 3:             +N -N  ·  N files  ·  review_status  CI  ·  comments  ·  updated  age
 func (m Model) renderTable(width, height int) string {
-	// Each PR row = 3 lines content + 1 border = 4 lines visual height
-	rowHeight := 4
-	visibleRows := height / rowHeight
-	if visibleRows < 1 {
-		visibleRows = 1
-	}
-	start := 0
-	if m.cursor >= visibleRows {
-		start = m.cursor - visibleRows + 1
-	}
-	end := start + visibleRows
-	if end > len(m.prs) {
-		end = len(m.prs)
-	}
+	start, end := m.visibleRange(height)
 
 	stateWidth := 4 // icon + padding
 
