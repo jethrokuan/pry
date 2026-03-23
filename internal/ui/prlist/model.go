@@ -185,6 +185,17 @@ func (m Model) layoutDimensions() (sidebarW, mainHeight int) {
 	return
 }
 
+func (m Model) halfPageSize() int {
+	_, mainHeight := m.layoutDimensions()
+	rowHeight := 4
+	visibleRows := mainHeight / rowHeight
+	half := visibleRows / 2
+	if half < 1 {
+		half = 1
+	}
+	return half
+}
+
 func (m Model) fetchUserTeams() tea.Cmd {
 	return func() tea.Msg {
 		teams, err := m.svc.UserTeams(context.Background())
@@ -328,14 +339,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.HalfPageDown):
 			if len(m.prs) > 0 {
-				_, mainHeight := m.layoutDimensions()
-				rowHeight := 4
-				visibleRows := mainHeight / rowHeight
-				half := visibleRows / 2
-				if half < 1 {
-					half = 1
-				}
-				m.cursor += half
+				m.cursor += m.halfPageSize()
 				if m.cursor >= len(m.prs) {
 					m.cursor = len(m.prs) - 1
 				}
@@ -343,14 +347,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.HalfPageUp):
 			if len(m.prs) > 0 {
-				_, mainHeight := m.layoutDimensions()
-				rowHeight := 4
-				visibleRows := mainHeight / rowHeight
-				half := visibleRows / 2
-				if half < 1 {
-					half = 1
-				}
-				m.cursor -= half
+				m.cursor -= m.halfPageSize()
 				if m.cursor < 0 {
 					m.cursor = 0
 				}
