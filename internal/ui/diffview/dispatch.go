@@ -85,6 +85,20 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 // handleCommentSelectKey handles keys when a comment is selected in the diff.
 // Returns handled=true if the key was consumed, false to fall through to normal mode.
 func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	// Handle delete confirmation prompt (y/n)
+	if m.confirmDelete {
+		switch msg.String() {
+		case "y":
+			m.confirmDelete = false
+			newM, cmd := m.deleteSelectedComment()
+			return newM, cmd, true
+		default:
+			// Any other key cancels
+			m.confirmDelete = false
+			return m, nil, true
+		}
+	}
+
 	switch {
 	case key.Matches(msg, keys.Up):
 		if m.comments.cursor > 0 {
@@ -126,8 +140,12 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 		newM, cmd := m.editSelectedComment()
 		return newM, cmd, true
 	case key.Matches(msg, keys.DeleteComment):
-		newM, cmd := m.deleteSelectedComment()
-		return newM, cmd, true
+		refs := m.commentRefsAtCursor()
+		if m.comments.cursor >= 0 && m.comments.cursor < len(refs) && refs[m.comments.cursor].isLocal {
+			m.confirmDelete = true
+			return m, nil, true
+		}
+		return m, nil, true
 	}
 
 	// Unhandled: deselect comment and fall through

@@ -242,6 +242,7 @@ type Model struct {
 	errors errorStore // unified error tracking for all async operations
 
 	confirmQuit        bool // true when waiting for second quit key to confirm
+	confirmDelete      bool // true when waiting for y/n to confirm comment deletion
 	narrowPrefixActive bool // true when waiting for second key after 'T'
 
 	// PR info popup
@@ -1136,7 +1137,12 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "d delete")
 		}
 		helpParts = append(helpParts, "esc back")
-		b.WriteString(styles.HelpStyle.Render(strings.Join(helpParts, "  ")))
+		if m.confirmDelete {
+			b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(styles.Warning).
+				Render("Delete comment? (y/n)"))
+		} else {
+			b.WriteString(styles.HelpStyle.Render(strings.Join(helpParts, "  ")))
+		}
 	} else if m.confirmQuit {
 		pendingCount := len(m.pr.PendingReview.Comments) + len(m.comments.forgeComments)
 		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(styles.Warning).
