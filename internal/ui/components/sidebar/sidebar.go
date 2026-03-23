@@ -1,11 +1,10 @@
 package sidebar
 
 import (
-	"fmt"
-
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
 
+	"github.com/jethrokuan/pry/internal/ui/components/scrollbar"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
@@ -27,7 +26,7 @@ func New() Model {
 func (m *Model) SetSize(width, height int) {
 	m.width = width
 	m.height = height
-	contentWidth := max(width-5, 1)  // left border(1) + left pad(1) + right pad(1) + border width(2)
+	contentWidth := max(width-6, 1)  // left border(1) + left pad(1) + right pad(1) + border width(2) + scrollbar(1)
 	contentHeight := max(height-2, 1) // top pad(1) + bottom pad(1)
 	if !m.ready {
 		m.viewport = viewport.New(
@@ -78,16 +77,20 @@ func (m Model) View() string {
 		Width(m.width).
 		Height(m.height)
 
-	// Show scroll percentage
-	pct := int(m.viewport.ScrollPercent() * 100)
-	pager := lipgloss.NewStyle().
-		Foreground(styles.Muted).
-		Bold(true).
-		Render(fmt.Sprintf(" %d%%", pct))
-
 	content := m.viewport.View()
-	if m.height > 1 {
-		return borderStyle.Height(m.height - 1).Render(content) + "\n" + pager
+
+	// Render scrollbar alongside content
+	sb := scrollbar.New()
+	sb.Height = m.viewport.Height()
+	sb.TotalItems = m.viewport.TotalLineCount()
+	sb.VisibleItems = m.viewport.Height()
+	sb.Offset = m.viewport.YOffset()
+	sb.ThumbColor = styles.Primary
+
+	sbView := sb.View()
+	if sbView != "" {
+		content = lipgloss.JoinHorizontal(lipgloss.Top, content, sbView)
 	}
+
 	return borderStyle.Render(content)
 }
