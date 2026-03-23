@@ -21,11 +21,15 @@ import (
 	"github.com/jethrokuan/pry/internal/review"
 )
 
+// version is set by GoReleaser via ldflags.
+var version = "dev"
+
 // CLI defines the command-line interface for pry.
 type CLI struct {
 	PRNumber int    `arg:"" optional:"" help:"PR number to open directly."`
 	Config   string `short:"c" help:"Path to config file." type:"path"`
 	Verbose  bool   `short:"v" help:"Enable verbose output."`
+	Version  kong.VersionFlag `short:"V" help:"Print version and exit."`
 }
 
 func main() {
@@ -34,6 +38,7 @@ func main() {
 		kong.Name("pry"),
 		kong.Description("Terminal UI for reviewing GitHub pull requests."),
 		kong.UsageOnError(),
+		kong.Vars{"version": version},
 	)
 
 	// Set up file-based logging (writes to ~/.config/pry/debug.log)

@@ -1,0 +1,30 @@
+version: 2
+
+builds:
+  - main: ./cmd
+    binary: pry
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+
+brews:
+  - repository:
+      owner: jethrokuan
+      name: homebrew-tap
+    homepage: https://github.com/jethrokuan/pry
+    description: Terminal UI for reviewing GitHub pull requests
+    license: MIT
+    install: |
+      bin.install "pry"
+    test: |
+      system "#{bin}/pry", "--version"
