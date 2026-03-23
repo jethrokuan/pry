@@ -210,7 +210,7 @@ func countViewedDescendants(node *treeNode, viewedFiles map[string]bool, files [
 func (m Model) renderFileTree() string {
 	var b strings.Builder
 
-	viewedCount := len(m.pr.PendingReview.ViewedFiles)
+	viewedCount := len(m.pendingReview.ViewedFiles)
 	fileCount := len(m.files)
 	titleStr := fmt.Sprintf("Files (%d)", fileCount)
 	if m.filter.isActive() {
@@ -252,7 +252,7 @@ func (m Model) renderFileTree() string {
 				cursor = "> "
 			}
 
-			isViewed := m.pr.PendingReview.ViewedFiles[file.Path]
+			isViewed := m.pendingReview.ViewedFiles[file.Path]
 
 			statusStyle := lipgloss.NewStyle()
 			switch file.Status {
@@ -331,7 +331,7 @@ func (m Model) renderFileTree() string {
 			}
 
 			// Show viewed count for directory
-			viewedDesc, totalDesc := countViewedDescendants(row.node, m.pr.PendingReview.ViewedFiles, m.files)
+			viewedDesc, totalDesc := countViewedDescendants(row.node, m.pendingReview.ViewedFiles, m.files)
 
 			dirStyle := lipgloss.NewStyle().Bold(true)
 			if totalDesc > 0 && viewedDesc == totalDesc {

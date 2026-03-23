@@ -12,7 +12,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jethrokuan/pry/internal/appctx"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
@@ -47,9 +46,10 @@ var keys = KeyMap{
 
 // Model is the submit review screen.
 type Model struct {
-	ctx *appctx.Context
-	pr  *review.PullRequest
-	textarea       textarea.Model
+	svc           review.Service
+	pr            *review.PullRequest
+	pendingReview *review.PendingReview
+	textarea      textarea.Model
 	submitting     bool
 	submitted      bool
 	waitingForSync bool
@@ -61,7 +61,7 @@ type Model struct {
 }
 
 // New creates a submit model.
-func New(ctx *appctx.Context, pr *review.PullRequest) Model {
+func New(svc review.Service, pr *review.PullRequest) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Review summary (optional)..."
 	ta.CharLimit = 0
@@ -70,10 +70,11 @@ func New(ctx *appctx.Context, pr *review.PullRequest) Model {
 	s.Spinner = spinner.Dot
 
 	return Model{
-		ctx:      ctx,
-		pr:       pr,
-		textarea: ta,
-		spinner:  s,
+		svc:           svc,
+		pr:            pr,
+		pendingReview: pr.PendingReview,
+		textarea:      ta,
+		spinner:       s,
 	}
 }
 
@@ -92,7 +93,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.textarea.SetHeight(5)
 
 	case waitForSyncMsg:
-		if m.pr.PendingReview.InFlightCount() == 0 {
+		if m.pendingReview.InFlightCount() == 0 {
 			// All syncs complete, now submit
 			return m, m.submitReview()
 		}
@@ -143,11 +144,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.Cancel):
 			return m, func() tea.Msg { return CancelledMsg{} }
 		case key.Matches(msg, keys.Action1):
-			m.pr.PendingReview.Event = review.ReviewEventComment
+			m.pendingReview.Event = review.ReviewEventComment
 		case key.Matches(msg, keys.Action2):
-			m.pr.PendingReview.Event = review.ReviewEventApprove
+			m.pendingReview.Event = review.ReviewEventApprove
 		case key.Matches(msg, keys.Action3):
-			m.pr.PendingReview.Event = review.ReviewEventRequestChanges
+			m.pendingReview.Event = review.ReviewEventRequestChanges
 		case key.Matches(msg, key.NewBinding(key.WithKeys("b"))):
 			m.focusBody = true
 			m.textarea.Focus()
@@ -161,10 +162,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 func (m *Model) submitReview() tea.Cmd {
-	m.pr.PendingReview.Body = m.textarea.Value()
+	m.pendingReview.Body = m.textarea.Value()
 
 	// Wait for any in-flight syncs to complete before submitting
-	if m.pr.PendingReview.InFlightCount() > 0 {
+	if m.pendingReview.InFlightCount() > 0 {
 		m.waitingForSync = true
 		return tea.Batch(
 			m.spinner.Tick,
@@ -179,7 +180,7 @@ func (m *Model) submitReview() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		func() tea.Msg {
-			err := m.ctx.Svc.SubmitReview(context.Background(), m.pr, m.pr.PendingReview)
+			err := m.svc.SubmitReview(context.Background(), m.pr, m.pendingReview)
 			return submitResultMsg{err: err}
 		},
 	)
@@ -197,10 +198,10 @@ func (m Model) View() string {
 
 	// Comment count
 	b.WriteString(fmt.Sprintf("%d inline comments pending\n\n",
-		len(m.pr.PendingReview.Comments)))
+		len(m.pendingReview.Comments)))
 
 	// Show comment summaries with sync status
-	for i, c := range m.pr.PendingReview.Comments {
+	for i, c := range m.pendingReview.Comments {
 		syncIcon := " "
 		switch c.SyncStatus {
 		case review.SyncComplete:
@@ -241,7 +242,7 @@ func (m Model) View() string {
 
 	for i, a := range actions {
 		radio := "( )"
-		if m.pr.PendingReview.Event == a.event {
+		if m.pendingReview.Event == a.event {
 			radio = "(x)"
 		}
 		actionStyle := lipgloss.NewStyle()
@@ -258,7 +259,7 @@ func (m Model) View() string {
 
 	// Show sync failure warnings
 	failedComments := 0
-	for _, c := range m.pr.PendingReview.Comments {
+	for _, c := range m.pendingReview.Comments {
 		if c.SyncStatus == review.SyncFailed {
 			failedComments++
 		}

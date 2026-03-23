@@ -7,7 +7,6 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	"github.com/jethrokuan/pry/internal/appctx"
 	"github.com/jethrokuan/pry/internal/review"
 )
 
@@ -28,7 +27,7 @@ var _ = ginkgo.Describe("PR Info Popup Scrolling", func() {
 		}
 
 		pr.StartReview()
-		m := New(&appctx.Context{}, pr)
+		m := New(nil, pr)
 		m.loading = false
 
 		// Set window size

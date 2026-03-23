@@ -5,7 +5,6 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	"github.com/jethrokuan/pry/internal/appctx"
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
 )
@@ -79,7 +78,7 @@ func newInputTestModel() Model {
 		Base:   "main",
 	}
 	pr.StartReview()
-	m := New(&appctx.Context{}, pr)
+	m := New(nil, pr)
 	m.loading = false
 
 	// Inject test files
@@ -642,7 +641,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
 			// Add a pending comment so hasUnsavedWork returns true
-			m.pr.PendingReview.Comments = append(m.pr.PendingReview.Comments, review.InlineComment{
+			m.pendingReview.Comments = append(m.pendingReview.Comments, review.InlineComment{
 				Path: "src/main.go",
 				Line: 1,
 				Body: "test comment",

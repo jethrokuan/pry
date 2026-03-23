@@ -16,7 +16,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jethrokuan/pry/internal/appctx"
 	"github.com/jethrokuan/pry/internal/clipboard"
 	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/review"
@@ -138,9 +137,13 @@ type Model struct {
 	enrichMap map[int]enrichState
 }
 
+// UserIdentityMsg carries the resolved user identity from the app layer.
+type UserIdentityMsg struct {
+	Identity *review.UserIdentity
+}
+
 // New creates a new PR list model.
-func New(ctx *appctx.Context, filters []review.PRFilter) Model {
-	svc := ctx.Svc
+func New(svc review.Service, filters []review.PRFilter) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
@@ -160,7 +163,7 @@ func New(ctx *appctx.Context, filters []review.PRFilter) Model {
 		spinner:      s,
 		filterInput: ti,
 		tabBar:      tabbar.New(tabs),
-		preview:     prpreview.New(ctx),
+		preview:     prpreview.New(),
 		enrichMap:   make(map[int]enrichState),
 	}
 }
@@ -249,6 +252,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			sidebarCmd := m.refreshSidebarPreview()
 			enrichCmd := m.enrichVisible()
 			return m, tea.Batch(sidebarCmd, enrichCmd)
+		}
+
+	case UserIdentityMsg:
+		if msg.Identity != nil {
+			m.preview.SetUserIdentity(msg.Identity)
 		}
 
 	case userTeamsLoadedMsg:

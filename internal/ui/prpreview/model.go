@@ -8,7 +8,6 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jethrokuan/pry/internal/appctx"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/sidebar"
 	"github.com/jethrokuan/pry/internal/ui/mdutil"
@@ -17,7 +16,7 @@ import (
 
 // Model manages the PR preview sidebar content and async body fetching.
 type Model struct {
-	ctx          *appctx.Context
+	userIdentity *review.UserIdentity
 	sidebar      sidebar.Model
 	sidebarWidth int
 	previewPRNum int
@@ -25,12 +24,16 @@ type Model struct {
 }
 
 // New creates a new PR preview model.
-func New(ctx *appctx.Context) Model {
+func New() Model {
 	return Model{
-		ctx:          ctx,
 		sidebar:      sidebar.New(),
 		sidebarWidth: 50,
 	}
+}
+
+// SetUserIdentity updates the user identity used for review status rendering.
+func (m *Model) SetUserIdentity(id *review.UserIdentity) {
+	m.userIdentity = id
 }
 
 // SetSize updates the sidebar dimensions.
@@ -177,7 +180,7 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 			b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Merge conflicts") + "\n")
 			renderConflictFiles(&b, pr.ConflictFiles)
 		}
-		renderReviewStatus(&b, pr, m.ctx)
+		renderReviewStatus(&b, pr, m.userIdentity)
 		renderCheckRunsDetail(&b, pr)
 	} else if pr.MergeState == "CLEAN" || pr.MergeState == "HAS_HOOKS" {
 		renderCleanStatus(&b, pr)
@@ -233,7 +236,7 @@ func truncateLines(s string, max int) string {
 }
 
 // renderReviewStatus renders the review/approval status line with pending reviewer names.
-func renderReviewStatus(b *strings.Builder, pr *review.PullRequest, ctx *appctx.Context) {
+func renderReviewStatus(b *strings.Builder, pr *review.PullRequest, userIdentity *review.UserIdentity) {
 	if pr.ReviewDecision == "CHANGES_REQUESTED" {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Changes requested") + "\n")
 		return
@@ -245,8 +248,8 @@ func renderReviewStatus(b *strings.Builder, pr *review.PullRequest, ctx *appctx.
 	// Collect pending reviewer names (individuals + teams)
 	var pending []string
 	userTeams := make(map[string]bool)
-	if ctx.UserIdentity != nil {
-		for _, t := range ctx.UserIdentity.Teams {
+	if userIdentity != nil {
+		for _, t := range userIdentity.Teams {
 			userTeams[t] = true
 		}
 	}

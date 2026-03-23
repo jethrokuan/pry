@@ -7,7 +7,6 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	"github.com/jethrokuan/pry/internal/appctx"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/review/reviewtest"
 )
@@ -18,8 +17,7 @@ func newTestModel(svc *reviewtest.MockService, filters ...review.PRFilter) Model
 			{Name: "Default", Qualifier: "is:open"},
 		}
 	}
-	ctx := &appctx.Context{Svc: svc}
-	return New(ctx, filters)
+	return New(svc, filters)
 }
 
 func samplePRs(n int) []review.PullRequest {

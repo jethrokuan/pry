@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jethrokuan/pry/internal/appctx"
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/diffview"
@@ -94,17 +93,12 @@ func SimpleDiffFile(path string, addedLines ...string) diff.DiffFile {
 
 // --- Model factories ---
 
-// TestContext creates an AppContext wrapping the given service for test use.
-func TestContext(svc review.Service) *appctx.Context {
-	return &appctx.Context{Svc: svc}
-}
-
 // NewDiffViewModel creates a diffview.Model with a mock service and test PR.
 // The returned model is in its initial loading state.
 func NewDiffViewModel(svc review.Service, opts ...diffview.Option) diffview.Model {
 	pr := NewPR().BuildPtr()
 	pr.StartReview()
-	return diffview.New(TestContext(svc), pr, opts...)
+	return diffview.New(svc, pr, opts...)
 }
 
 // NewDiffViewModelWithPR creates a diffview.Model with a specific PR.
@@ -112,14 +106,14 @@ func NewDiffViewModelWithPR(svc review.Service, pr *review.PullRequest, opts ...
 	if pr.PendingReview == nil {
 		pr.StartReview()
 	}
-	return diffview.New(TestContext(svc), pr, opts...)
+	return diffview.New(svc, pr, opts...)
 }
 
 // NewDiffViewModelWithReview creates a diffview.Model with a specific PR and pending review.
 // Deprecated: Use NewDiffViewModelWithPR instead. The review is now owned by the PR.
 func NewDiffViewModelWithReview(svc review.Service, pr *review.PullRequest, rev *review.PendingReview, opts ...diffview.Option) diffview.Model {
 	pr.PendingReview = rev
-	return diffview.New(TestContext(svc), pr, opts...)
+	return diffview.New(svc, pr, opts...)
 }
 
 // NewPRListModel creates a prlist.Model with a mock service and optional filters.
@@ -129,8 +123,7 @@ func NewPRListModel(svc review.Service, filters ...review.PRFilter) prlist.Model
 			{Name: "Default", Qualifier: "is:open"},
 		}
 	}
-	ctx := &appctx.Context{Svc: svc}
-	return prlist.New(ctx, filters)
+	return prlist.New(svc, filters)
 }
 
 // NewSubmitModel creates a submit.Model with a mock service and PR.
@@ -138,5 +131,5 @@ func NewSubmitModel(svc review.Service, pr *review.PullRequest) submit.Model {
 	if pr.PendingReview == nil {
 		pr.StartReview()
 	}
-	return submit.New(TestContext(svc), pr)
+	return submit.New(svc, pr)
 }

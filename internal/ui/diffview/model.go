@@ -15,7 +15,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jethrokuan/pry/internal/appctx"
 	"github.com/jethrokuan/pry/internal/clipboard"
 	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/diff"
@@ -224,9 +223,10 @@ var inlineKeys = struct {
 // --- Model ---
 
 type Model struct {
-	ctx   *appctx.Context
-	pr    *review.PullRequest
-	files []diff.DiffFile
+	svc           review.Service
+	pr            *review.PullRequest
+	pendingReview *review.PendingReview
+	files         []diff.DiffFile
 
 	nav      DiffNav
 	comments CommentPanel
@@ -294,6 +294,15 @@ func WithUserIdentity(id *review.UserIdentity) Option {
 	}
 }
 
+// WithMentionableUsers seeds the @-mention autocomplete with pre-loaded usernames.
+func WithMentionableUsers(users []string) Option {
+	return func(m *Model) {
+		if len(users) > 0 {
+			m.comments.mentionAll = users
+		}
+	}
+}
+
 // WithOwnerFilterDisabled explicitly disables the owner filter regardless of identity.
 func WithOwnerFilterDisabled() Option {
 	return func(m *Model) {
@@ -301,13 +310,14 @@ func WithOwnerFilterDisabled() Option {
 	}
 }
 
-func New(ctx *appctx.Context, pr *review.PullRequest, opts ...Option) Model {
+func New(svc review.Service, pr *review.PullRequest, opts ...Option) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
 	m := Model{
-		ctx:               ctx,
+		svc:               svc,
 		pr:                pr,
+		pendingReview:     pr.PendingReview,
 		loading: true,
 		spinner: s,
 		errors:  newErrorStore(),
@@ -330,21 +340,18 @@ func New(ctx *appctx.Context, pr *review.PullRequest, opts ...Option) Model {
 		opt(&m)
 	}
 
-	// Apply user identity from context if available and not already set by options
-	if len(m.filter.ownerIdentities) == 0 && ctx.UserIdentity != nil {
-		WithUserIdentity(ctx.UserIdentity)(&m)
-	}
-
 	return m
+}
+
+// PendingReview returns the current pending review state.
+// The app layer reads this when transitioning to the submit screen.
+func (m Model) PendingReview() *review.PendingReview {
+	return m.pendingReview
 }
 
 // --- Init ---
 
 func (m Model) Init() tea.Cmd {
-	// Seed mentionable users from context if already loaded at startup.
-	if users := m.ctx.MentionableUsers; len(users) > 0 {
-		m.comments.mentionAll = users
-	}
 	return tea.Batch(
 		m.loadFiles(),
 		m.loadComments(),
@@ -360,46 +367,46 @@ func (m Model) loadViewedFiles() tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		viewed, err := m.ctx.Svc.FetchViewedFiles(context.Background(), m.pr.NodeID)
+		viewed, err := m.svc.FetchViewedFiles(context.Background(), m.pr.NodeID)
 		return viewedFilesMsg{viewed: viewed, err: err}
 	}
 }
 
 func (m Model) loadFiles() tea.Cmd {
 	return func() tea.Msg {
-		files, err := m.ctx.Svc.FetchDiffFiles(context.Background(), m.pr.Number)
+		files, err := m.svc.FetchDiffFiles(context.Background(), m.pr.Number)
 		return filesLoadedMsg{files: files, err: err}
 	}
 }
 
 func (m Model) loadComments() tea.Cmd {
 	return func() tea.Msg {
-		comments, err := m.ctx.Svc.FetchExistingComments(context.Background(), m.pr.Number)
+		comments, err := m.svc.FetchExistingComments(context.Background(), m.pr.Number)
 		return existingCommentsMsg{comments: comments, err: err}
 	}
 }
 
 func (m Model) loadPendingReview() tea.Cmd {
 	return func() tea.Msg {
-		reviewID, nodeID, comments, err := m.ctx.Svc.FetchPendingReview(context.Background(), m.pr.Number)
+		reviewID, nodeID, comments, err := m.svc.FetchPendingReview(context.Background(), m.pr.Number)
 		return pendingReviewMsg{reviewID: reviewID, reviewNodeID: nodeID, comments: comments, err: err}
 	}
 }
 
 func (m Model) createPendingReviewCmd() tea.Cmd {
 	return func() tea.Msg {
-		id, nodeID, err := m.ctx.Svc.CreatePendingReview(context.Background(), m.pr.Number)
+		id, nodeID, err := m.svc.CreatePendingReview(context.Background(), m.pr.Number)
 		return reviewCreatedMsg{reviewID: id, reviewNodeID: nodeID, err: err}
 	}
 }
 
 func (m Model) syncCommentCmd(c review.InlineComment) tea.Cmd {
-	if m.pr.PendingReview.ReviewNodeID == "" {
+	if m.pendingReview.ReviewNodeID == "" {
 		return nil
 	}
 	// Capture values to avoid reading shared state from goroutine
-	svc := m.ctx.Svc
-	reviewNodeID := m.pr.PendingReview.ReviewNodeID
+	svc := m.svc
+	reviewNodeID := m.pendingReview.ReviewNodeID
 	localID := c.LocalID
 	comment := review.InlineComment{
 		Path:      c.Path,
@@ -418,7 +425,7 @@ func (m Model) deleteCommentCmd(localID, forgeID int) tea.Cmd {
 	if forgeID == 0 {
 		return nil
 	}
-	svc := m.ctx.Svc
+	svc := m.svc
 	prNumber := m.pr.Number
 	return func() tea.Msg {
 		err := svc.DeleteReviewComment(context.Background(), prNumber, forgeID)
@@ -430,7 +437,7 @@ func (m Model) editCommentCmd(localID, forgeID int, body string) tea.Cmd {
 	if forgeID == 0 {
 		return nil
 	}
-	svc := m.ctx.Svc
+	svc := m.svc
 	prNumber := m.pr.Number
 	return func() tea.Msg {
 		err := svc.EditReviewComment(context.Background(), prNumber, forgeID, body)
@@ -486,8 +493,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.err != nil {
 			m.errors.set(errCatReview, 0, msg.err)
 		} else if msg.reviewID > 0 {
-			m.pr.PendingReview.ReviewID = msg.reviewID
-			m.pr.PendingReview.ReviewNodeID = msg.reviewNodeID
+			m.pendingReview.ReviewID = msg.reviewID
+			m.pendingReview.ReviewNodeID = msg.reviewNodeID
 			// Restore comments from forge (crash recovery)
 			m.restoreForgeComments(msg.comments, msg.comments)
 			m.updateDiffContent()
@@ -497,14 +504,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case reviewCreatedMsg:
 		if msg.err == nil {
-			m.pr.PendingReview.ReviewID = msg.reviewID
-			m.pr.PendingReview.ReviewNodeID = msg.reviewNodeID
+			m.pendingReview.ReviewID = msg.reviewID
+			m.pendingReview.ReviewNodeID = msg.reviewNodeID
 			// Flush any comments that were added before the review was created
 			var cmds []tea.Cmd
-			for i := range m.pr.PendingReview.Comments {
-				if m.pr.PendingReview.Comments[i].SyncStatus == review.SyncPending {
-					m.pr.PendingReview.Comments[i].SyncStatus = review.SyncInFlight
-					cmds = append(cmds, m.syncCommentCmd(m.pr.PendingReview.Comments[i]))
+			for i := range m.pendingReview.Comments {
+				if m.pendingReview.Comments[i].SyncStatus == review.SyncPending {
+					m.pendingReview.Comments[i].SyncStatus = review.SyncInFlight
+					cmds = append(cmds, m.syncCommentCmd(m.pendingReview.Comments[i]))
 				}
 			}
 			if len(cmds) > 0 {
@@ -555,7 +562,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.errors.set(errCatViewed, 0, fmt.Errorf("viewed files: %w", msg.err))
 		} else if msg.viewed != nil {
 			for path := range msg.viewed {
-				m.pr.PendingReview.ViewedFiles[path] = true
+				m.pendingReview.ViewedFiles[path] = true
 			}
 			m.treeDirty = true
 			if len(m.files) > 0 {
@@ -598,10 +605,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case PRBodyLoadedMsg:
 		if msg.Err == nil && msg.PR != nil {
 			// Preserve review state when updating PR metadata
-			pendingReview := m.pr.PendingReview
+			pendingReview := m.pendingReview
 			existingComments := m.pr.ExistingComments
 			*m.pr = *msg.PR
-			m.pr.PendingReview = pendingReview
+			m.pendingReview = pendingReview
 			m.pr.ExistingComments = existingComments
 			if m.prInfoActive {
 				m.openPRInfoPopup()
@@ -609,7 +616,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Viewed files may not have been loaded yet if PRNodeID was
 			// empty at Init time (e.g. CLI launch with just a PR number).
 			// Now that app.go has backfilled the node ID, try again.
-			if len(m.pr.PendingReview.ViewedFiles) == 0 && m.pr.NodeID != "" {
+			if len(m.pendingReview.ViewedFiles) == 0 && m.pr.NodeID != "" {
 				return m, m.loadViewedFiles()
 			}
 		}
@@ -847,7 +854,7 @@ func (m *Model) setFlash(msg string) tea.Cmd {
 // be lost on quit. This includes both locally-added comments and comments
 // already synced to the forge as part of a draft review.
 func (m *Model) hasUnsavedWork() bool {
-	return len(m.pr.PendingReview.Comments) > 0 || len(m.comments.forgeComments) > 0
+	return len(m.pendingReview.Comments) > 0 || len(m.comments.forgeComments) > 0
 }
 
 const commentBoxHeight = 10 // textarea(5) + header(1) + border(2) + help(1) + padding(1)
@@ -888,8 +895,8 @@ func (m *Model) copyForgeLink() tea.Cmd {
 
 	file := m.files[m.nav.fileCursor]
 	sha := m.pr.HeadSHA
-	owner := m.ctx.Svc.RepoOwner()
-	repo := m.ctx.Svc.RepoName()
+	owner := m.svc.RepoOwner()
+	repo := m.svc.RepoName()
 
 	// Build base blob URL
 	url := fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", owner, repo, sha, file.Path)
@@ -1038,14 +1045,14 @@ func (m Model) View() string {
 	// Header
 	header := styles.Title.Render(fmt.Sprintf("PR #%d: %s", m.pr.Number, m.pr.Title))
 
-	totalPending := len(m.pr.PendingReview.Comments) + len(m.comments.forgeComments)
+	totalPending := len(m.pendingReview.Comments) + len(m.comments.forgeComments)
 	pendingCount := ""
 	if totalPending > 0 {
 		pendingCount = lipgloss.NewStyle().Foreground(styles.Warning).
 			Render(fmt.Sprintf("  [%d pending]", totalPending))
 	}
 
-	viewedCount := len(m.pr.PendingReview.ViewedFiles)
+	viewedCount := len(m.pendingReview.ViewedFiles)
 	viewedLabel := ""
 	if viewedCount > 0 {
 		viewedLabel = lipgloss.NewStyle().Foreground(styles.Success).
@@ -1053,7 +1060,7 @@ func (m Model) View() string {
 	}
 
 	syncLabel := ""
-	inflight := m.pr.PendingReview.InFlightCount()
+	inflight := m.pendingReview.InFlightCount()
 	if inflight > 0 {
 		syncLabel = lipgloss.NewStyle().Foreground(styles.Secondary).
 			Render(fmt.Sprintf("  [syncing %d...]", inflight))
@@ -1079,7 +1086,7 @@ func (m Model) View() string {
 	if len(m.files) > 0 {
 		fileName := m.files[m.nav.fileCursor].Path
 		viewed := ""
-		if m.pr.PendingReview.ViewedFiles[fileName] {
+		if m.pendingReview.ViewedFiles[fileName] {
 			viewed = " ✓"
 		}
 		b.WriteString(styles.StatusBar.Render(
@@ -1144,7 +1151,7 @@ func (m Model) View() string {
 			b.WriteString(styles.HelpStyle.Render(strings.Join(helpParts, "  ")))
 		}
 	} else if m.confirmQuit {
-		pendingCount := len(m.pr.PendingReview.Comments) + len(m.comments.forgeComments)
+		pendingCount := len(m.pendingReview.Comments) + len(m.comments.forgeComments)
 		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(styles.Warning).
 			Render(fmt.Sprintf("You have %d pending comment(s). Press ctrl+c again to quit.", pendingCount)))
 	} else if !m.comments.inlineActive {
@@ -1234,7 +1241,7 @@ func (m Model) currentPosition() (label string, index int, total int) {
 	case 'F':
 		t, p := 0, 0
 		for i, f := range m.files {
-			if !m.pr.PendingReview.ViewedFiles[f.Path] {
+			if !m.pendingReview.ViewedFiles[f.Path] {
 				t++
 				if i == m.nav.fileCursor {
 					p = t

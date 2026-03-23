@@ -200,14 +200,14 @@ var _ = Describe("App message routing", func() {
 			}
 			m = update(m, userIdentityMsg{identity: identity})
 
-			Expect(m.ctx.UserIdentity).NotTo(BeNil())
-			Expect(m.ctx.UserIdentity.Login).To(Equal("testuser"))
-			Expect(m.ctx.UserIdentity.Teams).To(ConsistOf("org/team1"))
+			Expect(m.userIdentity).NotTo(BeNil())
+			Expect(m.userIdentity.Login).To(Equal("testuser"))
+			Expect(m.userIdentity.Teams).To(ConsistOf("org/team1"))
 		})
 
 		It("ignores errors", func() {
 			m = update(m, userIdentityMsg{err: context.DeadlineExceeded})
-			Expect(m.ctx.UserIdentity).To(BeNil())
+			Expect(m.userIdentity).To(BeNil())
 		})
 
 		It("forwards identity to diffview when on diff screen", func() {
@@ -220,8 +220,8 @@ var _ = Describe("App message routing", func() {
 			}
 			m = update(m, userIdentityMsg{identity: identity})
 
-			Expect(m.ctx.UserIdentity).NotTo(BeNil())
-			Expect(m.ctx.UserIdentity.Login).To(Equal("testuser"))
+			Expect(m.userIdentity).NotTo(BeNil())
+			Expect(m.userIdentity.Login).To(Equal("testuser"))
 		})
 	})
 
