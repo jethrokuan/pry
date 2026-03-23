@@ -236,8 +236,7 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case diffview.BackMsg:
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		m.prList = prlist.New(m.ctx, m.filters)
-		return m, tea.Batch(m.prList.Init(), m.windowSizeCmd())
+		return m, m.windowSizeCmd()
 	case prBodyLoadedMsg:
 		if msg.err == nil && msg.pr != nil {
 			// Update the shared PR in-place so diffview sees the change.
