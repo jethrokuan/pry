@@ -219,48 +219,21 @@ func Render(sections []Section, termWidth int) string {
 	return boxStyle.Render(content)
 }
 
-// Overlay places the popup centered over the base string.
+// Overlay places the popup centered over the base string using Canvas compositing.
 func Overlay(base string, popup string, width, height int) string {
-	popupLines := strings.Split(popup, "\n")
-	baseLines := strings.Split(base, "\n")
+	popupW := lipgloss.Width(popup)
+	popupH := lipgloss.Height(popup)
 
-	popupWidth := 0
-	for _, l := range popupLines {
-		if w := lipgloss.Width(l); w > popupWidth {
-			popupWidth = w
-		}
+	x := (width - popupW) / 2
+	if x < 0 {
+		x = 0
+	}
+	y := (height - popupH) / 2
+	if y < 0 {
+		y = 0
 	}
 
-	startRow := (height - len(popupLines)) / 2
-	startCol := (width - popupWidth) / 2
-	if startRow < 0 {
-		startRow = 0
-	}
-	if startCol < 0 {
-		startCol = 0
-	}
-
-	for len(baseLines) < height {
-		baseLines = append(baseLines, "")
-	}
-
-	for i, popupLine := range popupLines {
-		row := startRow + i
-		if row >= len(baseLines) {
-			break
-		}
-		baseLine := baseLines[row]
-		baseWidth := lipgloss.Width(baseLine)
-		left := ""
-		if startCol > 0 {
-			if baseWidth >= startCol {
-				left = strings.Repeat(" ", startCol)
-			} else {
-				left = baseLine + strings.Repeat(" ", startCol-baseWidth)
-			}
-		}
-		baseLines[row] = left + popupLine
-	}
-
-	return strings.Join(baseLines, "\n")
+	baseLayer := lipgloss.NewLayer(base)
+	popupLayer := lipgloss.NewLayer(popup).X(x).Y(y).Z(1)
+	return lipgloss.NewCompositor(baseLayer, popupLayer).Render()
 }
