@@ -232,6 +232,7 @@ type Model struct {
 	comments CommentPanel
 	search   SearchBar
 	filter   FileFilter
+	editor   InlineEditor
 
 	width    int
 	height   int
@@ -298,7 +299,7 @@ func WithUserIdentity(id *review.UserIdentity) Option {
 func WithMentionableUsers(users []string) Option {
 	return func(m *Model) {
 		if len(users) > 0 {
-			m.comments.mentionAll = users
+			m.editor.SetMentionUsers(users)
 		}
 	}
 }
@@ -454,8 +455,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.mdCache = make(map[mdCacheKey]string)
 		m.treeDirty = true
 		m.updateViewports()
-		if m.comments.inlineActive {
-			m.comments.inlineTextarea.SetWidth(m.inlineTextareaWidth() - 4)
+		if m.editor.IsActive() {
+			m.editor.SetWidth(m.inlineTextareaWidth())
 		}
 		if m.comments.popupActive {
 			// Reopen to resize the popup viewport
@@ -622,7 +623,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case MentionableUsersMsg:
 		if len(msg.Users) > 0 {
-			m.comments.mentionAll = msg.Users
+			m.editor.SetMentionUsers(msg.Users)
 		}
 
 	case clipboardImageMsg:
@@ -638,10 +639,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case imageUploadedMsg:
 		if msg.err != nil {
 			return m, m.setFlash("Upload failed: " + msg.err.Error())
-		} else if m.comments.inlineActive {
-			// Insert markdown image link at current cursor position
+		} else if m.editor.IsActive() {
 			mdLink := fmt.Sprintf("![image](%s)", msg.url)
-			m.comments.inlineTextarea.InsertString(mdLink)
+			m.editor.InsertString(mdLink)
 			return m, m.setFlash("Image uploaded")
 		}
 
@@ -653,7 +653,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case editorFinishedMsg:
 		if msg.err == nil && msg.content != "" {
-			m.comments.inlineTextarea.SetValue(msg.content)
+			m.editor.SetValue(msg.content)
 		}
 
 	case flashExpiredMsg:
@@ -682,16 +682,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.loading {
 			return m, nil
 		}
-		if m.comments.inlineActive {
-			return m.handleInlineKey(msg)
+		if m.editor.IsActive() {
+			return m.handleInlineEditorKey(msg)
 		}
 		return m.handleKey(msg)
 	}
 
 	// Forward non-key messages to textarea when active
-	if m.comments.inlineActive {
+	if m.editor.IsActive() {
 		var cmd tea.Cmd
-		m.comments.inlineTextarea, cmd = m.comments.inlineTextarea.Update(msg)
+		m.editor.ta, cmd = m.editor.ta.Update(msg)
 		return m, cmd
 	}
 
@@ -807,8 +807,8 @@ func (m *Model) maxCommentBlockHeight() int {
 // commentRenderedLines returns the number of rendered lines for comments
 // on a specific file path, line number, and side.
 func (m *Model) commentRenderedLines(path string, lineNum int, side string) int {
-	existing := m.commentsForLine(path, lineNum, side)
-	localPending := m.localPendingForLine(path, lineNum, side)
+	existing := m.comments.CommentsForLine(path, lineNum, side)
+	localPending := m.comments.LocalPendingForLine(path, lineNum, side)
 	totalCount := len(existing) + len(localPending)
 	if totalCount == 0 {
 		return 0
@@ -868,7 +868,7 @@ func (m *Model) updateViewports() {
 	headerHeight := 3
 	footerHeight := 2
 	contentHeight := m.height - headerHeight - footerHeight
-	if m.comments.inlineActive {
+	if m.editor.IsActive() {
 		contentHeight -= commentBoxHeight
 	}
 	if contentHeight < 1 {
@@ -1102,32 +1102,13 @@ func (m Model) View() string {
 	}
 
 	// Inline comment box (below the diff)
-	if m.comments.inlineActive {
-		b.WriteString(m.renderCommentBox() + "\n")
+	if m.editor.IsActive() {
+		b.WriteString(m.editor.View() + "\n")
 	}
 
 	// Input mode bars
-	if m.search.gotoActive {
-		prompt := lipgloss.NewStyle().Bold(true).Render("Go to line: ")
-		b.WriteString(prompt + m.search.gotoInput + "█")
-	} else if m.search.active {
-		prompt := lipgloss.NewStyle().Bold(true).Render("/")
-		b.WriteString(prompt + m.search.input + "█")
-	} else if m.search.filterActive {
-		prompt := lipgloss.NewStyle().Bold(true).Render("Filter files: ")
-		b.WriteString(prompt + m.search.filterInput + "█\n")
-		// Show filtered file list
-		for i, idx := range m.search.filterFiles {
-			if i >= 10 {
-				b.WriteString(styles.HelpStyle.Render(fmt.Sprintf("  ... and %d more", len(m.search.filterFiles)-10)))
-				break
-			}
-			cursor := "  "
-			if i == m.search.filterCursor {
-				cursor = "> "
-			}
-			b.WriteString(cursor + m.files[idx].Path + "\n")
-		}
+	if m.search.IsActive() {
+		b.WriteString(m.search.View())
 	} else if m.filter.regexActive {
 		prompt := lipgloss.NewStyle().Bold(true).Render("Narrow (regex): ")
 		b.WriteString(prompt + m.filter.regexInput + "█")
@@ -1153,7 +1134,7 @@ func (m Model) View() string {
 		pendingCount := len(m.pendingReview.Comments) + len(m.comments.forgeComments)
 		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(styles.Warning).
 			Render(fmt.Sprintf("You have %d pending comment(s). Press ctrl+c again to quit.", pendingCount)))
-	} else if !m.comments.inlineActive {
+	} else if !m.editor.IsActive() {
 		// Footer
 		var helpParts []string
 		if m.nav.focus == FocusFileTree {
@@ -1189,8 +1170,8 @@ func (m Model) View() string {
 			if m.nav.visualMode {
 				helpParts = append(helpParts, "(SELECT)")
 			}
-			if m.search.query != "" {
-				helpParts = append(helpParts, fmt.Sprintf("[/%s n/N]", m.search.query))
+			if m.search.Query() != "" {
+				helpParts = append(helpParts, fmt.Sprintf("[/%s n/N]", m.search.Query()))
 			}
 			helpParts = append(helpParts, "i info")
 			helpParts = append(helpParts, "ctrl+s submit")
@@ -1255,7 +1236,7 @@ func (m Model) currentPosition() (label string, index int, total int) {
 		path := m.files[m.nav.fileCursor].Path
 		t, p := 0, 0
 		for i, dl := range m.nav.diffLines {
-			if m.lineHasComments(path, dl) {
+			if m.comments.LineHasComments(path, dl) {
 				t++
 				if i == m.nav.cursor.LineIdx {
 					p = t
@@ -1266,7 +1247,7 @@ func (m Model) currentPosition() (label string, index int, total int) {
 	case 'C':
 		t, p := 0, 0
 		for i, f := range m.files {
-			if m.fileHasComments(f.Path) {
+			if m.comments.FileHasComments(f.Path) {
 				t++
 				if i == m.nav.fileCursor {
 					p = t
@@ -1275,10 +1256,10 @@ func (m Model) currentPosition() (label string, index int, total int) {
 		}
 		return "Commented", p, t
 	case '/':
-		if m.search.query == "" {
+		if m.search.Query() == "" {
 			return "Match", 0, 0
 		}
-		query := strings.ToLower(m.search.query)
+		query := strings.ToLower(m.search.Query())
 		t, p := 0, 0
 		for i, dl := range m.nav.diffLines {
 			if strings.Contains(strings.ToLower(dl.content), query) {

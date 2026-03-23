@@ -230,7 +230,7 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 	hunkStyle := styles.HunkHeader
 	commentMarker := lipgloss.NewStyle().Foreground(styles.Warning).Render("▎")
 	noMarker := " "
-	searchQuery := strings.ToLower(m.search.query)
+	searchQuery := strings.ToLower(m.search.Query())
 	cursorBg := styles.BgCursor
 	searchBg := styles.BgSearch
 	activeHunkBg := styles.BgActiveHunk
@@ -372,7 +372,7 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 			}
 
 			// Comment marker on left edge
-			hasComment := m.lineHasComments(file.Path, diffLineInfo{newLine: line.NewNum, oldLine: line.OldNum})
+			hasComment := m.comments.LineHasComments(file.Path, diffLineInfo{newLine: line.NewNum, oldLine: line.OldNum})
 			marker := noMarker
 			if hasComment {
 				marker = commentMarker
@@ -428,8 +428,8 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 	ck := commentKey(path, line)
 	expanded := m.comments.expanded[ck]
 
-	existing := m.commentsForLine(path, line, side)
-	localPending := m.localPendingForLine(path, line, side)
+	existing := m.comments.CommentsForLine(path, line, side)
+	localPending := m.comments.LocalPendingForLine(path, line, side)
 
 	totalCount := len(existing) + len(localPending)
 	if totalCount == 0 {
@@ -545,41 +545,6 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 	b.WriteString(truncLine + "\n")
 
 	return totalCount
-}
-
-// renderCommentBox renders the inline comment editor box.
-func (m Model) renderCommentBox() string {
-	modeStr := "Comment"
-	if m.comments.inlineMode == commentModeSuggestion {
-		modeStr = "Suggestion"
-	}
-
-	location := fmt.Sprintf("%s:%d", m.comments.inlinePath, m.comments.inlineLine)
-	if m.comments.inlineStartLine > 0 {
-		location = fmt.Sprintf("%s:%d-%d", m.comments.inlinePath, m.comments.inlineStartLine, m.comments.inlineLine)
-	}
-
-	header := lipgloss.NewStyle().Foreground(styles.Warning).Bold(true).
-		Render(fmt.Sprintf(" %s on %s ", modeStr, location))
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Warning).
-		Padding(0, 1).
-		Width(m.inlineTextareaWidth() - 2)
-
-	helpText := "ctrl+s save  ctrl+e $EDITOR  ctrl+t toggle mode  esc cancel"
-	if m.comments.confirmDiscard {
-		helpText = "Press esc again to discard  ctrl+s save"
-	}
-	help := styles.HelpStyle.Render(helpText)
-
-	content := m.comments.inlineTextarea.View()
-	if m.comments.mentionActive && len(m.comments.mentionMatches) > 0 {
-		content += "\n" + m.renderMentionDropdown()
-	}
-
-	return header + "\n" + boxStyle.Render(content) + "\n" + help
 }
 
 // renderCommentPopup builds the bordered comment popup.

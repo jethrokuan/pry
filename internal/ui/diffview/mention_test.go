@@ -78,77 +78,69 @@ var _ = ginkgo.Describe("Mention autocomplete", func() {
 
 	ginkgo.Describe("updateMentionState", func() {
 		ginkgo.It("activates mention when @ is typed with matching users", func() {
-			m := Model{
-				comments: CommentPanel{
-					mentionAll: []string{"alice", "bob"},
-				},
+			e := InlineEditor{
+				mentionAll: []string{"alice", "bob"},
 			}
 			ta := textarea.New()
 			ta.SetWidth(80)
 			ta.SetHeight(5)
 			ta.SetValue("@al")
-			m.comments.inlineTextarea = ta
+			e.ta = ta
 
-			m.updateMentionState()
+			e.updateMentionState()
 
-			gomega.Expect(m.comments.mentionActive).To(gomega.BeTrue())
-			gomega.Expect(m.comments.mentionMatches).To(gomega.ConsistOf("alice"))
-			gomega.Expect(m.comments.mentionCursor).To(gomega.Equal(0))
+			gomega.Expect(e.mentionActive).To(gomega.BeTrue())
+			gomega.Expect(e.mentionMatches).To(gomega.ConsistOf("alice"))
+			gomega.Expect(e.mentionCursor).To(gomega.Equal(0))
 		})
 
 		ginkgo.It("deactivates when no users match", func() {
-			m := Model{
-				comments: CommentPanel{
-					mentionAll:    []string{"alice", "bob"},
-					mentionActive: true,
-				},
+			e := InlineEditor{
+				mentionAll:    []string{"alice", "bob"},
+				mentionActive: true,
 			}
 			ta := textarea.New()
 			ta.SetWidth(80)
 			ta.SetHeight(5)
 			ta.SetValue("@zzz")
-			m.comments.inlineTextarea = ta
+			e.ta = ta
 
-			m.updateMentionState()
+			e.updateMentionState()
 
-			gomega.Expect(m.comments.mentionActive).To(gomega.BeFalse())
+			gomega.Expect(e.mentionActive).To(gomega.BeFalse())
 		})
 
 		ginkgo.It("deactivates when mentionAll is empty", func() {
-			m := Model{
-				comments: CommentPanel{
-					mentionActive: true,
-				},
+			e := InlineEditor{
+				mentionActive: true,
 			}
 			ta := textarea.New()
 			ta.SetWidth(80)
 			ta.SetHeight(5)
 			ta.SetValue("@alice")
-			m.comments.inlineTextarea = ta
+			e.ta = ta
 
-			m.updateMentionState()
+			e.updateMentionState()
 
-			gomega.Expect(m.comments.mentionActive).To(gomega.BeFalse())
+			gomega.Expect(e.mentionActive).To(gomega.BeFalse())
 		})
 
 		ginkgo.It("resets cursor when matches shrink", func() {
-			m := Model{
-				comments: CommentPanel{
-					mentionAll:    []string{"alice", "alicia"},
-					mentionCursor: 1,
-				},
+			e := InlineEditor{
+				mentionAll:    []string{"alice", "alicia"},
+				mentionCursor: 1,
 			}
 			ta := textarea.New()
 			ta.SetWidth(80)
 			ta.SetHeight(5)
 			ta.SetValue("@alice")
-			m.comments.inlineTextarea = ta
+			e.ta = ta
 
-			m.updateMentionState()
+			e.updateMentionState()
 
-			gomega.Expect(m.comments.mentionActive).To(gomega.BeTrue())
-			gomega.Expect(m.comments.mentionMatches).To(gomega.HaveLen(1))
-			gomega.Expect(m.comments.mentionCursor).To(gomega.Equal(0))
+			gomega.Expect(e.mentionActive).To(gomega.BeTrue())
+			gomega.Expect(e.mentionMatches).To(gomega.HaveLen(1))
+			gomega.Expect(e.mentionCursor).To(gomega.Equal(0))
 		})
 	})
 })

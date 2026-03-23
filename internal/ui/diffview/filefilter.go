@@ -158,3 +158,36 @@ func (ff *FileFilter) isIncluded(idx int) bool {
 	}
 	return ff.includedFiles[idx]
 }
+
+// --- FileFilter outbound messages ---
+
+// filterRegexAppliedMsg is emitted when the user confirms a regex pattern.
+type filterRegexAppliedMsg struct{}
+
+// filterRegexDismissedMsg is emitted when the user cancels regex input.
+type filterRegexDismissedMsg struct{}
+
+// HandleRegexKey processes a key event while the regex input mode is active.
+// Returns the updated FileFilter and an optional outbound message.
+func (ff FileFilter) HandleRegexKey(keyStr string, text string) (FileFilter, any) {
+	switch keyStr {
+	case "enter":
+		ff.setRegex(ff.regexInput)
+		ff.regexActive = false
+		return ff, filterRegexAppliedMsg{}
+	case "esc", "ctrl+c":
+		ff.regexActive = false
+		ff.regexInput = ""
+		return ff, filterRegexDismissedMsg{}
+	case "backspace":
+		if len(ff.regexInput) > 0 {
+			ff.regexInput = ff.regexInput[:len(ff.regexInput)-1]
+		}
+		return ff, nil
+	default:
+		if text != "" {
+			ff.regexInput += text
+		}
+		return ff, nil
+	}
+}

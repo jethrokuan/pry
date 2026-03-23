@@ -542,10 +542,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 	ginkgo.Describe("File filter mode", func() {
 		ginkgo.It("should filter files by input and select on enter", func() {
 			m := newInputTestModel()
-			m.search.filterActive = true
-			m.search.filterInput = ""
-			m.search.filterFiles = m.allFileIndices()
-			m.search.filterCursor = 0
+			m.activateFileFilter()
 
 			// Type "util"
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'u', Text: "u"})
@@ -565,9 +562,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 
 		ginkgo.It("should navigate filter list with up/down", func() {
 			m := newInputTestModel()
-			m.search.filterActive = true
-			m.search.filterFiles = m.allFileIndices()
-			m.search.filterCursor = 0
+			m.activateFileFilter()
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 			gomega.Expect(m.search.filterCursor).To(gomega.Equal(1))
@@ -578,7 +573,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 
 		ginkgo.It("should cancel with esc", func() {
 			m := newInputTestModel()
-			m.search.filterActive = true
+			m.activateFileFilter()
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 			gomega.Expect(m.search.filterActive).To(gomega.BeFalse())
@@ -686,9 +681,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 
 		ginkgo.It("should prioritize filter mode over diff keys", func() {
 			m := newInputTestModel()
-			m.search.filterActive = true
-			m.search.filterInput = ""
-			m.search.filterFiles = m.allFileIndices()
+			m.activateFileFilter()
 
 			// 'j' in filter mode should append to input
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})

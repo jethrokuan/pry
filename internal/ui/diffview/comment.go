@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -40,10 +39,10 @@ func (m *Model) commentRefsAtLine(diffIdx int) []commentRef {
 		if !m.comments.expanded[ck] {
 			return
 		}
-		for range m.commentsForLine(path, line, side) {
+		for range m.comments.CommentsForLine(path, line, side) {
 			refs = append(refs, commentRef{})
 		}
-		for _, c := range m.localPendingForLine(path, line, side) {
+		for _, c := range m.comments.LocalPendingForLine(path, line, side) {
 			refs = append(refs, commentRef{isLocal: true, localID: c.LocalID})
 		}
 	}
@@ -80,26 +79,10 @@ func (m Model) editSelectedComment() (Model, tea.Cmd) {
 	}
 
 	m.nav.cursor = m.nav.cursor.AsLine()
-	m.comments.inlineActive = true
-	m.comments.inlinePath = c.Path
-	m.comments.inlineLine = c.Line
-	m.comments.inlineStartLine = c.StartLine
-	m.comments.inlineSide = c.Side
-	m.comments.inlineMode = commentModeComment
-	m.comments.inlineEditLocalID = c.LocalID
-
-	ta := textarea.New()
-	ta.Placeholder = "Edit your comment..."
-	ta.Focus()
-	ta.CharLimit = 0
-	ta.SetWidth(m.inlineTextareaWidth() - 4)
-	ta.SetHeight(5)
-	ta.SetValue(c.Body)
-
-	m.comments.inlineTextarea = ta
+	m.editor.OpenForEdit(c.Path, c.Line, c.StartLine, c.Side, c.LocalID, c.Body, m.inlineTextareaWidth())
 	m.updateViewports()
 
-	return m, textarea.Blink
+	return m, m.editor.BlinkCmd()
 }
 
 // deleteSelectedComment deletes the selected local pending comment.
@@ -178,7 +161,7 @@ func (m *Model) buildCommentPopupContent(width int) string {
 	var b strings.Builder
 
 	writeExisting := func(lineNum int, side string) {
-		for _, c := range m.commentsForLine(path, lineNum, side) {
+		for _, c := range m.comments.CommentsForLine(path, lineNum, side) {
 			label := "💬"
 			if c.IsPending {
 				label = "📝"
@@ -194,7 +177,7 @@ func (m *Model) buildCommentPopupContent(width int) string {
 		}
 	}
 	writeLocal := func(lineNum int, side string) {
-		for _, c := range m.localPendingForLine(path, lineNum, side) {
+		for _, c := range m.comments.LocalPendingForLine(path, lineNum, side) {
 			syncLabel := ""
 			switch c.SyncStatus {
 			case review.SyncInFlight:
@@ -226,26 +209,22 @@ func (m *Model) buildCommentPopupContent(width int) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func commentIndexKey(path string, line int, side string) string {
-	return fmt.Sprintf("%s:%d:%s", path, line, side)
-}
 
 // --- Comment mutation methods ---
 // All comment data mutations go through these methods, which automatically
-// rebuild the comment index. This eliminates the need to manually call
-// rebuildCommentIndex() at each mutation site.
+// rebuild the comment index via CommentPanel.RebuildIndex().
 
 // setExistingComments replaces the existing comments and rebuilds the index.
 func (m *Model) setExistingComments(comments []review.ExistingComment) {
 	m.comments.existing = comments
-	m.rebuildCommentIndex()
+	m.comments.RebuildIndex(m.pendingReview.Comments)
 }
 
 // addLocalComment adds a new local pending comment and rebuilds the index.
 // Returns the assigned LocalID.
 func (m *Model) addLocalComment(c review.InlineComment) int {
 	id := m.pendingReview.AddCommentDirect(c)
-	m.rebuildCommentIndex()
+	m.comments.RebuildIndex(m.pendingReview.Comments)
 	return id
 }
 
@@ -253,7 +232,7 @@ func (m *Model) addLocalComment(c review.InlineComment) int {
 // the index. Returns the removed comment's ForgeID.
 func (m *Model) removeLocalComment(localID int) int {
 	forgeID := m.pendingReview.RemoveCommentByLocalID(localID)
-	m.rebuildCommentIndex()
+	m.comments.RebuildIndex(m.pendingReview.Comments)
 	return forgeID
 }
 
@@ -262,7 +241,7 @@ func (m *Model) removeLocalComment(localID int) int {
 func (m *Model) updateLocalComment(localID int, fn func(*review.InlineComment)) {
 	if c := m.pendingReview.FindByLocalID(localID); c != nil {
 		fn(c)
-		m.rebuildCommentIndex()
+		m.comments.RebuildIndex(m.pendingReview.Comments)
 	}
 }
 
@@ -280,51 +259,7 @@ func (m *Model) restoreForgeComments(pendingComments []review.ExistingComment, f
 		})
 	}
 	m.comments.forgeComments = forgeComments
-	m.rebuildCommentIndex()
-}
-
-// rebuildCommentIndex rebuilds the existingIndex and localPendingIndex maps
-// from the current comment data. It is called automatically by mutation methods
-// and should not normally be called directly.
-func (m *Model) rebuildCommentIndex() {
-	m.comments.existingIndex = make(map[string][]review.ExistingComment)
-	m.comments.fileCommentIndex = make(map[string]bool)
-	for _, c := range m.comments.existing {
-		k := commentIndexKey(c.Path, c.Line, c.Side)
-		m.comments.existingIndex[k] = append(m.comments.existingIndex[k], c)
-		m.comments.fileCommentIndex[c.Path] = true
-	}
-	for _, c := range m.comments.forgeComments {
-		k := commentIndexKey(c.Path, c.Line, c.Side)
-		m.comments.existingIndex[k] = append(m.comments.existingIndex[k], c)
-		m.comments.fileCommentIndex[c.Path] = true
-	}
-
-	m.comments.localPendingIndex = make(map[string][]review.InlineComment)
-	for _, c := range m.pendingReview.Comments {
-		k := commentIndexKey(c.Path, c.Line, c.Side)
-		m.comments.localPendingIndex[k] = append(m.comments.localPendingIndex[k], c)
-		m.comments.fileCommentIndex[c.Path] = true
-	}
-}
-
-func (m *Model) commentsForLine(path string, line int, side string) []review.ExistingComment {
-	exact := m.comments.existingIndex[commentIndexKey(path, line, side)]
-	// Also include comments with empty side (they match any side query)
-	if side != "" {
-		emptySide := m.comments.existingIndex[commentIndexKey(path, line, "")]
-		if len(emptySide) > 0 {
-			result := make([]review.ExistingComment, 0, len(exact)+len(emptySide))
-			result = append(result, exact...)
-			result = append(result, emptySide...)
-			return result
-		}
-	}
-	return exact
-}
-
-func (m *Model) localPendingForLine(path string, line int, side string) []review.InlineComment {
-	return m.comments.localPendingIndex[commentIndexKey(path, line, side)]
+	m.comments.RebuildIndex(m.pendingReview.Comments)
 }
 
 func lineAndSide(dl diffLineInfo) (int, string) {
@@ -532,36 +467,13 @@ func (m Model) markTreeItemViewed() (Model, tea.Cmd) {
 // --- Inline comment editor ---
 
 func (m *Model) openInlineComment(path string, line, startLine int, side string, mode commentMode, suggestion string) tea.Cmd {
-	m.comments.inlineActive = true
-	m.comments.inlinePath = path
-	m.comments.inlineLine = line
-	m.comments.inlineStartLine = startLine
-	m.comments.inlineSide = side
-	m.comments.inlineMode = mode
-	m.comments.inlineSuggestion = suggestion
-
-	ta := textarea.New()
-	ta.Placeholder = "Write your comment..."
-	ta.Focus()
-	ta.CharLimit = 0
-	ta.SetWidth(m.inlineTextareaWidth() - 4)
-	ta.SetHeight(5)
-
-	if mode == commentModeSuggestion && suggestion != "" {
-		ta.SetValue(suggestion)
-	}
-
-	m.comments.inlineTextarea = ta
+	m.editor.Open(path, line, startLine, side, mode, suggestion, m.inlineTextareaWidth())
 	m.updateViewports()
-
-	return textarea.Blink
+	return m.editor.BlinkCmd()
 }
 
 func (m *Model) closeInlineComment() {
-	m.comments.inlineActive = false
-	m.comments.inlineEditLocalID = 0
-	m.comments.confirmDiscard = false
-	m.comments.mentionActive = false
+	m.editor.Close()
 	m.updateViewports()
 	m.updateDiffContent()
 }
@@ -574,35 +486,25 @@ func (m Model) inlineTextareaWidth() int {
 	return m.width - treeWidth
 }
 
-func (m Model) saveInlineComment() (Model, tea.Cmd) {
-	text := strings.TrimSpace(m.comments.inlineTextarea.Value())
-	if text == "" {
-		m.closeInlineComment()
-		return m, nil
-	}
-
-	body := text
-	if m.comments.inlineMode == commentModeSuggestion {
-		body = fmt.Sprintf("```suggestion\n%s\n```", text)
-	}
-
+// handleEditorSave processes a save message from the InlineEditor.
+func (m Model) handleEditorSave(msg inlineEditorSaveMsg) (Model, tea.Cmd) {
 	// Editing an existing comment
-	if m.comments.inlineEditLocalID != 0 {
-		c := m.pendingReview.FindByLocalID(m.comments.inlineEditLocalID)
+	if msg.editLocalID != 0 {
+		c := m.pendingReview.FindByLocalID(msg.editLocalID)
 		if c != nil {
 			localID := c.LocalID
 			forgeID := c.ForgeID
 			m.updateLocalComment(localID, func(c *review.InlineComment) {
-				c.Body = body
+				c.Body = msg.body
 			})
 			m.closeInlineComment()
-			return m, m.editCommentCmd(localID, forgeID, body)
+			return m, m.editCommentCmd(localID, forgeID, msg.body)
 		}
 		m.closeInlineComment()
 		return m, nil
 	}
 
-	side := m.comments.inlineSide
+	side := msg.side
 	if side == "" {
 		side = "RIGHT"
 	}
@@ -613,11 +515,11 @@ func (m Model) saveInlineComment() (Model, tea.Cmd) {
 	}
 
 	newComment := review.InlineComment{
-		Path:       m.comments.inlinePath,
-		Line:       m.comments.inlineLine,
-		StartLine:  m.comments.inlineStartLine,
+		Path:       msg.path,
+		Line:       msg.line,
+		StartLine:  msg.startLine,
 		Side:       side,
-		Body:       body,
+		Body:       msg.body,
 		SyncStatus: syncStatus,
 	}
 	m.addLocalComment(newComment)
@@ -641,7 +543,7 @@ func (m Model) openExternalEditorForComment() tea.Cmd {
 		editor = "vim"
 	}
 
-	content := m.comments.inlineTextarea.Value()
+	content := m.editor.ta.Value()
 
 	tmpFile, err := os.CreateTemp("", "pry-comment-*.md")
 	if err != nil {

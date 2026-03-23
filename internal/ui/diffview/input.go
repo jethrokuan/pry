@@ -2,7 +2,6 @@ package diffview
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -26,10 +25,7 @@ func (m Model) handleTreeKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.Enter):
 		return m.handleTreeEnter()
 	case key.Matches(msg, keys.Search):
-		m.search.filterActive = true
-		m.search.filterInput = ""
-		m.search.filterFiles = m.allFileIndices()
-		m.search.filterCursor = 0
+		m.activateFileFilter()
 		return m, nil
 	case key.Matches(msg, keys.Help):
 		m.showHelp = true
@@ -37,6 +33,15 @@ func (m Model) handleTreeKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// activateFileFilter opens the SearchBar in file filter mode.
+func (m *Model) activateFileFilter() {
+	fileNames := make([]string, len(m.files))
+	for i, f := range m.files {
+		fileNames[i] = f.Path
+	}
+	m.search.ActivateFilter(fileNames, m.filter.isIncluded)
 }
 
 // onTreeCursorChanged updates fileCursor if on a file row and syncs viewports.
@@ -188,7 +193,7 @@ func (m Model) toggleFoldAtDiffCursor() Model {
 	}
 
 	// If cursor line has comments, toggle comment fold
-	if m.lineHasComments(path, dl) {
+	if m.comments.LineHasComments(path, dl) {
 		return m.toggleCommentAtCursor()
 	}
 
@@ -350,7 +355,7 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if len(m.files) > 0 && m.nav.cursor.LineIdx < len(m.nav.diffLines) {
 			path := m.files[m.nav.fileCursor].Path
 			dl := m.nav.diffLines[m.nav.cursor.LineIdx]
-			if m.lineHasComments(path, dl) {
+			if m.comments.LineHasComments(path, dl) {
 				// Expand the comment block and enter comment select mode
 				if dl.newLine > 0 {
 					m.comments.expanded[commentKey(path, dl.newLine)] = true
@@ -386,25 +391,21 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	// Search
 	case key.Matches(msg, keys.Search):
-		m.search.active = true
-		m.search.input = ""
+		m.search.ActivateSearch()
 		return m, nil
 	case key.Matches(msg, keys.NextSearch):
-		if m.search.query != "" {
+		if m.search.Query() != "" {
 			m.nav.activeCycler = '/'
 			return m, m.jumpToNextSearchMatch()
 		}
 	case key.Matches(msg, keys.PrevSearch):
-		if m.search.query != "" {
+		if m.search.Query() != "" {
 			m.nav.activeCycler = '/'
 			return m, m.jumpToPrevSearchMatch()
 		}
 
 	case key.Matches(msg, keys.FilterFile):
-		m.search.filterActive = true
-		m.search.filterInput = ""
-		m.search.filterFiles = m.allFileIndices()
-		m.search.filterCursor = 0
+		m.activateFileFilter()
 		return m, nil
 	case key.Matches(msg, keys.Help):
 		m.showHelp = true
@@ -508,7 +509,7 @@ func (m *Model) navigateComment(forward, crossFile bool) tea.Cmd {
 	start := m.nav.cursor.LineIdx
 	path := m.files[m.nav.fileCursor].Path
 	idx := cyclicSearch(start, n, forward, func(i int) bool {
-		return m.lineHasComments(path, m.nav.diffLines[i])
+		return m.comments.LineHasComments(path, m.nav.diffLines[i])
 	})
 	if idx >= 0 {
 		m.nav.cursor.LineIdx = idx
@@ -541,7 +542,7 @@ func (m *Model) navigateCommentToFile(forward bool) tea.Cmd {
 		if !m.filter.isIncluded(i) {
 			return false
 		}
-		if !m.fileHasComments(m.files[i].Path) {
+		if !m.comments.FileHasComments(m.files[i].Path) {
 			return false
 		}
 		// Temporarily switch to this file to check if comments map to diff lines
@@ -596,13 +597,13 @@ func (m *Model) expandAndSelectComment(lineIdx int) {
 func (m *Model) findCommentedDiffLine(path string, forward bool) int {
 	if forward {
 		for j := 0; j < len(m.nav.diffLines); j++ {
-			if m.lineHasComments(path, m.nav.diffLines[j]) {
+			if m.comments.LineHasComments(path, m.nav.diffLines[j]) {
 				return j
 			}
 		}
 	} else {
 		for j := len(m.nav.diffLines) - 1; j >= 0; j-- {
-			if m.lineHasComments(path, m.nav.diffLines[j]) {
+			if m.comments.LineHasComments(path, m.nav.diffLines[j]) {
 				return j
 			}
 		}
@@ -701,51 +702,37 @@ func (m *Model) navigateHunkCrossFile(forward bool) tea.Cmd {
 	return nil
 }
 
-// lineHasComments returns true if the given diff line has any comments.
-func (m *Model) lineHasComments(path string, dl diffLineInfo) bool {
-	if dl.newLine > 0 && len(m.commentsForLine(path, dl.newLine, "RIGHT"))+len(m.localPendingForLine(path, dl.newLine, "RIGHT")) > 0 {
-		return true
-	}
-	if dl.oldLine > 0 && len(m.commentsForLine(path, dl.oldLine, "LEFT"))+len(m.localPendingForLine(path, dl.oldLine, "LEFT")) > 0 {
-		return true
-	}
-	return false
-}
+// --- SearchBar delegation ---
 
-// fileHasComments returns true if any comments exist for the given file path.
-func (m *Model) fileHasComments(path string) bool {
-	return m.comments.fileCommentIndex[path]
-}
+// handleSearchBarKey delegates key events to the SearchBar component and
+// handles any outbound messages it produces.
+func (m Model) handleSearchBarKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	s, outMsg := m.search.HandleKey(msg.String(), msg.Text)
+	m.search = s
 
-// --- Goto line handling ---
-
-func (m Model) handleGotoKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "enter":
-		if m.search.gotoInput != "" {
-			lineNum, err := strconv.Atoi(m.search.gotoInput)
-			if err == nil {
-				m.jumpToLine(lineNum)
-			}
-		}
-		m.search.gotoActive = false
-		m.search.gotoInput = ""
-		return m, nil
-	case "esc", "ctrl+c":
-		m.search.gotoActive = false
-		m.search.gotoInput = ""
-		return m, nil
-	case "backspace":
-		if len(m.search.gotoInput) > 0 {
-			m.search.gotoInput = m.search.gotoInput[:len(m.search.gotoInput)-1]
-		}
-		return m, nil
-	default:
-		if len(msg.String()) == 1 && msg.String()[0] >= '0' && msg.String()[0] <= '9' {
-			m.search.gotoInput += msg.String()
-		}
-		return m, nil
+	switch ev := outMsg.(type) {
+	case searchGotoLineMsg:
+		m.jumpToLine(ev.line)
+	case searchQueryConfirmedMsg:
+		m.nav.activeCycler = '/'
+		cmd := m.jumpToNextSearchMatch()
+		m.updateDiffContent()
+		return m, cmd
+	case searchDismissedMsg:
+		m.updateDiffContent()
+	case searchFilterSelectedMsg:
+		oldIdx := m.nav.fileCursor
+		m.nav.fileCursor = ev.fileIdx
+		m.nav.buildDiffLines(m.files)
+		m.nav.cursor = CursorTarget{Kind: CursorLine}
+		m.nav.diffViewport.GotoTop()
+		m.updateDiffContent()
+		m.autoFollowFile(oldIdx, m.nav.fileCursor)
+	case searchFilterDismissedMsg:
+		// nothing extra needed
 	}
+
+	return m, nil
 }
 
 func (m *Model) jumpToLine(lineNum int) {
@@ -759,41 +746,11 @@ func (m *Model) jumpToLine(lineNum int) {
 	}
 }
 
-// --- Search handling ---
-
-func (m Model) handleSearchKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "enter":
-		m.search.query = m.search.input
-		m.search.active = false
-		var cmd tea.Cmd
-		if m.search.query != "" {
-			m.nav.activeCycler = '/'
-			cmd = m.jumpToNextSearchMatch()
-		}
-		m.updateDiffContent()
-		return m, cmd
-	case "esc", "ctrl+c":
-		m.search.active = false
-		m.search.input = ""
-		m.updateDiffContent()
-		return m, nil
-	case "backspace":
-		if len(m.search.input) > 0 {
-			m.search.input = m.search.input[:len(m.search.input)-1]
-		}
-		return m, nil
-	default:
-		if msg.Text != "" {
-			m.search.input += msg.Text
-		}
-		return m, nil
-	}
-}
+// --- Search match navigation (used by parent for n/N keys) ---
 
 func (m *Model) jumpToNextSearchMatch() tea.Cmd {
 	m.nav.pushJump()
-	query := strings.ToLower(m.search.query)
+	query := strings.ToLower(m.search.Query())
 	for i := m.nav.cursor.LineIdx + 1; i < len(m.nav.diffLines); i++ {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.cursor.LineIdx = i
@@ -814,7 +771,7 @@ func (m *Model) jumpToNextSearchMatch() tea.Cmd {
 
 func (m *Model) jumpToPrevSearchMatch() tea.Cmd {
 	m.nav.pushJump()
-	query := strings.ToLower(m.search.query)
+	query := strings.ToLower(m.search.Query())
 	for i := m.nav.cursor.LineIdx - 1; i >= 0; i-- {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.cursor.LineIdx = i
@@ -835,28 +792,18 @@ func (m *Model) jumpToPrevSearchMatch() tea.Cmd {
 
 // --- Narrow regex filter handling ---
 
+// handleNarrowRegexKey delegates to the FileFilter component and handles
+// any outbound messages.
 func (m Model) handleNarrowRegexKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "enter":
-		m.filter.setRegex(m.filter.regexInput)
-		m.filter.regexActive = false
+	ff, outMsg := m.filter.HandleRegexKey(msg.String(), msg.Text)
+	m.filter = ff
+
+	switch outMsg.(type) {
+	case filterRegexAppliedMsg:
 		m.applyFilters()
-		return m, nil
-	case "esc", "ctrl+c":
-		m.filter.regexActive = false
-		m.filter.regexInput = ""
-		return m, nil
-	case "backspace":
-		if len(m.filter.regexInput) > 0 {
-			m.filter.regexInput = m.filter.regexInput[:len(m.filter.regexInput)-1]
-		}
-		return m, nil
-	default:
-		if msg.Text != "" {
-			m.filter.regexInput += msg.Text
-		}
-		return m, nil
 	}
+
+	return m, nil
 }
 
 // --- Narrow prefix (T) handling ---
@@ -978,64 +925,6 @@ func (m *Model) applyFilters() {
 
 // --- File filter handling ---
 
-func (m Model) handleFilterKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	switch msg.String() {
-	case "enter":
-		if len(m.search.filterFiles) > 0 && m.search.filterCursor < len(m.search.filterFiles) {
-			oldIdx := m.nav.fileCursor
-			m.nav.fileCursor = m.search.filterFiles[m.search.filterCursor]
-			m.nav.buildDiffLines(m.files)
-			m.nav.cursor = CursorTarget{Kind: CursorLine}
-			m.nav.diffViewport.GotoTop()
-			m.updateDiffContent()
-			m.autoFollowFile(oldIdx, m.nav.fileCursor)
-		}
-		m.search.filterActive = false
-		m.search.filterInput = ""
-		return m, nil
-	case "esc", "ctrl+c":
-		m.search.filterActive = false
-		m.search.filterInput = ""
-		return m, nil
-	case "up":
-		if m.search.filterCursor > 0 {
-			m.search.filterCursor--
-		}
-		return m, nil
-	case "down":
-		if m.search.filterCursor < len(m.search.filterFiles)-1 {
-			m.search.filterCursor++
-		}
-		return m, nil
-	case "backspace":
-		if len(m.search.filterInput) > 0 {
-			m.search.filterInput = m.search.filterInput[:len(m.search.filterInput)-1]
-			m.updateFilteredFiles()
-		}
-		return m, nil
-	default:
-		if msg.Text != "" {
-			m.search.filterInput += msg.Text
-			m.updateFilteredFiles()
-		}
-		return m, nil
-	}
-}
-
-func (m *Model) updateFilteredFiles() {
-	m.search.filterFiles = nil
-	m.search.filterCursor = 0
-	query := strings.ToLower(m.search.filterInput)
-	for i, f := range m.files {
-		// Respect active narrowing filters
-		if !m.filter.isIncluded(i) {
-			continue
-		}
-		if query == "" || strings.Contains(strings.ToLower(f.Path), query) {
-			m.search.filterFiles = append(m.search.filterFiles, i)
-		}
-	}
-}
 
 func (m Model) allFileIndices() []int {
 	var indices []int
@@ -1049,56 +938,23 @@ func (m Model) allFileIndices() []int {
 
 // --- Inline comment key handling ---
 
-func (m Model) handleInlineKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	// When mention autocomplete is active, intercept navigation keys
-	if m.comments.mentionActive {
-		result, cmd, consumed := m.handleMentionKey(msg)
-		if consumed {
-			return result, cmd
-		}
-		// esc in mention mode just closes the dropdown; don't also close the editor
-		// (already handled above since esc is consumed by handleMentionKey)
-	}
+// handleInlineEditorKey delegates key events to the InlineEditor and handles
+// any outbound messages.
+func (m Model) handleInlineEditorKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	e, cmd, outMsg := m.editor.HandleKey(msg)
+	m.editor = e
 
-	switch {
-	case key.Matches(msg, inlineKeys.Cancel):
-		if m.comments.inlineTextarea.Value() != "" && !m.comments.confirmDiscard {
-			m.comments.confirmDiscard = true
-			return m, nil
-		}
+	switch msg := outMsg.(type) {
+	case inlineEditorSaveMsg:
+		return m.handleEditorSave(msg)
+	case inlineEditorCancelMsg:
 		m.closeInlineComment()
 		return m, nil
-
-	case key.Matches(msg, inlineKeys.Save):
-		return m.saveInlineComment()
-
-	case key.Matches(msg, inlineKeys.ToggleMode):
-		if m.comments.inlineMode == commentModeComment {
-			m.comments.inlineMode = commentModeSuggestion
-			if m.comments.inlineSuggestion != "" && m.comments.inlineTextarea.Value() == "" {
-				m.comments.inlineTextarea.SetValue(m.comments.inlineSuggestion)
-			}
-		} else {
-			m.comments.inlineMode = commentModeComment
-		}
-		return m, nil
-
-	case key.Matches(msg, inlineKeys.OpenEditor):
+	case inlineEditorOpenEditorMsg:
 		return m, m.openExternalEditorForComment()
-
-	case key.Matches(msg, inlineKeys.PasteImage):
+	case inlineEditorPasteImageMsg:
 		return m, checkClipboardImageCmd
 	}
-
-	// Any other key resets the discard confirmation
-	m.comments.confirmDiscard = false
-
-	// Forward to textarea
-	var cmd tea.Cmd
-	m.comments.inlineTextarea, cmd = m.comments.inlineTextarea.Update(msg)
-
-	// After textarea processes the key, check for @ mention trigger
-	m.updateMentionState()
 
 	return m, cmd
 }

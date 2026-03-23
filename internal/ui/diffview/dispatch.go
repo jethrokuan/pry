@@ -55,12 +55,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	m.flashMsg = ""
 
 	switch m.activeMode() {
-	case modeGoto:
-		return m.handleGotoKey(msg)
-	case modeSearch:
-		return m.handleSearchKey(msg)
-	case modeFilter:
-		return m.handleFilterKey(msg)
+	case modeGoto, modeSearch, modeFilter:
+		return m.handleSearchBarKey(msg)
 	case modeNarrowRegex:
 		return m.handleNarrowRegexKey(msg)
 	case modeNarrowPrefix:
@@ -169,8 +165,8 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 		return m, tea.Quit
 	case key.Matches(msg, keys.Back):
-		if m.search.query != "" {
-			m.search.query = ""
+		if m.search.Query() != "" {
+			m.search.ClearQuery()
 			m.updateDiffContent()
 			return m, nil
 		}

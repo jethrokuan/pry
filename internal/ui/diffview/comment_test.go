@@ -201,7 +201,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 				Path: "a.go", Line: 10, Side: "RIGHT", Body: "local pending",
 			})
 
-			m.rebuildCommentIndex()
+			m.comments.RebuildIndex(m.pendingReview.Comments)
 
 			// Existing + forge on same key
 			existing := m.comments.existingIndex[commentIndexKey("a.go", 10, "RIGHT")]
@@ -228,7 +228,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 
 			// Remove via the review directly, then rebuild
 			m.pendingReview.Comments = nil
-			m.rebuildCommentIndex()
+			m.comments.RebuildIndex(m.pendingReview.Comments)
 
 			gomega.Expect(m.comments.localPendingIndex[commentIndexKey("old.go", 1, "RIGHT")]).To(gomega.BeEmpty())
 			gomega.Expect(m.comments.fileCommentIndex["old.go"]).To(gomega.BeFalse())
@@ -270,11 +270,11 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 				{ID: 2, Path: "f.go", Line: 10, Side: "LEFT", Body: "left"},
 			})
 
-			right := m.commentsForLine("f.go", 10, "RIGHT")
+			right := m.comments.CommentsForLine("f.go", 10, "RIGHT")
 			gomega.Expect(right).To(gomega.HaveLen(1))
 			gomega.Expect(right[0].Body).To(gomega.Equal("right"))
 
-			left := m.commentsForLine("f.go", 10, "LEFT")
+			left := m.comments.CommentsForLine("f.go", 10, "LEFT")
 			gomega.Expect(left).To(gomega.HaveLen(1))
 			gomega.Expect(left[0].Body).To(gomega.Equal("left"))
 		})
@@ -285,12 +285,12 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 				{ID: 2, Path: "f.go", Line: 10, Side: "RIGHT", Body: "right"},
 			})
 
-			right := m.commentsForLine("f.go", 10, "RIGHT")
+			right := m.comments.CommentsForLine("f.go", 10, "RIGHT")
 			gomega.Expect(right).To(gomega.HaveLen(2))
 		})
 
 		ginkgo.It("returns nil for lines with no comments", func() {
-			result := m.commentsForLine("f.go", 999, "RIGHT")
+			result := m.comments.CommentsForLine("f.go", 999, "RIGHT")
 			gomega.Expect(result).To(gomega.BeEmpty())
 		})
 	})
@@ -304,7 +304,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 				Path: "f.go", Line: 20, Side: "RIGHT", Body: "other line",
 			})
 
-			result := m.localPendingForLine("f.go", 10, "RIGHT")
+			result := m.comments.LocalPendingForLine("f.go", 10, "RIGHT")
 			gomega.Expect(result).To(gomega.HaveLen(1))
 			gomega.Expect(result[0].Body).To(gomega.Equal("pending"))
 		})
