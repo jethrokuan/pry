@@ -104,7 +104,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// View renders the flash stack. Newer items appear first (top).
+// View renders the flash stack as a styled overlay box.
 // Returns empty string when there are no flashes.
 func (m Model) View() string {
 	if len(m.items) == 0 {
@@ -118,18 +118,29 @@ func (m Model) View() string {
 		var rendered string
 		switch it.Style {
 		case StyleSpinner:
-			rendered = lipgloss.NewStyle().Foreground(styles.Muted).Render(
-				m.spinner.View() + " " + it.Text,
-			)
+			rendered = m.spinner.View() + " " + it.Text
 		case StyleSuccess:
-			rendered = lipgloss.NewStyle().Foreground(styles.Success).Render(it.Text)
+			rendered = lipgloss.NewStyle().Foreground(styles.Success).Bold(true).Render(it.Text)
 		default:
-			rendered = lipgloss.NewStyle().Foreground(styles.Muted).Render(it.Text)
+			rendered = it.Text
 		}
 		lines[ri] = rendered
 	}
 
-	return strings.Join(lines, "\n")
+	content := strings.Join(lines, "\n")
+
+	// Wrap in a styled overlay box.
+	box := lipgloss.NewStyle().
+		Background(styles.BgSelected).
+		Foreground(lipgloss.BrightWhite).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.Info).
+		BorderBackground(styles.BgSelected).
+		Padding(0, 2).
+		Bold(true).
+		Render(content)
+
+	return box
 }
 
 // Empty returns true when there are no flash messages.

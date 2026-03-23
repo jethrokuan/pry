@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -347,25 +346,24 @@ func (m Model) View() tea.View {
 		content = m.submit.View()
 	}
 
-	// Overlay flash messages on the second-to-last line (above footer).
+	// Overlay flash messages using Canvas compositing.
 	if !m.flash.Empty() {
 		flashView := m.flash.View()
-		flashHeight := lipgloss.Height(flashView)
-		lines := strings.Split(content, "\n")
-		// Insert flash lines just before the last line (footer).
-		if len(lines) > 1 {
-			insertAt := len(lines) - 1 - flashHeight
-			if insertAt < 0 {
-				insertAt = 0
-			}
-			flashLines := strings.Split(flashView, "\n")
-			for i, fl := range flashLines {
-				if insertAt+i < len(lines) {
-					lines[insertAt+i] = fl
-				}
-			}
-			content = strings.Join(lines, "\n")
+		flashW := lipgloss.Width(flashView)
+
+		// Top-right corner with 1 cell padding from edge.
+		x := m.width - flashW - 1
+		if x < 0 {
+			x = 0
 		}
+		y := 1
+		if y < 0 {
+			y = 0
+		}
+
+		base := lipgloss.NewLayer(content)
+		overlay := lipgloss.NewLayer(flashView).X(x).Y(y).Z(1)
+		content = lipgloss.NewCompositor(base, overlay).Render()
 	}
 
 	v := tea.NewView(content)
