@@ -46,7 +46,7 @@ func (m *Model) onTreeCursorChanged() {
 		if row.node.fileIdx >= 0 {
 			m.nav.fileCursor = row.node.fileIdx
 			m.nav.buildDiffLines(m.files)
-			m.nav.diffCursor = 0
+			m.nav.cursor = CursorTarget{Kind: CursorLine}
 			m.updateDiffContent()
 		} else {
 			// On a folder — just refresh the tree rendering (cursor highlight)
@@ -65,7 +65,7 @@ func (m Model) handleTreeEnter() (Model, tea.Cmd) {
 	if row.node.fileIdx >= 0 {
 		// File: focus diff pane
 		m.nav.focus = FocusDiff
-		m.nav.diffCursor = 0
+		m.nav.cursor = CursorTarget{Kind: CursorLine}
 		m.nav.diffViewport.GotoTop()
 		m.updateDiffContent()
 	} else {
@@ -171,11 +171,11 @@ func (m Model) toggleFoldAtDiffCursor() Model {
 	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
 		return m
 	}
-	if m.nav.diffCursor >= len(m.nav.diffLines) {
+	if m.nav.cursor.LineIdx >= len(m.nav.diffLines) {
 		return m
 	}
 
-	dl := m.nav.diffLines[m.nav.diffCursor]
+	dl := m.nav.diffLines[m.nav.cursor.LineIdx]
 	path := m.files[m.nav.fileCursor].Path
 
 	// If it's a collapsed hunk placeholder, expand it
@@ -197,8 +197,8 @@ func (m Model) toggleFoldAtDiffCursor() Model {
 	m.nav.collapsedHunks[hk] = true
 	m.nav.buildDiffLines(m.files)
 	// Clamp cursor if it's now past the end
-	if m.nav.diffCursor >= len(m.nav.diffLines) {
-		m.nav.diffCursor = len(m.nav.diffLines) - 1
+	if m.nav.cursor.LineIdx >= len(m.nav.diffLines) {
+		m.nav.cursor.LineIdx = len(m.nav.diffLines) - 1
 	}
 	m.updateDiffContent()
 	return m
@@ -206,7 +206,7 @@ func (m Model) toggleFoldAtDiffCursor() Model {
 
 // toggleAllFolds toggles all comment folds and hunk folds for the current file.
 func (m Model) toggleAllFolds() Model {
-	m.comments.cursor = -1
+	m.nav.cursor = m.nav.cursor.AsLine()
 
 	// Check if anything is expanded (comments or hunks)
 	anyCommentExpanded := false
@@ -260,11 +260,11 @@ func (m Model) toggleAllFolds() Model {
 	}
 
 	m.nav.buildDiffLines(m.files)
-	if m.nav.diffCursor >= len(m.nav.diffLines) {
-		m.nav.diffCursor = len(m.nav.diffLines) - 1
+	if m.nav.cursor.LineIdx >= len(m.nav.diffLines) {
+		m.nav.cursor.LineIdx = len(m.nav.diffLines) - 1
 	}
-	if m.nav.diffCursor < 0 {
-		m.nav.diffCursor = 0
+	if m.nav.cursor.LineIdx < 0 {
+		m.nav.cursor.LineIdx = 0
 	}
 	m.updateDiffContent()
 	return m
@@ -311,66 +311,55 @@ func (m *Model) moveToPrevFile() tea.Cmd {
 func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Up):
-		if m.nav.diffCursor > 0 {
-			// Check if previous line has expanded comments → enter from bottom
-			if !m.nav.visualMode {
-				prevRefs := m.commentRefsAtLine(m.nav.diffCursor - 1)
-				if len(prevRefs) > 0 {
-					m.nav.diffCursor--
-					m.comments.cursor = len(prevRefs) - 1
-					m.syncViewportToCursor()
-					return m, nil
-				}
-			}
-			m.nav.diffCursor--
+		if m.nav.cursor.LineIdx > 0 {
+			m.nav.cursor.LineIdx--
 			if m.nav.visualMode {
-				m.nav.visualEnd = m.nav.diffCursor
+				m.nav.visualEnd = m.nav.cursor.LineIdx
 			}
 			m.syncViewportToCursor()
 		}
 	case key.Matches(msg, keys.Down):
-		// Enter comment selection if current line has expanded comments
-		if !m.nav.visualMode {
-			refs := m.commentRefsAtCursor()
-			if len(refs) > 0 {
-				m.comments.cursor = 0
-				m.updateDiffContent()
-				return m, nil
-			}
-		}
-		if m.nav.diffCursor < len(m.nav.diffLines)-1 {
-			m.nav.diffCursor++
+		if m.nav.cursor.LineIdx < len(m.nav.diffLines)-1 {
+			m.nav.cursor.LineIdx++
 			if m.nav.visualMode {
-				m.nav.visualEnd = m.nav.diffCursor
+				m.nav.visualEnd = m.nav.cursor.LineIdx
 			}
 			m.syncViewportToCursor()
 		}
 	case key.Matches(msg, keys.PageUp):
-		m.nav.diffCursor -= m.nav.diffViewport.Height() / 2
-		if m.nav.diffCursor < 0 {
-			m.nav.diffCursor = 0
+		m.nav.cursor.LineIdx -= m.nav.diffViewport.Height() / 2
+		if m.nav.cursor.LineIdx < 0 {
+			m.nav.cursor.LineIdx = 0
 		}
 		if m.nav.visualMode {
-			m.nav.visualEnd = m.nav.diffCursor
+			m.nav.visualEnd = m.nav.cursor.LineIdx
 		}
 		m.syncViewportToCursor()
 	case key.Matches(msg, keys.PageDown):
-		m.nav.diffCursor += m.nav.diffViewport.Height() / 2
-		if m.nav.diffCursor >= len(m.nav.diffLines) {
-			m.nav.diffCursor = len(m.nav.diffLines) - 1
+		m.nav.cursor.LineIdx += m.nav.diffViewport.Height() / 2
+		if m.nav.cursor.LineIdx >= len(m.nav.diffLines) {
+			m.nav.cursor.LineIdx = len(m.nav.diffLines) - 1
 		}
 		if m.nav.visualMode {
-			m.nav.visualEnd = m.nav.diffCursor
+			m.nav.visualEnd = m.nav.cursor.LineIdx
 		}
 		m.syncViewportToCursor()
 
-	// Context-dependent Enter: create comment on empty line, open popup on commented line
+	// Context-dependent Enter: enter comment select on commented line, create comment on empty line
 	case key.Matches(msg, keys.Enter):
-		if len(m.files) > 0 && m.nav.diffCursor < len(m.nav.diffLines) {
+		if len(m.files) > 0 && m.nav.cursor.LineIdx < len(m.nav.diffLines) {
 			path := m.files[m.nav.fileCursor].Path
-			dl := m.nav.diffLines[m.nav.diffCursor]
+			dl := m.nav.diffLines[m.nav.cursor.LineIdx]
 			if m.lineHasComments(path, dl) {
-				m.openCommentPopup()
+				// Expand the comment block and enter comment select mode
+				if dl.newLine > 0 {
+					m.comments.expanded[commentKey(path, dl.newLine)] = true
+				}
+				if dl.oldLine > 0 {
+					m.comments.expanded[commentKey(path, dl.oldLine)] = true
+				}
+				m.nav.cursor = CursorTarget{Kind: CursorComment, LineIdx: m.nav.cursor.LineIdx, CommentIdx: 0}
+				m.updateDiffContent()
 				return m, nil
 			}
 		}
@@ -459,7 +448,7 @@ func (m *Model) navigateFile(forward, unviewedOnly bool) tea.Cmd {
 	oldIdx := m.nav.fileCursor
 	m.nav.fileCursor = idx
 	m.nav.buildDiffLines(m.files)
-	m.nav.diffCursor = 0
+	m.nav.cursor = CursorTarget{Kind: CursorLine}
 	m.nav.diffViewport.GotoTop()
 	m.updateDiffContent()
 	m.autoFollowFile(oldIdx, m.nav.fileCursor)
@@ -516,13 +505,13 @@ func (m *Model) navigateComment(forward, crossFile bool) tea.Cmd {
 		return m.navigateCommentToFile(forward)
 	}
 	n := len(m.nav.diffLines)
-	start := m.nav.diffCursor
+	start := m.nav.cursor.LineIdx
 	path := m.files[m.nav.fileCursor].Path
 	idx := cyclicSearch(start, n, forward, func(i int) bool {
 		return m.lineHasComments(path, m.nav.diffLines[i])
 	})
 	if idx >= 0 {
-		m.nav.diffCursor = idx
+		m.nav.cursor.LineIdx = idx
 		m.expandAndSelectComment(idx)
 		m.syncViewportToCursorWithComments()
 		wrapped := (forward && idx <= start) || (!forward && idx >= start)
@@ -570,8 +559,8 @@ func (m *Model) navigateCommentToFile(forward bool) tea.Cmd {
 		return m.setFlash("No comments found")
 	}
 	// m.nav.fileCursor and diffLines are already set to the found file by the match function
-	m.nav.diffCursor = m.findCommentedDiffLine(m.files[idx].Path, forward)
-	m.expandAndSelectComment(m.nav.diffCursor)
+	m.nav.cursor.LineIdx = m.findCommentedDiffLine(m.files[idx].Path, forward)
+	m.expandAndSelectComment(m.nav.cursor.LineIdx)
 	m.nav.diffViewport.GotoTop()
 	m.updateDiffContent()
 	m.autoFollowFile(oldIdx, m.nav.fileCursor)
@@ -586,12 +575,12 @@ func (m *Model) navigateCommentToFile(forward bool) tea.Cmd {
 	return nil
 }
 
-// expandAndSelectComment expands the comment block at the given cursor and selects the first comment.
-func (m *Model) expandAndSelectComment(cursor int) {
-	if cursor < 0 || cursor >= len(m.nav.diffLines) || len(m.files) == 0 {
+// expandAndSelectComment expands the comment block at the given line index and enters comment select mode.
+func (m *Model) expandAndSelectComment(lineIdx int) {
+	if lineIdx < 0 || lineIdx >= len(m.nav.diffLines) || len(m.files) == 0 {
 		return
 	}
-	dl := m.nav.diffLines[cursor]
+	dl := m.nav.diffLines[lineIdx]
 	path := m.files[m.nav.fileCursor].Path
 	if dl.newLine > 0 {
 		m.comments.expanded[commentKey(path, dl.newLine)] = true
@@ -599,7 +588,7 @@ func (m *Model) expandAndSelectComment(cursor int) {
 	if dl.oldLine > 0 {
 		m.comments.expanded[commentKey(path, dl.oldLine)] = true
 	}
-	m.comments.cursor = 0
+	m.nav.cursor = CursorTarget{Kind: CursorComment, LineIdx: lineIdx, CommentIdx: 0}
 }
 
 // findCommentedDiffLine returns the index of the first (forward=true) or last (forward=false)
@@ -628,12 +617,12 @@ func (m *Model) navigateHunk(forward bool) tea.Cmd {
 	if len(m.nav.diffLines) == 0 {
 		return m.navigateHunkCrossFile(forward)
 	}
-	currentHunk := m.nav.diffLines[m.nav.diffCursor].hunkIdx
+	currentHunk := m.nav.diffLines[m.nav.cursor.LineIdx].hunkIdx
 
 	if forward {
-		for i := m.nav.diffCursor + 1; i < len(m.nav.diffLines); i++ {
+		for i := m.nav.cursor.LineIdx + 1; i < len(m.nav.diffLines); i++ {
 			if m.nav.diffLines[i].hunkIdx != currentHunk {
-				m.nav.diffCursor = i
+				m.nav.cursor.LineIdx = i
 				m.syncViewportToCursor()
 				return nil
 			}
@@ -643,13 +632,13 @@ func (m *Model) navigateHunk(forward bool) tea.Cmd {
 	}
 
 	// First, go to start of current hunk
-	startOfCurrent := m.nav.diffCursor
+	startOfCurrent := m.nav.cursor.LineIdx
 	for startOfCurrent > 0 && m.nav.diffLines[startOfCurrent-1].hunkIdx == currentHunk {
 		startOfCurrent--
 	}
-	if startOfCurrent < m.nav.diffCursor {
+	if startOfCurrent < m.nav.cursor.LineIdx {
 		// We weren't at the start — go there
-		m.nav.diffCursor = startOfCurrent
+		m.nav.cursor.LineIdx = startOfCurrent
 		m.syncViewportToCursor()
 		return nil
 	}
@@ -658,7 +647,7 @@ func (m *Model) navigateHunk(forward bool) tea.Cmd {
 		prevHunk := m.nav.diffLines[startOfCurrent-1].hunkIdx
 		for i := startOfCurrent - 1; i >= 0; i-- {
 			if i == 0 || m.nav.diffLines[i-1].hunkIdx != prevHunk {
-				m.nav.diffCursor = i
+				m.nav.cursor.LineIdx = i
 				m.syncViewportToCursor()
 				return nil
 			}
@@ -685,14 +674,14 @@ func (m *Model) navigateHunkCrossFile(forward bool) tea.Cmd {
 	m.nav.fileCursor = nextIdx
 	m.nav.buildDiffLines(m.files)
 	if forward {
-		m.nav.diffCursor = 0
+		m.nav.cursor = CursorTarget{Kind: CursorLine}
 	} else {
 		// Go to last hunk's start
 		if len(m.nav.diffLines) > 0 {
 			lastHunk := m.nav.diffLines[len(m.nav.diffLines)-1].hunkIdx
 			for i := len(m.nav.diffLines) - 1; i >= 0; i-- {
 				if i == 0 || m.nav.diffLines[i-1].hunkIdx != lastHunk {
-					m.nav.diffCursor = i
+					m.nav.cursor.LineIdx = i
 					break
 				}
 			}
@@ -763,7 +752,7 @@ func (m *Model) jumpToLine(lineNum int) {
 	m.nav.pushJump()
 	for i, dl := range m.nav.diffLines {
 		if dl.newLine == lineNum || dl.oldLine == lineNum {
-			m.nav.diffCursor = i
+			m.nav.cursor = CursorTarget{Kind: CursorLine, LineIdx: i}
 			m.syncViewportToCursor()
 			return
 		}
@@ -805,17 +794,17 @@ func (m Model) handleSearchKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 func (m *Model) jumpToNextSearchMatch() tea.Cmd {
 	m.nav.pushJump()
 	query := strings.ToLower(m.search.query)
-	for i := m.nav.diffCursor + 1; i < len(m.nav.diffLines); i++ {
+	for i := m.nav.cursor.LineIdx + 1; i < len(m.nav.diffLines); i++ {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
-			m.nav.diffCursor = i
+			m.nav.cursor.LineIdx = i
 			m.syncViewportToCursor()
 			return nil
 		}
 	}
 	// Wrap around
-	for i := 0; i <= m.nav.diffCursor; i++ {
+	for i := 0; i <= m.nav.cursor.LineIdx; i++ {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
-			m.nav.diffCursor = i
+			m.nav.cursor.LineIdx = i
 			m.syncViewportToCursor()
 			return m.setFlash("Wrapped to first match")
 		}
@@ -826,17 +815,17 @@ func (m *Model) jumpToNextSearchMatch() tea.Cmd {
 func (m *Model) jumpToPrevSearchMatch() tea.Cmd {
 	m.nav.pushJump()
 	query := strings.ToLower(m.search.query)
-	for i := m.nav.diffCursor - 1; i >= 0; i-- {
+	for i := m.nav.cursor.LineIdx - 1; i >= 0; i-- {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
-			m.nav.diffCursor = i
+			m.nav.cursor.LineIdx = i
 			m.syncViewportToCursor()
 			return nil
 		}
 	}
 	// Wrap around
-	for i := len(m.nav.diffLines) - 1; i >= m.nav.diffCursor; i-- {
+	for i := len(m.nav.diffLines) - 1; i >= m.nav.cursor.LineIdx; i-- {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
-			m.nav.diffCursor = i
+			m.nav.cursor.LineIdx = i
 			m.syncViewportToCursor()
 			return m.setFlash("Wrapped to last match")
 		}
@@ -935,12 +924,12 @@ func (m *Model) applyJumpPos(pos jumpPos) {
 		m.nav.buildDiffLines(m.files)
 		m.autoFollowFile(oldIdx, m.nav.fileCursor)
 	}
-	m.nav.diffCursor = pos.diffCursor
-	if m.nav.diffCursor >= len(m.nav.diffLines) {
-		m.nav.diffCursor = len(m.nav.diffLines) - 1
+	m.nav.cursor = CursorTarget{Kind: CursorLine, LineIdx: pos.lineIdx}
+	if m.nav.cursor.LineIdx >= len(m.nav.diffLines) {
+		m.nav.cursor.LineIdx = len(m.nav.diffLines) - 1
 	}
-	if m.nav.diffCursor < 0 {
-		m.nav.diffCursor = 0
+	if m.nav.cursor.LineIdx < 0 {
+		m.nav.cursor.LineIdx = 0
 	}
 	m.updateDiffContent()
 	m.syncViewportToCursor()
@@ -978,7 +967,7 @@ func (m *Model) applyFilters() {
 			m.nav.fileCursor = 0
 		}
 		m.nav.buildDiffLines(m.files)
-		m.nav.diffCursor = 0
+		m.nav.cursor = CursorTarget{Kind: CursorLine}
 	}
 
 	m.nav.syncTreeCursorToFileCursor()
@@ -996,7 +985,7 @@ func (m Model) handleFilterKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			oldIdx := m.nav.fileCursor
 			m.nav.fileCursor = m.search.filterFiles[m.search.filterCursor]
 			m.nav.buildDiffLines(m.files)
-			m.nav.diffCursor = 0
+			m.nav.cursor = CursorTarget{Kind: CursorLine}
 			m.nav.diffViewport.GotoTop()
 			m.updateDiffContent()
 			m.autoFollowFile(oldIdx, m.nav.fileCursor)

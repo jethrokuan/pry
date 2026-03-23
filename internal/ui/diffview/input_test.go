@@ -169,38 +169,38 @@ var _ = ginkgo.Describe("Input Handling", func() {
 		ginkgo.It("should move diff cursor down with j key", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
-			m.nav.diffCursor = 0
+			m.nav.cursor.LineIdx = 0
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.nav.diffCursor).To(gomega.Equal(1))
+			gomega.Expect(m.nav.cursor.LineIdx).To(gomega.Equal(1))
 		})
 
 		ginkgo.It("should move diff cursor up with k key", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
-			m.nav.diffCursor = 2
+			m.nav.cursor.LineIdx = 2
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
-			gomega.Expect(m.nav.diffCursor).To(gomega.Equal(1))
+			gomega.Expect(m.nav.cursor.LineIdx).To(gomega.Equal(1))
 		})
 
 		ginkgo.It("should not move diff cursor below last line", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
 			lastIdx := len(m.nav.diffLines) - 1
-			m.nav.diffCursor = lastIdx
+			m.nav.cursor.LineIdx = lastIdx
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.nav.diffCursor).To(gomega.Equal(lastIdx))
+			gomega.Expect(m.nav.cursor.LineIdx).To(gomega.Equal(lastIdx))
 		})
 
 		ginkgo.It("should not move diff cursor above first line", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
-			m.nav.diffCursor = 0
+			m.nav.cursor.LineIdx = 0
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
-			gomega.Expect(m.nav.diffCursor).To(gomega.Equal(0))
+			gomega.Expect(m.nav.cursor.LineIdx).To(gomega.Equal(0))
 		})
 
 		ginkgo.It("should activate search with / key", func() {
@@ -266,7 +266,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'f'})
 			gomega.Expect(m.nav.fileCursor).To(gomega.Equal(1))
-			gomega.Expect(m.nav.diffCursor).To(gomega.Equal(0), "diff cursor should reset to 0")
+			gomega.Expect(m.nav.cursor.LineIdx).To(gomega.Equal(0), "diff cursor should reset to 0")
 		})
 
 		ginkgo.It("should navigate to previous file with F key", func() {
@@ -294,11 +294,11 @@ var _ = ginkgo.Describe("Input Handling", func() {
 		ginkgo.It("should navigate to next hunk with h key", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
-			m.nav.diffCursor = 0
+			m.nav.cursor.LineIdx = 0
 			// First file has two hunks. Cursor starts in hunk 0.
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'h'})
-			gomega.Expect(m.nav.diffLines[m.nav.diffCursor].hunkIdx).To(gomega.Equal(1))
+			gomega.Expect(m.nav.diffLines[m.nav.cursor.LineIdx].hunkIdx).To(gomega.Equal(1))
 		})
 
 		ginkgo.It("should navigate to previous hunk with H key", func() {
@@ -307,16 +307,16 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			// Start at the second hunk
 			for i, dl := range m.nav.diffLines {
 				if dl.hunkIdx == 1 {
-					m.nav.diffCursor = i + 1 // somewhere inside hunk 1
+					m.nav.cursor.LineIdx = i + 1 // somewhere inside hunk 1
 					break
 				}
 			}
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'H'})
 			// Should go to start of hunk 1
-			gomega.Expect(m.nav.diffLines[m.nav.diffCursor].hunkIdx).To(gomega.Equal(1))
+			gomega.Expect(m.nav.diffLines[m.nav.cursor.LineIdx].hunkIdx).To(gomega.Equal(1))
 			// Should be at the first line of hunk 1
-			isFirstOfHunk := m.nav.diffCursor == 0 || m.nav.diffLines[m.nav.diffCursor-1].hunkIdx != 1
+			isFirstOfHunk := m.nav.cursor.LineIdx == 0 || m.nav.diffLines[m.nav.cursor.LineIdx-1].hunkIdx != 1
 			gomega.Expect(isFirstOfHunk).To(gomega.BeTrue())
 		})
 	})
@@ -325,7 +325,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 		ginkgo.It("should extend visual selection when moving down", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
-			m.nav.diffCursor = 1
+			m.nav.cursor.LineIdx = 1
 			m.nav.visualMode = true
 			m.nav.visualStart = 1
 			m.nav.visualEnd = 1
@@ -339,7 +339,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 		ginkgo.It("should extend visual selection when moving up", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
-			m.nav.diffCursor = 3
+			m.nav.cursor.LineIdx = 3
 			m.nav.visualMode = true
 			m.nav.visualStart = 3
 			m.nav.visualEnd = 3
@@ -418,8 +418,8 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			gomega.Expect(m.search.gotoActive).To(gomega.BeFalse())
 			// Cursor should be on a line with newLine or oldLine == 3
-			if m.nav.diffCursor < len(m.nav.diffLines) {
-				dl := m.nav.diffLines[m.nav.diffCursor]
+			if m.nav.cursor.LineIdx < len(m.nav.diffLines) {
+				dl := m.nav.diffLines[m.nav.cursor.LineIdx]
 				gomega.Expect(dl.newLine == 3 || dl.oldLine == 3).To(gomega.BeTrue())
 			}
 		})
@@ -589,7 +589,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 		ginkgo.It("should collapse a hunk in diff focus", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
-			m.nav.diffCursor = 0
+			m.nav.cursor.LineIdx = 0
 			linesBefore := len(m.nav.diffLines)
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
@@ -608,7 +608,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			hk := hunkKey(m.files[0].Path, 0)
 			m.nav.collapsedHunks[hk] = true
 			m.nav.buildDiffLines(m.files)
-			m.nav.diffCursor = 0
+			m.nav.cursor.LineIdx = 0
 
 			linesBefore := len(m.nav.diffLines)
 			gomega.Expect(m.nav.diffLines[0].collapsed).To(gomega.BeTrue())
@@ -667,11 +667,11 @@ var _ = ginkgo.Describe("Input Handling", func() {
 		ginkgo.It("should prioritize goto mode over diff keys", func() {
 			m := newInputTestModel()
 			m.search.gotoActive = true
-			oldCursor := m.nav.diffCursor
+			oldCursor := m.nav.cursor.LineIdx
 
 			// 'j' in goto mode should not move diff cursor
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-			gomega.Expect(m.nav.diffCursor).To(gomega.Equal(oldCursor))
+			gomega.Expect(m.nav.cursor.LineIdx).To(gomega.Equal(oldCursor))
 		})
 
 		ginkgo.It("should prioritize search mode over diff keys", func() {
@@ -700,10 +700,10 @@ var _ = ginkgo.Describe("Input Handling", func() {
 		ginkgo.It("should ignore keypresses when loading", func() {
 			m := newInputTestModel()
 			m.loading = true
-			oldCursor := m.nav.diffCursor
+			oldCursor := m.nav.cursor.LineIdx
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.nav.diffCursor).To(gomega.Equal(oldCursor))
+			gomega.Expect(m.nav.cursor.LineIdx).To(gomega.Equal(oldCursor))
 		})
 	})
 
@@ -761,19 +761,19 @@ var _ = ginkgo.Describe("Input Handling", func() {
 		ginkgo.It("should deselect comment and return to diff on esc", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
-			m.comments.cursor = 1
+			m.nav.cursor = CursorTarget{Kind: CursorComment, LineIdx: 0, CommentIdx: 1}
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-			gomega.Expect(m.comments.cursor).To(gomega.Equal(-1))
+			gomega.Expect(m.nav.cursor.Kind).To(gomega.Equal(CursorLine))
 		})
 
 		ginkgo.It("should deselect comment when pressing up past first comment", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
-			m.comments.cursor = 0
+			m.nav.cursor = CursorTarget{Kind: CursorComment, LineIdx: 0, CommentIdx: 0}
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
-			gomega.Expect(m.comments.cursor).To(gomega.Equal(-1))
+			gomega.Expect(m.nav.cursor.Kind).To(gomega.Equal(CursorLine))
 		})
 	})
 })

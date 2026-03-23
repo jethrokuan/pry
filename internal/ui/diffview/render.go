@@ -237,8 +237,8 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 
 	// Determine which hunk is active (contains the cursor)
 	activeHunkIdx := -1
-	if m.nav.focus == FocusDiff && len(m.nav.diffLines) > 0 && m.nav.diffCursor < len(m.nav.diffLines) {
-		activeHunkIdx = m.nav.diffLines[m.nav.diffCursor].hunkIdx
+	if m.nav.focus == FocusDiff && len(m.nav.diffLines) > 0 && m.nav.cursor.LineIdx < len(m.nav.diffLines) {
+		activeHunkIdx = m.nav.diffLines[m.nav.cursor.LineIdx].hunkIdx
 	}
 
 	hunkIndex := 0
@@ -266,7 +266,7 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 
 		if isCollapsed {
 			// Render a single selectable placeholder line for the collapsed hunk
-			isCurrent := m.nav.focus == FocusDiff && lineIdx == m.nav.diffCursor
+			isCurrent := m.nav.focus == FocusDiff && lineIdx == m.nav.cursor.LineIdx
 			summary := fmt.Sprintf("  ⋯ %d lines hidden [tab to expand]", len(hunk.Lines))
 			if isCurrent {
 				foldBg := lipgloss.NewStyle().Background(cursorBg)
@@ -286,7 +286,7 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 		}
 
 		for _, line := range hunk.Lines {
-			isCurrent := m.nav.focus == FocusDiff && lineIdx == m.nav.diffCursor
+			isCurrent := m.nav.focus == FocusDiff && lineIdx == m.nav.cursor.LineIdx
 			isVisualSelected := m.nav.visualMode && m.nav.focus == FocusDiff &&
 				lineIdx >= min(m.nav.visualStart, m.nav.visualEnd) &&
 				lineIdx <= max(m.nav.visualStart, m.nav.visualEnd)
@@ -399,8 +399,8 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 			commentSelBase := 0
 			renderSideComments := func(lineNum int, side string) {
 				sel := -1
-				if isCurrent && m.comments.cursor >= 0 {
-					sel = m.comments.cursor - commentSelBase
+				if isCurrent && m.nav.cursor.IsComment() {
+					sel = m.nav.cursor.CommentIdx - commentSelBase
 				}
 				n := m.renderLineComments(&b, file.Path, lineNum, side, sel)
 				commentSelBase += n
@@ -586,9 +586,9 @@ func (m Model) renderCommentBox() string {
 func (m Model) renderCommentPopup() string {
 	path := ""
 	lineNum := 0
-	if len(m.files) > 0 && m.nav.diffCursor < len(m.nav.diffLines) {
+	if len(m.files) > 0 && m.nav.cursor.LineIdx < len(m.nav.diffLines) {
 		path = m.files[m.nav.fileCursor].Path
-		dl := m.nav.diffLines[m.nav.diffCursor]
+		dl := m.nav.diffLines[m.nav.cursor.LineIdx]
 		if dl.newLine > 0 {
 			lineNum = dl.newLine
 		} else {

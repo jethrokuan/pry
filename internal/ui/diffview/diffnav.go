@@ -12,7 +12,7 @@ import (
 // and file tree navigation state.
 type DiffNav struct {
 	fileCursor   int
-	diffCursor   int
+	cursor       CursorTarget
 	diffViewport viewport.Model
 	treeViewport viewport.Model
 	focus        Focus
@@ -47,7 +47,7 @@ type DiffNav struct {
 // jumpPos records a cursor position for the jump list.
 type jumpPos struct {
 	fileCursor int
-	diffCursor int
+	lineIdx    int // diff line index (always restored as CursorLine)
 }
 
 // buildDiffLines flattens the hunks of the current file into a flat diffLines slice.
@@ -142,7 +142,7 @@ func (n *DiffNav) syncTreeViewportToCursor() {
 // pushJump records the current position in the jump list before a navigation jump.
 // Truncates any forward history if we're not at the head.
 func (n *DiffNav) pushJump() {
-	pos := jumpPos{fileCursor: n.fileCursor, diffCursor: n.diffCursor}
+	pos := jumpPos{fileCursor: n.fileCursor, lineIdx: n.cursor.LineIdx}
 
 	// If we have forward history, truncate it
 	if n.jumpCursor >= 0 && n.jumpCursor < len(n.jumpList)-1 {
@@ -152,7 +152,7 @@ func (n *DiffNav) pushJump() {
 	// Deduplicate: don't push if identical to the last entry
 	if len(n.jumpList) > 0 {
 		last := n.jumpList[len(n.jumpList)-1]
-		if last.fileCursor == pos.fileCursor && last.diffCursor == pos.diffCursor {
+		if last.fileCursor == pos.fileCursor && last.lineIdx == pos.lineIdx {
 			n.jumpCursor = len(n.jumpList) - 1
 			return
 		}

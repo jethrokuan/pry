@@ -332,7 +332,6 @@ func New(svc review.Service, pr *review.PullRequest, opts ...Option) Model {
 		},
 		comments: CommentPanel{
 			expanded: make(map[string]bool),
-			cursor:   -1,
 		},
 	}
 
@@ -702,7 +701,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // --- Viewport helpers ---
 
 func (m *Model) syncViewportToCursor() {
-	rendered := m.renderedLineForCursor(m.nav.diffCursor)
+	rendered := m.renderedLineForCursor(m.nav.cursor.LineIdx)
 	if rendered < m.nav.diffViewport.YOffset() {
 		m.nav.diffViewport.SetYOffset(rendered)
 	} else if rendered >= m.nav.diffViewport.YOffset()+m.nav.diffViewport.Height() {
@@ -715,8 +714,8 @@ func (m *Model) syncViewportToCursor() {
 // block in the viewport. If the combined block is taller than the viewport,
 // it places the cursor line at the top instead.
 func (m *Model) syncViewportToCursorWithComments() {
-	rendered := m.renderedLineForCursor(m.nav.diffCursor)
-	commentHeight := m.commentBlockHeight(m.nav.diffCursor)
+	rendered := m.renderedLineForCursor(m.nav.cursor.LineIdx)
+	commentHeight := m.commentBlockHeight(m.nav.cursor.LineIdx)
 
 	// Total height of the diff line (1) + its comment block.
 	totalHeight := 1 + commentHeight
@@ -902,7 +901,7 @@ func (m *Model) copyForgeLink() tea.Cmd {
 	url := fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", owner, repo, sha, file.Path)
 
 	// Add line anchor
-	if m.nav.diffCursor < len(m.nav.diffLines) {
+	if m.nav.cursor.LineIdx < len(m.nav.diffLines) {
 		if m.nav.visualMode {
 			// Selection active — compute line range
 			startIdx := min(m.nav.visualStart, m.nav.visualEnd)
@@ -918,7 +917,7 @@ func (m *Model) copyForgeLink() tea.Cmd {
 			}
 		} else {
 			// Single line
-			line := m.resolveLineNumber(m.nav.diffCursor)
+			line := m.resolveLineNumber(m.nav.cursor.LineIdx)
 			if line > 0 {
 				url += fmt.Sprintf("#L%d", line)
 			}
@@ -1132,14 +1131,14 @@ func (m Model) View() string {
 	} else if m.filter.regexActive {
 		prompt := lipgloss.NewStyle().Bold(true).Render("Narrow (regex): ")
 		b.WriteString(prompt + m.filter.regexInput + "█")
-	} else if m.comments.cursor >= 0 && m.nav.focus == FocusDiff {
+	} else if m.nav.cursor.IsComment() && m.nav.focus == FocusDiff {
 		// Comment selection mode footer
 		refs := m.commentRefsAtCursor()
 		var helpParts []string
 		helpParts = append(helpParts, "j/k select comment")
 		helpParts = append(helpParts, "enter view all")
 		helpParts = append(helpParts, "r reply")
-		if m.comments.cursor < len(refs) && refs[m.comments.cursor].isLocal {
+		if m.nav.cursor.CommentIdx < len(refs) && refs[m.nav.cursor.CommentIdx].isLocal {
 			helpParts = append(helpParts, "e edit")
 			helpParts = append(helpParts, "d delete")
 		}
@@ -1258,7 +1257,7 @@ func (m Model) currentPosition() (label string, index int, total int) {
 		for i, dl := range m.nav.diffLines {
 			if m.lineHasComments(path, dl) {
 				t++
-				if i == m.nav.diffCursor {
+				if i == m.nav.cursor.LineIdx {
 					p = t
 				}
 			}
@@ -1284,7 +1283,7 @@ func (m Model) currentPosition() (label string, index int, total int) {
 		for i, dl := range m.nav.diffLines {
 			if strings.Contains(strings.ToLower(dl.content), query) {
 				t++
-				if i == m.nav.diffCursor {
+				if i == m.nav.cursor.LineIdx {
 					p = t
 				}
 			}
@@ -1297,8 +1296,8 @@ func (m Model) currentPosition() (label string, index int, total int) {
 		}
 		file := m.files[m.nav.fileCursor]
 		hunkIdx := 0
-		if len(m.nav.diffLines) > 0 && m.nav.diffCursor < len(m.nav.diffLines) {
-			hunkIdx = m.nav.diffLines[m.nav.diffCursor].hunkIdx + 1
+		if len(m.nav.diffLines) > 0 && m.nav.cursor.LineIdx < len(m.nav.diffLines) {
+			hunkIdx = m.nav.diffLines[m.nav.cursor.LineIdx].hunkIdx + 1
 		}
 		return "Hunk", hunkIdx, len(file.Hunks)
 	}

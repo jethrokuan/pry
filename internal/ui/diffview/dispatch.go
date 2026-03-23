@@ -42,7 +42,7 @@ func (m Model) activeMode() inputMode {
 		return modePRInfo
 	case m.comments.popupActive:
 		return modeCommentPopup
-	case m.comments.cursor >= 0 && m.nav.focus == FocusDiff:
+	case m.nav.cursor.IsComment() && m.nav.focus == FocusDiff:
 		return modeCommentSelect
 	default:
 		return modeNormal
@@ -101,30 +101,30 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 
 	switch {
 	case key.Matches(msg, keys.Up):
-		if m.comments.cursor > 0 {
-			m.comments.cursor--
+		if m.nav.cursor.CommentIdx > 0 {
+			m.nav.cursor.CommentIdx--
 			m.updateDiffContent()
 			return m, nil, true
 		}
-		m.comments.cursor = -1
+		m.nav.cursor = m.nav.cursor.AsLine()
 		m.updateDiffContent()
 		return m, nil, true
 	case key.Matches(msg, keys.Down):
 		refs := m.commentRefsAtCursor()
-		if m.comments.cursor < len(refs)-1 {
-			m.comments.cursor++
+		if m.nav.cursor.CommentIdx < len(refs)-1 {
+			m.nav.cursor.CommentIdx++
 			m.updateDiffContent()
 			return m, nil, true
 		}
 		// Past last comment → move to next diff line
-		m.comments.cursor = -1
-		if m.nav.diffCursor < len(m.nav.diffLines)-1 {
-			m.nav.diffCursor++
+		m.nav.cursor = m.nav.cursor.AsLine()
+		if m.nav.cursor.LineIdx < len(m.nav.diffLines)-1 {
+			m.nav.cursor.LineIdx++
 			m.syncViewportToCursor()
 		}
 		return m, nil, true
 	case key.Matches(msg, keys.Back):
-		m.comments.cursor = -1
+		m.nav.cursor = m.nav.cursor.AsLine()
 		m.updateDiffContent()
 		return m, nil, true
 	case key.Matches(msg, keys.Enter):
@@ -134,14 +134,14 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 
 	switch {
 	case key.Matches(msg, keys.Reply):
-		m.comments.cursor = -1
+		m.nav.cursor = m.nav.cursor.AsLine()
 		return m, m.startComment(), true
 	case key.Matches(msg, keys.EditComment):
 		newM, cmd := m.editSelectedComment()
 		return newM, cmd, true
 	case key.Matches(msg, keys.DeleteComment):
 		refs := m.commentRefsAtCursor()
-		if m.comments.cursor >= 0 && m.comments.cursor < len(refs) && refs[m.comments.cursor].isLocal {
+		if m.nav.cursor.CommentIdx >= 0 && m.nav.cursor.CommentIdx < len(refs) && refs[m.nav.cursor.CommentIdx].isLocal {
 			m.confirmDelete = true
 			return m, nil, true
 		}
@@ -149,7 +149,7 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 	}
 
 	// Unhandled: deselect comment and fall through
-	m.comments.cursor = -1
+	m.nav.cursor = m.nav.cursor.AsLine()
 	return m, nil, false
 }
 
@@ -201,10 +201,10 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if m.nav.focus == FocusDiff {
 			if !m.nav.visualMode {
 				m.nav.visualMode = true
-				m.nav.visualStart = m.nav.diffCursor
-				m.nav.visualEnd = m.nav.diffCursor
+				m.nav.visualStart = m.nav.cursor.LineIdx
+				m.nav.visualEnd = m.nav.cursor.LineIdx
 			} else {
-				m.nav.visualEnd = m.nav.diffCursor
+				m.nav.visualEnd = m.nav.cursor.LineIdx
 			}
 			m.updateDiffContent()
 		}

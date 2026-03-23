@@ -60,16 +60,16 @@ func (m *Model) commentRefsAtLine(diffIdx int) []commentRef {
 
 // commentRefsAtCursor returns all expanded comments below the current diff cursor.
 func (m *Model) commentRefsAtCursor() []commentRef {
-	return m.commentRefsAtLine(m.nav.diffCursor)
+	return m.commentRefsAtLine(m.nav.cursor.LineIdx)
 }
 
 // editSelectedComment opens the inline editor for the selected local pending comment.
 func (m Model) editSelectedComment() (Model, tea.Cmd) {
 	refs := m.commentRefsAtCursor()
-	if m.comments.cursor < 0 || m.comments.cursor >= len(refs) {
+	if !m.nav.cursor.IsComment() || m.nav.cursor.CommentIdx >= len(refs) {
 		return m, nil
 	}
-	ref := refs[m.comments.cursor]
+	ref := refs[m.nav.cursor.CommentIdx]
 	if !ref.isLocal {
 		return m, nil
 	}
@@ -79,7 +79,7 @@ func (m Model) editSelectedComment() (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.comments.cursor = -1
+	m.nav.cursor = m.nav.cursor.AsLine()
 	m.comments.inlineActive = true
 	m.comments.inlinePath = c.Path
 	m.comments.inlineLine = c.Line
@@ -105,10 +105,10 @@ func (m Model) editSelectedComment() (Model, tea.Cmd) {
 // deleteSelectedComment deletes the selected local pending comment.
 func (m Model) deleteSelectedComment() (Model, tea.Cmd) {
 	refs := m.commentRefsAtCursor()
-	if m.comments.cursor < 0 || m.comments.cursor >= len(refs) {
+	if !m.nav.cursor.IsComment() || m.nav.cursor.CommentIdx >= len(refs) {
 		return m, nil
 	}
-	ref := refs[m.comments.cursor]
+	ref := refs[m.nav.cursor.CommentIdx]
 	if !ref.isLocal {
 		return m, nil
 	}
@@ -122,7 +122,7 @@ func (m Model) deleteSelectedComment() (Model, tea.Cmd) {
 	forgeID := c.ForgeID
 
 	m.removeLocalComment(localID)
-	m.comments.cursor = -1
+	m.nav.cursor = m.nav.cursor.AsLine()
 	m.updateDiffContent()
 
 	return m, m.deleteCommentCmd(localID, forgeID)
@@ -137,7 +137,7 @@ func commentKey(path string, line int) string {
 // openCommentPopup opens a scrollable popup showing all comments for the
 // current diff line.
 func (m *Model) openCommentPopup() {
-	if len(m.files) == 0 || m.nav.diffCursor >= len(m.nav.diffLines) {
+	if len(m.files) == 0 || m.nav.cursor.LineIdx >= len(m.nav.diffLines) {
 		return
 	}
 
@@ -165,7 +165,7 @@ func (m *Model) openCommentPopup() {
 // buildCommentPopupContent formats all comments for the current diff line
 // into a string suitable for display in the popup viewport.
 func (m *Model) buildCommentPopupContent(width int) string {
-	dl := m.nav.diffLines[m.nav.diffCursor]
+	dl := m.nav.diffLines[m.nav.cursor.LineIdx]
 	path := m.files[m.nav.fileCursor].Path
 
 	authorStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
@@ -337,14 +337,14 @@ func lineAndSide(dl diffLineInfo) (int, string) {
 // --- Comment folding ---
 
 func (m Model) toggleCommentAtCursor() Model {
-	m.comments.cursor = -1
+	m.nav.cursor = m.nav.cursor.AsLine()
 	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
 		return m
 	}
 	path := m.files[m.nav.fileCursor].Path
 
-	if m.nav.focus == FocusDiff && m.nav.diffCursor < len(m.nav.diffLines) {
-		dl := m.nav.diffLines[m.nav.diffCursor]
+	if m.nav.focus == FocusDiff && m.nav.cursor.LineIdx < len(m.nav.diffLines) {
+		dl := m.nav.diffLines[m.nav.cursor.LineIdx]
 		line := dl.newLine
 		if line == 0 {
 			line = dl.oldLine
@@ -449,7 +449,7 @@ func (m *Model) navigateToNextUnviewed() {
 			oldIdx := m.nav.fileCursor
 			m.nav.fileCursor = idx
 			m.nav.buildDiffLines(m.files)
-			m.nav.diffCursor = 0
+			m.nav.cursor = CursorTarget{Kind: CursorLine}
 			m.autoFollowFile(oldIdx, m.nav.fileCursor)
 			return
 		}
@@ -665,10 +665,10 @@ func (m Model) openExternalEditorForComment() tea.Cmd {
 }
 
 func (m *Model) startComment() tea.Cmd {
-	if len(m.nav.diffLines) == 0 || m.nav.diffCursor >= len(m.nav.diffLines) {
+	if len(m.nav.diffLines) == 0 || m.nav.cursor.LineIdx >= len(m.nav.diffLines) {
 		return nil
 	}
-	dl := m.nav.diffLines[m.nav.diffCursor]
+	dl := m.nav.diffLines[m.nav.cursor.LineIdx]
 	path := m.files[m.nav.fileCursor].Path
 	line, side := lineAndSide(dl)
 
@@ -703,8 +703,8 @@ func (m Model) openInEditor() tea.Cmd {
 	}
 	file := m.files[m.nav.fileCursor]
 	line := 1
-	if m.nav.diffCursor < len(m.nav.diffLines) {
-		if dl := m.nav.diffLines[m.nav.diffCursor]; dl.newLine > 0 {
+	if m.nav.cursor.LineIdx < len(m.nav.diffLines) {
+		if dl := m.nav.diffLines[m.nav.cursor.LineIdx]; dl.newLine > 0 {
 			line = dl.newLine
 		}
 	}

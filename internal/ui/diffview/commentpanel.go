@@ -13,7 +13,6 @@ type CommentPanel struct {
 	existing      []review.ExistingComment // comments already on the PR
 	forgeComments []review.ExistingComment // from forge's pending review (crash recovery)
 	expanded      map[string]bool          // per-line expanded state (key: "path:line")
-	cursor        int                      // selected comment index (-1 = none, 0+ = index)
 
 	// Indexed comment lookups — rebuilt on mutation via rebuildCommentIndex().
 	// Key format: "path:line:side" (side may be "" for existing comments with no side).
