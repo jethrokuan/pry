@@ -92,6 +92,7 @@ type PullRequest struct {
 	// Merge & review status
 	MergeState     string     // BLOCKED, CLEAN, DIRTY, DRAFT, HAS_HOOKS, UNKNOWN, UNSTABLE
 	Mergeable      string     // MERGEABLE, CONFLICTING, UNKNOWN
+	ConflictFiles  []string   // File paths with merge conflicts (best-effort, may be empty)
 	ReviewDecision string     // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
 	Reviewers      []Reviewer // Individual reviewer statuses
 	PendingTeams   []string   // Team slugs with outstanding review requests

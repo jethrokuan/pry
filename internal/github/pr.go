@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jethrokuan/pry/internal/git"
 	"github.com/jethrokuan/pry/internal/review"
 )
 
@@ -515,6 +516,11 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 
 	pr := nodeToPR(resp.Repository.PullRequest, "")
 	slog.Debug("fetched PR", "number", pr.Number, "nodeID", pr.NodeID, "title", pr.Title)
+
+	// Best-effort: detect which files have merge conflicts using local git.
+	if pr.Mergeable == "CONFLICTING" {
+		pr.ConflictFiles = git.MergeConflictFiles("origin/"+pr.Base, pr.HeadSHA)
+	}
 
 	c.cache.Set(key, pr, c.prTTL)
 	return &pr, nil

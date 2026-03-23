@@ -175,6 +175,7 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 	} else if pr.MergeState == "BLOCKED" || pr.MergeState == "UNSTABLE" || pr.MergeState == "DIRTY" {
 		if pr.Mergeable == "CONFLICTING" {
 			b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Merge conflicts") + "\n")
+			renderConflictFiles(&b, pr.ConflictFiles)
 		}
 		renderReviewStatus(&b, pr, m.ctx)
 		renderCheckRunsDetail(&b, pr)
@@ -298,6 +299,25 @@ func renderReviewStatus(b *strings.Builder, pr *review.PullRequest, ctx *appctx.
 		names += lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf(", +%d more", overflow))
 	}
 	b.WriteString(prefix + names + "\n")
+}
+
+// renderConflictFiles renders the list of conflicted file names.
+func renderConflictFiles(b *strings.Builder, files []string) {
+	if len(files) == 0 {
+		return
+	}
+	fileStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	const maxVisible = 5
+	show := files
+	if len(show) > maxVisible {
+		show = show[:maxVisible]
+	}
+	for _, f := range show {
+		b.WriteString(fileStyle.Render("    "+f) + "\n")
+	}
+	if len(files) > maxVisible {
+		b.WriteString(fileStyle.Italic(true).Render(fmt.Sprintf("    +%d more", len(files)-maxVisible)) + "\n")
+	}
 }
 
 // renderCheckRunsDetail renders the check runs summary and detail lines.
