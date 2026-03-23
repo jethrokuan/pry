@@ -9,10 +9,6 @@
 # Leave empty to use $EDITOR / $VISUAL.
 # editor = ""
 
-# Use delta (https://dandavison.github.io/delta/) for syntax-highlighted diffs.
-# Requires delta to be installed. Falls back to built-in rendering if missing.
-# use_delta = true
-
 # Number of PRs to fetch per page in the PR list.
 # page_size = 50
 

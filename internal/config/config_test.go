@@ -13,7 +13,6 @@ var _ = ginkgo.Describe("Config", func() {
 	ginkgo.Describe("load with no file", func() {
 		ginkgo.It("returns defaults when path is nil", func() {
 			cfg := load(nil)
-			gomega.Expect(cfg.UseDelta).To(gomega.BeTrue())
 			gomega.Expect(cfg.PageSize).To(gomega.Equal(50))
 			gomega.Expect(cfg.PRList.SidebarWidth).To(gomega.Equal(50))
 			gomega.Expect(cfg.Cache.Enabled).To(gomega.BeTrue())
@@ -22,7 +21,6 @@ var _ = ginkgo.Describe("Config", func() {
 		ginkgo.It("returns defaults when file does not exist", func() {
 			path := "/nonexistent/config.toml"
 			cfg := load(&path)
-			gomega.Expect(cfg.UseDelta).To(gomega.BeTrue())
 			gomega.Expect(cfg.PageSize).To(gomega.Equal(50))
 		})
 	})
@@ -44,14 +42,12 @@ var _ = ginkgo.Describe("Config", func() {
 			path := filepath.Join(tmpDir, "config.toml")
 			content := `
 editor = "nvim"
-use_delta = false
 page_size = 25
 `
 			gomega.Expect(os.WriteFile(path, []byte(content), 0644)).To(gomega.Succeed())
 
 			cfg := load(&path)
 			gomega.Expect(cfg.Editor).To(gomega.Equal("nvim"))
-			gomega.Expect(cfg.UseDelta).To(gomega.BeFalse())
 			gomega.Expect(cfg.PageSize).To(gomega.Equal(25))
 		})
 

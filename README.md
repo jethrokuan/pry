@@ -26,7 +26,7 @@ go build -o pry ./cmd/...
 
 - [gh](https://cli.github.com/) CLI, authenticated (`gh auth login`)
 - Go 1.25+ (build only)
-- [delta](https://github.com/dandavison/delta) (optional, for syntax-highlighted diffs)
+
 
 ## Usage
 
@@ -168,7 +168,7 @@ internal/
   diff/
     model.go                 DiffFile, Hunk, DiffLine types
     parser.go                Unified diff parser + position mapping
-    renderer.go              Built-in ANSI rendering, delta integration
+    renderer.go              Built-in ANSI rendering
   ui/
     prlist/model.go          PR list screen
     prdetail/model.go        PR detail screen

@@ -60,7 +60,7 @@ Each screen is a Bubble Tea `Model` in its own package under `internal/ui/`. Scr
 - **`internal/review`** — Domain types (`PullRequest`, `InlineComment`, `PendingReview`, etc.) and `Service` interface. All UI code depends on this package, never on a forge-specific package directly.
 - **`internal/github`** — GitHub API layer using `go-gh` (reuses `gh` CLI auth). The `Adapter` type implements `review.Service`. Uses both REST and GraphQL.
 - **`internal/app`** — Top-level model, screen routing, state management (selected PR, pending review)
-- **`internal/diff`** — Unified diff parser, data types (`DiffFile`, `Hunk`, `DiffLine`), ANSI renderer with optional `delta` integration
+- **`internal/diff`** — Unified diff parser, data types (`DiffFile`, `Hunk`, `DiffLine`), ANSI renderer
 - **`internal/ui/*`** — Individual screen models (prlist, prdetail, diffview, comment, submit)
 - **`internal/git`** — Local git operations (checkout, repo detection)
 
@@ -85,7 +85,7 @@ internal/app/      ← wires review.Service to screens
 
 User configuration lives at `~/.config/pry/config.toml`. An annotated example is at `config.example.toml` in the repo root.
 
-**Currently configurable:** theme selection (10 built-in themes), per-color overrides, editor command, delta toggle, page size, PR list filters, PR list columns, file tree owner filter.
+**Currently configurable:** theme selection (10 built-in themes), per-color overrides, editor command, page size, PR list filters, PR list columns, file tree owner filter.
 
 **Not yet configurable (hardcoded):** keybindings, paddings/margins, border styles, comment height caps.
 
@@ -101,7 +101,6 @@ User configuration lives at `~/.config/pry/config.toml`. An annotated example is
 - **Bubble Tea / Lip Gloss / Bubbles / Glamour** — TUI framework, styling, components, markdown rendering (all from Charm)
 - **go-gh** — GitHub API client that reuses `gh` CLI authentication
 - **Ginkgo v2 / Gomega** — BDD testing framework and matcher library
-- **delta** (optional runtime) — Syntax-highlighted diff rendering
 
 ## Version Control (jj)
 

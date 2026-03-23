@@ -42,7 +42,6 @@ type CacheConfig struct {
 // Config holds user configuration for the tool.
 type Config struct {
 	Editor   string         `koanf:"editor"`
-	UseDelta bool           `koanf:"use_delta"`
 	PageSize int            `koanf:"page_size"`
 	Filters  []FilterConfig `koanf:"filters"`
 	Columns  []string       `koanf:"columns"`
@@ -83,7 +82,6 @@ func (c Config) PRColumns() []string {
 }
 
 var defaults = confmap.Provider(map[string]interface{}{
-	"use_delta":             true,
 	"page_size":             50,
 	"pr_list.sidebar_width": 50,
 	"cache.enabled":         true,
