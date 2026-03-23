@@ -751,8 +751,8 @@ func (m Model) renderTable(width, height int) string {
 			statsContent += dot + muted.Render(m.spinner.View())
 		}
 
-		mergeIcon, mergeLabel, mergeColor := mergeStateLabel(pr)
-		mergeTag := s(mergeColor).Render(mergeIcon+" "+mergeLabel) + " "
+		mergeIcon, mergeColor := mergeStateIcon(pr)
+		mergeTag := s(mergeColor).Render(mergeIcon) + " "
 		leftPart := base.Render(statsContent)
 		line3 := base.Width(width).Render(
 			leftPart + lipgloss.PlaceHorizontal(width-lipgloss.Width(leftPart), lipgloss.Right, mergeTag, lipgloss.WithWhitespaceStyle(base)),
@@ -820,21 +820,19 @@ func renderStateIcon(pr review.PullRequest) (string, color.Color) {
 	}
 }
 
-// mergeStateLabel returns the icon, label text, and color for a PR's merge state.
-func mergeStateLabel(pr review.PullRequest) (string, string, color.Color) {
+// mergeStateIcon returns the icon and color for a PR's merge state.
+func mergeStateIcon(pr review.PullRequest) (string, color.Color) {
 	switch pr.MergeState {
 	case "CLEAN", "HAS_HOOKS":
-		return iconApproved, "Ready", lipgloss.Green
-	case "BLOCKED":
-		return iconChangesRequested, "Blocked", lipgloss.Red
+		return iconApproved, lipgloss.Green
+	case "BLOCKED", "DRAFT":
+		return iconChangesRequested, lipgloss.Red
 	case "UNSTABLE":
-		return iconWaiting, "Unstable", lipgloss.BrightYellow
+		return iconWaiting, lipgloss.BrightYellow
 	case "DIRTY":
-		return iconChangesRequested, "Conflicts", lipgloss.Red
-	case "DRAFT":
-		return iconWaiting, "Draft", lipgloss.BrightBlack
+		return iconChangesRequested, lipgloss.Red
 	default:
-		return iconWaiting, "Unknown", lipgloss.BrightBlack
+		return iconWaiting, lipgloss.BrightBlack
 	}
 }
 
