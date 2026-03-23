@@ -184,7 +184,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(1))
 			gomega.Expect(m.tabBar.Active()).To(gomega.Equal(1))
-			gomega.Expect(m.loading).To(gomega.BeTrue())
+			gomega.Expect(m.loading).To(gomega.BeFalse()) // non-blocking refresh
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
 		})
 
@@ -197,7 +197,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(1))
 			gomega.Expect(m.tabBar.Active()).To(gomega.Equal(1))
-			gomega.Expect(m.loading).To(gomega.BeTrue())
+			gomega.Expect(m.loading).To(gomega.BeFalse()) // non-blocking refresh
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
 		})
 
@@ -230,7 +230,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			m, cmd := m.Update(tea.KeyPressMsg{Code: '2'})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(1))
 			gomega.Expect(m.tabBar.Active()).To(gomega.Equal(1))
-			gomega.Expect(m.loading).To(gomega.BeTrue())
+			gomega.Expect(m.loading).To(gomega.BeFalse()) // non-blocking refresh
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
 		})
 	})
@@ -266,7 +266,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			gomega.Expect(m.customFilter).NotTo(gomega.BeNil())
 			gomega.Expect(m.customFilter.Name).To(gomega.Equal("Custom"))
 			gomega.Expect(m.customFilter.Qualifier).To(gomega.Equal("author:octocat"))
-			gomega.Expect(m.loading).To(gomega.BeTrue())
+			gomega.Expect(m.loading).To(gomega.BeFalse()) // non-blocking refresh
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
 		})
 	})
@@ -277,7 +277,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			m := loadModel(svc, samplePRs(1))
 
 			m, cmd := m.Update(tea.KeyPressMsg{Code: 'r'})
-			gomega.Expect(m.loading).To(gomega.BeTrue())
+			gomega.Expect(m.loading).To(gomega.BeFalse()) // non-blocking refresh
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
 		})
 	})

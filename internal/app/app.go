@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/config"
 	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/components/flash"
 	"github.com/jethrokuan/pry/internal/ui/diffview"
 	"github.com/jethrokuan/pry/internal/ui/prlist"
 	"github.com/jethrokuan/pry/internal/ui/submit"
@@ -39,6 +42,9 @@ type Model struct {
 	diffView diffview.Model
 	submit   submit.Model
 
+	// Flash messages (stacked, newer on top)
+	flash flash.Model
+
 	// State
 	selectedPR *review.PullRequest
 	initialPR  int // PR number passed via CLI argument (0 = none)
@@ -52,6 +58,7 @@ func New(svc review.Service, cfg config.Config, filters []review.PRFilter) Model
 		filters: filters,
 		screen:  ScreenPRList,
 		prList:  prlist.New(svc, filters),
+		flash:   flash.New(),
 	}
 }
 
@@ -65,6 +72,7 @@ func NewWithPR(svc review.Service, cfg config.Config, prNumber int, filters []re
 		filters:    filters,
 		screen:     ScreenDiffView,
 		prList:     prlist.New(svc, filters),
+		flash:      flash.New(),
 		selectedPR: pr,
 		initialPR:  prNumber,
 	}
@@ -173,11 +181,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		slog.Debug("msg", "type", fmt.Sprintf("%T", msg))
 	}
 
+	// Flash messages from any screen — translate to flash component messages.
+	var flashCmd tea.Cmd
+	switch msg := msg.(type) {
+	case prlist.FlashMsg:
+		style := flash.StyleSuccess
+		if msg.Spinner {
+			style = flash.StyleSpinner
+		}
+		m.flash, flashCmd = m.flash.Update(flash.ShowMsg{
+			ID:      msg.ID,
+			Text:    msg.Text,
+			Style:   style,
+			Expires: msg.Expires,
+		})
+		return m, flashCmd
+	case prlist.DismissFlashMsg:
+		m.flash, flashCmd = m.flash.Update(flash.DismissMsg{ID: msg.ID})
+		return m, flashCmd
+	default:
+		// Forward ticks/expiry to flash model; continue processing below.
+		m.flash, flashCmd = m.flash.Update(msg)
+	}
+
 	// Global messages
 	switch msg := msg.(type) {
 	case CmdPanicMsg:
 		slog.Error("command panic recovered", "error", msg.Err)
-		return m, nil
+		return m, flashCmd
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -188,14 +219,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case ScreenPRList:
 				var cmd tea.Cmd
 				m.prList, cmd = m.prList.Update(prlist.UserIdentityMsg{Identity: msg.identity})
-				return m, cmd
+				return m, tea.Batch(flashCmd, cmd)
 			case ScreenDiffView:
 				var cmd tea.Cmd
 				m.diffView, cmd = m.diffView.Update(diffview.UserIdentityMsg{Identity: msg.identity})
-				return m, cmd
+				return m, tea.Batch(flashCmd, cmd)
 			}
 		}
-		return m, nil
+		return m, flashCmd
 	case mentionableUsersMsg:
 		if msg.err == nil {
 			m.mentionableUsers = msg.users
@@ -203,22 +234,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.screen == ScreenDiffView {
 				var cmd tea.Cmd
 				m.diffView, cmd = m.diffView.Update(diffview.MentionableUsersMsg{Users: msg.users})
-				return m, cmd
+				return m, tea.Batch(flashCmd, cmd)
 			}
 		}
-		return m, nil
+		return m, flashCmd
 	}
 
+	var model tea.Model
+	var screenCmd tea.Cmd
 	switch m.screen {
 	case ScreenPRList:
-		return m.updatePRList(msg)
+		model, screenCmd = m.updatePRList(msg)
 	case ScreenDiffView:
-		return m.updateDiffView(msg)
+		model, screenCmd = m.updateDiffView(msg)
 	case ScreenSubmit:
-		return m.updateSubmit(msg)
+		model, screenCmd = m.updateSubmit(msg)
+	default:
+		return m, flashCmd
 	}
-
-	return m, nil
+	return model, tea.Batch(flashCmd, screenCmd)
 }
 
 // prBodyLoadedMsg carries the full PR data after fetching the body.
@@ -312,6 +346,28 @@ func (m Model) View() tea.View {
 	case ScreenSubmit:
 		content = m.submit.View()
 	}
+
+	// Overlay flash messages on the second-to-last line (above footer).
+	if !m.flash.Empty() {
+		flashView := m.flash.View()
+		flashHeight := lipgloss.Height(flashView)
+		lines := strings.Split(content, "\n")
+		// Insert flash lines just before the last line (footer).
+		if len(lines) > 1 {
+			insertAt := len(lines) - 1 - flashHeight
+			if insertAt < 0 {
+				insertAt = 0
+			}
+			flashLines := strings.Split(flashView, "\n")
+			for i, fl := range flashLines {
+				if insertAt+i < len(lines) {
+					lines[insertAt+i] = fl
+				}
+			}
+			content = strings.Join(lines, "\n")
+		}
+	}
+
 	v := tea.NewView(content)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion

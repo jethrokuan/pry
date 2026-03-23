@@ -1,0 +1,158 @@
+// Package flash provides a stackable flash message system for the root model.
+// Screens add/remove flashes via typed messages; the root model owns the state.
+package flash
+
+import (
+	"strings"
+	"time"
+
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/jethrokuan/pry/internal/ui/styles"
+)
+
+// Style controls how a flash is rendered.
+type Style int
+
+const (
+	StyleSuccess Style = iota // green, auto-expires
+	StyleInfo                 // muted, auto-expires
+	StyleSpinner              // animated spinner prefix, no auto-expiry
+)
+
+// item is a single flash entry.
+type item struct {
+	ID    string
+	Text  string
+	Style Style
+}
+
+// ShowMsg asks the root model to display a flash. If an entry with the same
+// ID already exists it is replaced (moved to top).
+type ShowMsg struct {
+	ID      string
+	Text    string
+	Style   Style
+	Expires time.Duration // 0 = no auto-expiry (must be dismissed manually)
+}
+
+// DismissMsg removes the flash with the given ID.
+type DismissMsg struct {
+	ID string
+}
+
+// expiredMsg is internal — auto-fires when a timed flash expires.
+type expiredMsg struct {
+	ID string
+}
+
+// Model holds the flash stack. Newer items are at the end (rendered on top).
+type Model struct {
+	items   []item
+	spinner spinner.Model
+}
+
+// New creates an empty flash model.
+func New() Model {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	return Model{spinner: s}
+}
+
+// Update handles flash-related messages. Call this from the root Update.
+func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case ShowMsg:
+		// Remove existing entry with same ID (if any).
+		m.items = removeByID(m.items, msg.ID)
+		// Append to end (newest = top when rendered).
+		m.items = append(m.items, item{
+			ID:    msg.ID,
+			Text:  msg.Text,
+			Style: msg.Style,
+		})
+		var cmds []tea.Cmd
+		if msg.Expires > 0 {
+			id := msg.ID
+			cmds = append(cmds, tea.Tick(msg.Expires, func(time.Time) tea.Msg {
+				return expiredMsg{ID: id}
+			}))
+		}
+		if msg.Style == StyleSpinner {
+			cmds = append(cmds, m.spinner.Tick)
+		}
+		return m, tea.Batch(cmds...)
+
+	case DismissMsg:
+		m.items = removeByID(m.items, msg.ID)
+		return m, nil
+
+	case expiredMsg:
+		m.items = removeByID(m.items, msg.ID)
+		return m, nil
+
+	case spinner.TickMsg:
+		if m.hasSpinner() {
+			var cmd tea.Cmd
+			m.spinner, cmd = m.spinner.Update(msg)
+			return m, cmd
+		}
+	}
+
+	return m, nil
+}
+
+// View renders the flash stack. Newer items appear first (top).
+// Returns empty string when there are no flashes.
+func (m Model) View() string {
+	if len(m.items) == 0 {
+		return ""
+	}
+
+	lines := make([]string, len(m.items))
+	// Reverse order: newest (last in slice) rendered first.
+	for i, it := range m.items {
+		ri := len(m.items) - 1 - i
+		var rendered string
+		switch it.Style {
+		case StyleSpinner:
+			rendered = lipgloss.NewStyle().Foreground(styles.Muted).Render(
+				m.spinner.View() + " " + it.Text,
+			)
+		case StyleSuccess:
+			rendered = lipgloss.NewStyle().Foreground(styles.Success).Render(it.Text)
+		default:
+			rendered = lipgloss.NewStyle().Foreground(styles.Muted).Render(it.Text)
+		}
+		lines[ri] = rendered
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// Empty returns true when there are no flash messages.
+func (m Model) Empty() bool {
+	return len(m.items) == 0
+}
+
+func (m Model) hasSpinner() bool {
+	for _, it := range m.items {
+		if it.Style == StyleSpinner {
+			return true
+		}
+	}
+	return false
+}
+
+func removeByID(items []item, id string) []item {
+	n := 0
+	for _, it := range items {
+		if it.ID != id {
+			items[n] = it
+			n++
+		}
+	}
+	return items[:n]
+}

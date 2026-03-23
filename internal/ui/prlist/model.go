@@ -42,7 +42,18 @@ type userTeamsLoadedMsg struct {
 	teams []string
 }
 
-type flashExpiredMsg struct{}
+// FlashMsg is emitted by the PR list to request the root model show a flash.
+type FlashMsg struct {
+	ID      string
+	Text    string
+	Spinner bool          // true = animated spinner style
+	Expires time.Duration // 0 = manual dismiss
+}
+
+// DismissFlashMsg is emitted to request the root model dismiss a flash by ID.
+type DismissFlashMsg struct {
+	ID string
+}
 
 // enrichState tracks per-PR background enrichment status.
 type enrichState int
@@ -129,9 +140,6 @@ type Model struct {
 
 	// Help overlay
 	showHelp bool
-
-	// Flash message (ephemeral status)
-	flashMsg string
 
 	// Background enrichment: tracks GetPR fetch state per PR number
 	enrichMap map[int]enrichState
@@ -241,8 +249,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case prsLoadedMsg:
 		m.loading = false
+		dismissCmd := func() tea.Msg { return DismissFlashMsg{ID: "pr-refresh"} }
 		if msg.err != nil {
 			m.err = msg.err
+			return m, dismissCmd
 		} else {
 			m.prs = msg.prs
 			m.cursor = 0
@@ -251,7 +261,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.tabBar.SetCount(m.filterIdx, len(m.prs))
 			sidebarCmd := m.refreshSidebarPreview()
 			enrichCmd := m.enrichVisible()
-			return m, tea.Batch(sidebarCmd, enrichCmd)
+			return m, tea.Batch(dismissCmd, sidebarCmd, enrichCmd)
 		}
 
 	case UserIdentityMsg:
@@ -292,10 +302,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case flashExpiredMsg:
-		m.flashMsg = ""
-		return m, nil
-
 	case spinner.TickMsg:
 		if m.loading || m.hasEnrichmentPending() {
 			var cmd tea.Cmd
@@ -315,8 +321,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					Name:      "Custom",
 					Qualifier: qualifier,
 				}
-				m.loading = true
-				return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+				return m, m.startFetch()
 			case "esc", "ctrl+c":
 				m.editing = false
 				m.filterInput.Blur()
@@ -375,15 +380,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.tabBar.Next() {
 				m.filterIdx = m.tabBar.Active()
 				m.customFilter = nil
-				m.loading = true
-				return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+				return m, m.startFetch()
 			}
 		case key.Matches(msg, keys.PrevTab):
 			if m.tabBar.Prev() {
 				m.filterIdx = m.tabBar.Active()
 				m.customFilter = nil
-				m.loading = true
-				return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+				return m, m.startFetch()
 			}
 		case key.Matches(msg, keys.EditFilter):
 			m.editing = true
@@ -403,24 +406,23 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if inv, ok := m.svc.(review.CacheInvalidator); ok {
 				inv.InvalidateListPRs()
 			}
-			m.loading = true
-			return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+			return m, m.startFetch()
 		case key.Matches(msg, keys.CopyNumber):
 			if len(m.prs) > 0 {
 				pr := m.prs[m.cursor]
 				text := fmt.Sprintf("%d", pr.Number)
 				if err := clipboard.WriteText(text); err != nil {
-					return m, m.setFlash("Copy failed: " + err.Error())
+					return m, emitFlash("copy", "Copy failed: "+err.Error(), 1500*time.Millisecond)
 				}
-				return m, m.setFlash(fmt.Sprintf("Copied #%d", pr.Number))
+				return m, emitFlash("copy", fmt.Sprintf("Copied #%d", pr.Number), 1500*time.Millisecond)
 			}
 		case key.Matches(msg, keys.CopyURL):
 			if len(m.prs) > 0 {
 				pr := m.prs[m.cursor]
 				if err := clipboard.WriteText(pr.URL); err != nil {
-					return m, m.setFlash("Copy failed: " + err.Error())
+					return m, emitFlash("copy", "Copy failed: "+err.Error(), 1500*time.Millisecond)
 				}
-				return m, m.setFlash(fmt.Sprintf("Copied %s", pr.URL))
+				return m, emitFlash("copy", fmt.Sprintf("Copied %s", pr.URL), 1500*time.Millisecond)
 			}
 		case key.Matches(msg, keys.Help):
 			m.showHelp = true
@@ -434,8 +436,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.tabBar.SetActive(idx)
 				m.filterIdx = idx
 				m.customFilter = nil
-				m.loading = true
-				return m, tea.Batch(m.fetchPRs(), m.spinner.Tick)
+				return m, m.startFetch()
 			}
 		}
 	}
@@ -633,12 +634,7 @@ func (m Model) renderFooter() string {
 	repoLabel := fmt.Sprintf("%s/%s", m.svc.RepoOwner(), m.svc.RepoName())
 	repo := lipgloss.NewStyle().Foreground(styles.Primary).Render(repoLabel)
 
-	var footerLeft string
-	if m.flashMsg != "" {
-		footerLeft = lipgloss.NewStyle().Foreground(styles.Success).Render(m.flashMsg)
-	} else {
-		footerLeft = styles.HelpStyle.Render("↑/k up  ↓/j down  enter select  tab switch  / search  y copy #  Y copy URL  ? help")
-	}
+	footerLeft := styles.HelpStyle.Render("↑/k up  ↓/j down  enter select  tab switch  / search  y copy #  Y copy URL  ? help")
 	gap := m.width - lipgloss.Width(footerLeft) - lipgloss.Width(repo)
 	if gap < 1 {
 		gap = 1
@@ -657,12 +653,26 @@ func helpSections() []helppopup.Section {
 	}
 }
 
-// setFlash sets a flash message and returns a command that clears it after a delay.
-func (m *Model) setFlash(msg string) tea.Cmd {
-	m.flashMsg = msg
-	return tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-		return flashExpiredMsg{}
-	})
+// startFetch triggers a PR fetch. If the list already has data, it shows a
+// non-blocking refresh spinner (via flash msg to root) instead of the
+// full-screen loading state.
+func (m *Model) startFetch() tea.Cmd {
+	cmds := []tea.Cmd{m.fetchPRs(), m.spinner.Tick}
+	if len(m.prs) > 0 {
+		cmds = append(cmds, func() tea.Msg {
+			return FlashMsg{ID: "pr-refresh", Text: "Refreshing…", Spinner: true}
+		})
+	} else {
+		m.loading = true
+	}
+	return tea.Batch(cmds...)
+}
+
+// emitFlash returns a command that emits a timed flash message to the root model.
+func emitFlash(id, text string, expires time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		return FlashMsg{ID: id, Text: text, Expires: expires}
+	}
 }
 
 // visibleRange computes the start and end indices of visible PR rows given
