@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -94,7 +96,7 @@ type mentionableUsersMsg struct {
 
 // loadUserIdentity fetches the current user's login and teams.
 func (m Model) loadUserIdentity() tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		ctx := context.Background()
 		login, err := m.ctx.Svc.CurrentUser(ctx)
 		if err != nil {
@@ -110,15 +112,15 @@ func (m Model) loadUserIdentity() tea.Cmd {
 				Teams: teams,
 			},
 		}
-	}
+	})
 }
 
 // loadMentionableUsers fetches @-mentionable usernames in the background at startup.
 func (m Model) loadMentionableUsers() tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd(func() tea.Msg {
 		users, err := m.ctx.Svc.ListMentionableUsers(context.Background())
 		return mentionableUsersMsg{users: users, err: err}
-	}
+	})
 }
 
 // Init starts the application.
@@ -129,10 +131,10 @@ func (m Model) Init() tea.Cmd {
 			m.diffView.Init(),
 			m.loadUserIdentity(),
 			m.loadMentionableUsers(),
-			func() tea.Msg {
+			safeCmd(func() tea.Msg {
 				full, err := m.ctx.Svc.GetPR(context.Background(), prNumber)
 				return prBodyLoadedMsg{pr: full, err: err}
-			},
+			}),
 		)
 	}
 	return tea.Batch(
@@ -156,8 +158,18 @@ func (m Model) windowSizeCmd() tea.Cmd {
 
 // Update handles all messages, routing to the active screen.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Log all messages for debugging (visible with -v flag in ~/.config/pry/debug.log)
+	if k, ok := msg.(tea.KeyPressMsg); ok {
+		slog.Debug("msg", "type", "KeyPressMsg", "key", k.String())
+	} else {
+		slog.Debug("msg", "type", fmt.Sprintf("%T", msg))
+	}
+
 	// Global messages
 	switch msg := msg.(type) {
+	case CmdPanicMsg:
+		slog.Error("command panic recovered", "error", msg.Err)
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -215,10 +227,10 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(
 			m.diffView.Init(),
 			m.windowSizeCmd(),
-			func() tea.Msg {
+			safeCmd(func() tea.Msg {
 				full, err := m.ctx.Svc.GetPR(context.Background(), prNumber)
 				return prBodyLoadedMsg{pr: full, err: err}
-			},
+			}),
 		)
 	}
 

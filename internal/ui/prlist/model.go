@@ -175,9 +175,12 @@ func (m Model) Init() tea.Cmd {
 }
 
 // layoutDimensions returns sidebar width and main content height.
+// Used by Update() for sizing estimates. View() uses render-then-measure
+// for the authoritative layout, so keep these values in sync.
 func (m Model) layoutDimensions() (sidebarW, mainHeight int) {
 	sidebarW = m.width * 45 / 100
-	// tab bar (1) + separator (1) + footer (2) = 4
+	// Estimate: header 2 lines (tab bar + separator) + footer 2 lines (gap + help text).
+	// View() computes this precisely via lipgloss.Height().
 	mainHeight = m.height - 4
 	if mainHeight < 3 {
 		mainHeight = 3
@@ -522,28 +525,29 @@ func (m Model) View() string {
 		return m.spinner.View() + " Loading..."
 	}
 
-	var b strings.Builder
+	// Render fixed elements first, then measure to compute remaining space.
+	// This avoids fragile hardcoded arithmetic (e.g. "m.height - 4").
 
-	// Tab bar (full width)
+	// Header: tab bar + separator
 	m.tabBar.SetWidth(m.width)
-	b.WriteString(m.tabBar.View() + "\n")
-
-	// Horizontal separator between tab bar and panes
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(strings.Repeat("─", m.width)) + "\n")
-
-	// Compute layout
-	sidebarW, mainHeight := m.layoutDimensions()
-	tableWidth := m.width - sidebarW
-
-	// Main content: left pane + sidebar preview
-	m.preview.SetSize(sidebarW, mainHeight)
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, m.renderLeftPane(tableWidth, mainHeight), m.preview.View()))
+	header := m.tabBar.View() + "\n" +
+		lipgloss.NewStyle().Foreground(styles.Muted).Render(strings.Repeat("─", m.width)) + "\n"
 
 	// Footer
-	b.WriteString("\n")
-	b.WriteString(m.renderFooter())
+	footer := "\n" + m.renderFooter()
 
-	result := b.String()
+	// Main content fills the remaining vertical space
+	mainHeight := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
+	if mainHeight < 3 {
+		mainHeight = 3
+	}
+	sidebarW := m.width * 45 / 100
+	tableWidth := m.width - sidebarW
+
+	m.preview.SetSize(sidebarW, mainHeight)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, m.renderLeftPane(tableWidth, mainHeight), m.preview.View())
+
+	result := header + content + footer
 	if m.showHelp {
 		popup := helppopup.Render(helpSections(), m.width)
 		result = helppopup.Overlay(result, popup, m.width, m.height)
@@ -556,13 +560,14 @@ func (m Model) renderLeftPane(tableWidth, mainHeight int) string {
 	var leftPane strings.Builder
 
 	// Search bar (scoped to left pane width)
+	var searchBar string
 	if m.editing {
 		searchBorder := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(styles.Primary).
 			Width(tableWidth - 4).
 			Padding(0, 1)
-		leftPane.WriteString(searchBorder.Render(m.filterInput.View()) + "\n")
+		searchBar = searchBorder.Render(m.filterInput.View()) + "\n"
 	} else {
 		af := m.activeFilter()
 		qualifier := af.Qualifier
@@ -574,13 +579,14 @@ func (m Model) renderLeftPane(tableWidth, mainHeight int) string {
 			BorderForeground(styles.Muted).
 			Width(tableWidth - 4).
 			Padding(0, 1)
-		leftPane.WriteString(searchBorder.Render(
+		searchBar = searchBorder.Render(
 			lipgloss.NewStyle().Foreground(styles.Muted).Render(qualifier),
-		) + "\n")
+		) + "\n"
 	}
+	leftPane.WriteString(searchBar)
 
-	// Search bar takes 3 lines (border top + content + border bottom)
-	tableHeight := mainHeight - 3
+	// Measure the rendered search bar instead of hardcoding "- 3"
+	tableHeight := mainHeight - lipgloss.Height(searchBar)
 
 	if m.loading {
 		loadingText := m.spinner.View() + " Loading PRs..."
