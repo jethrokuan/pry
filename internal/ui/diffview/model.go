@@ -38,15 +38,15 @@ type filesLoadedMsg struct {
 	err   error
 }
 
-type existingCommentsMsg struct {
-	comments []review.ExistingComment
+type commentsLoadedMsg struct {
+	comments []review.Comment
 	err      error
 }
 
 type pendingReviewMsg struct {
 	reviewID     int
 	reviewNodeID string
-	comments     []review.ExistingComment
+	comments     []review.Comment
 	err          error
 }
 
@@ -56,21 +56,23 @@ type reviewCreatedMsg struct {
 	err          error
 }
 
-type commentSyncedMsg struct {
-	localID  int
-	forgeID int
-	err      error
+// commentAddedMsg is sent when a background AddReviewComment call completes.
+type commentAddedMsg struct {
+	tempID  int            // The optimistic temp ID to replace
+	comment review.Comment // The real comment from the server
+	err     error
 }
 
 type commentDeletedMsg struct {
-	localID int
-	err     error
+	commentID int
+	err       error
 }
 
 type commentEditedMsg struct {
-	localID int
-	body    string
-	err     error
+	commentID int
+	body      string
+	oldBody   string // original body for rollback on failure
+	err       error
 }
 
 type viewedFilesMsg struct {
@@ -227,12 +229,16 @@ type Model struct {
 	pr            *review.PullRequest
 	pendingReview *review.PendingReview
 	files         []diff.DiffFile
+	currentUser   string // authenticated user login
 
 	nav      DiffNav
 	comments CommentPanel
 	search   SearchBar
 	filter   FileFilter
 	editor   InlineEditor
+
+	// Optimistic comment tracking: maps temp (negative) IDs to in-flight state
+	inflight map[int]bool
 
 	width    int
 	height   int
@@ -304,6 +310,13 @@ func WithMentionableUsers(users []string) Option {
 	}
 }
 
+// WithCurrentUser sets the authenticated user's login for comment ownership.
+func WithCurrentUser(login string) Option {
+	return func(m *Model) {
+		m.currentUser = login
+	}
+}
+
 // WithOwnerFilterDisabled explicitly disables the owner filter regardless of identity.
 func WithOwnerFilterDisabled() Option {
 	return func(m *Model) {
@@ -319,6 +332,7 @@ func New(svc review.Service, pr *review.PullRequest, opts ...Option) Model {
 		svc:               svc,
 		pr:                pr,
 		pendingReview:     pr.PendingReview,
+		inflight:          make(map[int]bool),
 		loading: true,
 		spinner: s,
 		errors:  newErrorStore(),
@@ -381,8 +395,8 @@ func (m Model) loadFiles() tea.Cmd {
 
 func (m Model) loadComments() tea.Cmd {
 	return func() tea.Msg {
-		comments, err := m.svc.FetchExistingComments(context.Background(), m.pr.Number)
-		return existingCommentsMsg{comments: comments, err: err}
+		comments, err := m.svc.FetchComments(context.Background(), m.pr.Number)
+		return commentsLoadedMsg{comments: comments, err: err}
 	}
 }
 
@@ -400,48 +414,67 @@ func (m Model) createPendingReviewCmd() tea.Cmd {
 	}
 }
 
-func (m Model) syncCommentCmd(c review.InlineComment) tea.Cmd {
-	if m.pendingReview.ReviewNodeID == "" {
-		return nil
-	}
-	// Capture values to avoid reading shared state from goroutine
+// addReviewCommentCmd creates a pending review (if needed) and adds a comment.
+// The tempID is the optimistic comment's ID, used to replace it on success or remove on failure.
+func (m Model) addReviewCommentCmd(tempID int, path string, line, startLine int, side, body string) tea.Cmd {
 	svc := m.svc
+	prNumber := m.pr.Number
 	reviewNodeID := m.pendingReview.ReviewNodeID
-	localID := c.LocalID
-	comment := review.InlineComment{
-		Path:      c.Path,
-		Line:      c.Line,
-		StartLine: c.StartLine,
-		Side:      c.Side,
-		Body:      c.Body,
-	}
+	currentUser := m.currentUser
+
 	return func() tea.Msg {
-		forgeID, err := svc.AddReviewComment(context.Background(), reviewNodeID, comment)
-		return commentSyncedMsg{localID: localID, forgeID: forgeID, err: err}
+		nodeID := reviewNodeID
+		// Create pending review if we don't have one yet
+		if nodeID == "" {
+			_, nid, err := svc.CreatePendingReview(context.Background(), prNumber)
+			if err != nil {
+				return commentAddedMsg{tempID: tempID, err: err}
+			}
+			nodeID = nid
+		}
+
+		forgeID, err := svc.AddReviewComment(context.Background(), nodeID, path, line, startLine, side, body)
+		if err != nil {
+			return commentAddedMsg{tempID: tempID, err: err}
+		}
+
+		return commentAddedMsg{
+			tempID: tempID,
+			comment: review.Comment{
+				ID:        forgeID,
+				Path:      path,
+				Line:      line,
+				StartLine: startLine,
+				Side:      side,
+				Body:      body,
+				Author:    currentUser,
+				IsPending: true,
+			},
+		}
 	}
 }
 
-func (m Model) deleteCommentCmd(localID, forgeID int) tea.Cmd {
-	if forgeID == 0 {
+func (m Model) deleteCommentCmd(commentID int) tea.Cmd {
+	if commentID <= 0 {
+		return nil // temp/optimistic comment, nothing to delete on server
+	}
+	svc := m.svc
+	prNumber := m.pr.Number
+	return func() tea.Msg {
+		err := svc.DeleteReviewComment(context.Background(), prNumber, commentID)
+		return commentDeletedMsg{commentID: commentID, err: err}
+	}
+}
+
+func (m Model) editCommentCmd(commentID int, body, oldBody string) tea.Cmd {
+	if commentID <= 0 {
 		return nil
 	}
 	svc := m.svc
 	prNumber := m.pr.Number
 	return func() tea.Msg {
-		err := svc.DeleteReviewComment(context.Background(), prNumber, forgeID)
-		return commentDeletedMsg{localID: localID, err: err}
-	}
-}
-
-func (m Model) editCommentCmd(localID, forgeID int, body string) tea.Cmd {
-	if forgeID == 0 {
-		return nil
-	}
-	svc := m.svc
-	prNumber := m.pr.Number
-	return func() tea.Msg {
-		err := svc.EditReviewComment(context.Background(), prNumber, forgeID, body)
-		return commentEditedMsg{localID: localID, body: body, err: err}
+		err := svc.EditReviewComment(context.Background(), prNumber, commentID, body)
+		return commentEditedMsg{commentID: commentID, body: body, oldBody: oldBody, err: err}
 	}
 }
 
@@ -481,11 +514,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.updateDiffContent()
 		}
 
-	case existingCommentsMsg:
+	case commentsLoadedMsg:
 		if msg.err != nil {
 			m.errors.set(errCatLoad, 0, fmt.Errorf("comments: %w", msg.err))
 		} else {
-			m.setExistingComments(msg.comments)
+			m.setComments(msg.comments)
 			m.updateDiffContent()
 		}
 
@@ -495,8 +528,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else if msg.reviewID > 0 {
 			m.pendingReview.ReviewID = msg.reviewID
 			m.pendingReview.ReviewNodeID = msg.reviewNodeID
-			// Restore comments from forge (crash recovery)
-			m.restoreForgeComments(msg.comments, msg.comments)
+			// Merge pending review comments into the comment list
+			m.mergePendingComments(msg.comments)
 			m.updateDiffContent()
 		}
 		// No existing pending review — that's fine, we'll create one lazily
@@ -506,54 +539,40 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.err == nil {
 			m.pendingReview.ReviewID = msg.reviewID
 			m.pendingReview.ReviewNodeID = msg.reviewNodeID
-			// Flush any comments that were added before the review was created
-			var cmds []tea.Cmd
-			for i := range m.pendingReview.Comments {
-				if m.pendingReview.Comments[i].SyncStatus == review.SyncPending {
-					m.pendingReview.Comments[i].SyncStatus = review.SyncInFlight
-					cmds = append(cmds, m.syncCommentCmd(m.pendingReview.Comments[i]))
-				}
-			}
-			if len(cmds) > 0 {
-				return m, tea.Batch(cmds...)
-			}
 		} else {
 			m.errors.set(errCatReview, 0, msg.err)
 		}
 
-	case commentSyncedMsg:
+	case commentAddedMsg:
+		delete(m.inflight, msg.tempID)
 		if msg.err != nil {
-			m.updateLocalComment(msg.localID, func(c *review.InlineComment) {
-				c.SyncStatus = review.SyncFailed
-				c.SyncError = msg.err
-			})
-			m.errors.set(errCatCommentSync, msg.localID, msg.err)
-		} else {
-			m.updateLocalComment(msg.localID, func(c *review.InlineComment) {
-				c.SyncStatus = review.SyncComplete
-				c.ForgeID = msg.forgeID
-			})
-			m.errors.clear(errCatCommentSync, msg.localID)
+			// Rollback: remove the optimistic comment
+			m.removeCommentByID(msg.tempID)
+			m.updateDiffContent()
+			return m, m.setFlash("Comment failed: " + msg.err.Error())
+		}
+		// Replace temp comment with real one from server
+		m.replaceComment(msg.tempID, msg.comment)
+		// Update ReviewNodeID if this was the first comment (review was created inline)
+		if m.pendingReview.ReviewNodeID == "" {
+			// Re-fetch pending review to get the IDs
+			return m, m.loadPendingReview()
 		}
 		m.updateDiffContent()
 
 	case commentDeletedMsg:
 		if msg.err != nil {
-			m.errors.set(errCatCommentSync, msg.localID, fmt.Errorf("delete: %w", msg.err))
-		} else {
-			m.errors.clear(errCatCommentSync, msg.localID)
+			// Re-fetch comments to restore the deleted one
+			return m, tea.Batch(m.loadComments(), m.setFlash("Delete failed: "+msg.err.Error()))
 		}
 		m.updateDiffContent()
 
 	case commentEditedMsg:
 		if msg.err != nil {
-			m.errors.set(errCatCommentSync, msg.localID, fmt.Errorf("edit: %w", msg.err))
-		} else {
-			m.errors.clear(errCatCommentSync, msg.localID)
-			// Update the local comment body
-			m.updateLocalComment(msg.localID, func(c *review.InlineComment) {
-				c.Body = msg.body
-			})
+			// Rollback: restore old body
+			m.updateCommentBody(msg.commentID, msg.oldBody)
+			m.updateDiffContent()
+			return m, m.setFlash("Edit failed: " + msg.err.Error())
 		}
 		m.updateDiffContent()
 
@@ -584,6 +603,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case UserIdentityMsg:
+		if msg.Identity != nil {
+			m.currentUser = msg.Identity.Login
+		}
 		if msg.Identity != nil && len(m.filter.ownerIdentities) == 0 {
 			m.filter.ownerIdentities = make([]string, 0, 1+len(msg.Identity.Teams))
 			m.filter.ownerIdentities = append(m.filter.ownerIdentities, "@"+msg.Identity.Login)
@@ -606,10 +628,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Err == nil && msg.PR != nil {
 			// Preserve review state when updating PR metadata
 			pendingReview := m.pendingReview
-			existingComments := m.pr.ExistingComments
+			comments := m.pr.Comments
 			*m.pr = *msg.PR
 			m.pendingReview = pendingReview
-			m.pr.ExistingComments = existingComments
+			m.pr.Comments = comments
 			if m.prInfoActive {
 				m.openPRInfoPopup()
 			}
@@ -807,9 +829,8 @@ func (m *Model) maxCommentBlockHeight() int {
 // commentRenderedLines returns the number of rendered lines for comments
 // on a specific file path, line number, and side.
 func (m *Model) commentRenderedLines(path string, lineNum int, side string) int {
-	existing := m.comments.CommentsForLine(path, lineNum, side)
-	localPending := m.comments.LocalPendingForLine(path, lineNum, side)
-	totalCount := len(existing) + len(localPending)
+	comments := m.comments.CommentsForLine(path, lineNum, side)
+	totalCount := len(comments)
 	if totalCount == 0 {
 		return 0
 	}
@@ -825,11 +846,7 @@ func (m *Model) commentRenderedLines(path string, lineNum int, side string) int 
 		contentWidth = 20
 	}
 	lines := 0
-	for _, c := range existing {
-		rendered := m.renderMarkdown(c.Body, contentWidth-2)
-		lines += 1 + len(strings.Split(rendered, "\n")) + 1
-	}
-	for _, c := range localPending {
+	for _, c := range comments {
 		rendered := m.renderMarkdown(c.Body, contentWidth-2)
 		lines += 1 + len(strings.Split(rendered, "\n")) + 1
 	}
@@ -849,11 +866,26 @@ func (m *Model) setFlash(msg string) tea.Cmd {
 	})
 }
 
-// hasUnsavedWork returns true if the review has any pending comments that would
-// be lost on quit. This includes both locally-added comments and comments
-// already synced to the forge as part of a draft review.
+// hasUnsavedWork returns true if there are any pending (draft) comments
+// from the current user that haven't been submitted yet.
 func (m *Model) hasUnsavedWork() bool {
-	return len(m.pendingReview.Comments) > 0 || len(m.comments.forgeComments) > 0
+	for _, c := range m.comments.comments {
+		if c.IsPending && c.Author == m.currentUser {
+			return true
+		}
+	}
+	return false
+}
+
+// pendingCommentCount returns the number of pending (draft) comments from the current user.
+func (m *Model) pendingCommentCount() int {
+	n := 0
+	for _, c := range m.comments.comments {
+		if c.IsPending && c.Author == m.currentUser {
+			n++
+		}
+	}
+	return n
 }
 
 const commentBoxHeight = 10 // textarea(5) + header(1) + border(2) + help(1) + padding(1)
@@ -1044,11 +1076,10 @@ func (m Model) View() string {
 	// Header
 	header := styles.Title.Render(fmt.Sprintf("PR #%d: %s", m.pr.Number, m.pr.Title))
 
-	totalPending := len(m.pendingReview.Comments) + len(m.comments.forgeComments)
 	pendingCount := ""
-	if totalPending > 0 {
+	if n := m.pendingCommentCount(); n > 0 {
 		pendingCount = lipgloss.NewStyle().Foreground(styles.Warning).
-			Render(fmt.Sprintf("  [%d pending]", totalPending))
+			Render(fmt.Sprintf("  [%d pending]", n))
 	}
 
 	viewedCount := len(m.pendingReview.ViewedFiles)
@@ -1059,10 +1090,9 @@ func (m Model) View() string {
 	}
 
 	syncLabel := ""
-	inflight := m.pendingReview.InFlightCount()
-	if inflight > 0 {
+	if n := len(m.inflight); n > 0 {
 		syncLabel = lipgloss.NewStyle().Foreground(styles.Secondary).
-			Render(fmt.Sprintf("  [syncing %d...]", inflight))
+			Render(fmt.Sprintf("  [syncing %d...]", n))
 	}
 
 	b.WriteString(header + pendingCount + viewedLabel + syncLabel + "\n")
@@ -1119,7 +1149,7 @@ func (m Model) View() string {
 		helpParts = append(helpParts, "j/k select comment")
 		helpParts = append(helpParts, "enter view all")
 		helpParts = append(helpParts, "r reply")
-		if m.nav.cursor.CommentIdx < len(refs) && refs[m.nav.cursor.CommentIdx].isLocal {
+		if m.nav.cursor.CommentIdx < len(refs) && refs[m.nav.cursor.CommentIdx].editable {
 			helpParts = append(helpParts, "e edit")
 			helpParts = append(helpParts, "d delete")
 		}
@@ -1131,9 +1161,8 @@ func (m Model) View() string {
 			b.WriteString(styles.HelpStyle.Render(strings.Join(helpParts, "  ")))
 		}
 	} else if m.confirmQuit {
-		pendingCount := len(m.pendingReview.Comments) + len(m.comments.forgeComments)
 		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(styles.Warning).
-			Render(fmt.Sprintf("You have %d pending comment(s). Press ctrl+c again to quit.", pendingCount)))
+			Render(fmt.Sprintf("You have %d pending comment(s). Press ctrl+c again to quit.", m.pendingCommentCount())))
 	} else if !m.editor.IsActive() {
 		// Footer
 		var helpParts []string

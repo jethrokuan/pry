@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -15,8 +14,6 @@ import (
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
-
-type waitForSyncMsg struct{}
 
 // SubmittedMsg is sent when the review is successfully submitted.
 type SubmittedMsg struct{}
@@ -49,19 +46,19 @@ type Model struct {
 	svc           review.Service
 	pr            *review.PullRequest
 	pendingReview *review.PendingReview
+	currentUser   string
 	textarea      textarea.Model
-	submitting     bool
-	submitted      bool
-	waitingForSync bool
-	err            error
-	width          int
-	height         int
-	spinner        spinner.Model
-	focusBody      bool
+	submitting    bool
+	submitted     bool
+	err           error
+	width         int
+	height        int
+	spinner       spinner.Model
+	focusBody     bool
 }
 
 // New creates a submit model.
-func New(svc review.Service, pr *review.PullRequest) Model {
+func New(svc review.Service, pr *review.PullRequest, currentUser string) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Review summary (optional)..."
 	ta.CharLimit = 0
@@ -73,6 +70,7 @@ func New(svc review.Service, pr *review.PullRequest) Model {
 		svc:           svc,
 		pr:            pr,
 		pendingReview: pr.PendingReview,
+		currentUser:   currentUser,
 		textarea:      ta,
 		spinner:       s,
 	}
@@ -92,19 +90,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.textarea.SetWidth(msg.Width - 6)
 		m.textarea.SetHeight(5)
 
-	case waitForSyncMsg:
-		if m.pendingReview.InFlightCount() == 0 {
-			// All syncs complete, now submit
-			return m, m.submitReview()
-		}
-		// Still waiting, check again
-		return m, tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
-			return waitForSyncMsg{}
-		})
-
 	case submitResultMsg:
 		m.submitting = false
-		m.waitingForSync = false
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
@@ -163,20 +150,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m *Model) submitReview() tea.Cmd {
 	m.pendingReview.Body = m.textarea.Value()
-
-	// Wait for any in-flight syncs to complete before submitting
-	if m.pendingReview.InFlightCount() > 0 {
-		m.waitingForSync = true
-		return tea.Batch(
-			m.spinner.Tick,
-			tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
-				return waitForSyncMsg{}
-			}),
-		)
-	}
-
 	m.submitting = true
-	m.waitingForSync = false
 	return tea.Batch(
 		m.spinner.Tick,
 		func() tea.Msg {
@@ -184,6 +158,17 @@ func (m *Model) submitReview() tea.Cmd {
 			return submitResultMsg{err: err}
 		},
 	)
+}
+
+// pendingComments returns the current user's pending comments.
+func (m Model) pendingComments() []review.Comment {
+	var result []review.Comment
+	for _, c := range m.pr.Comments {
+		if c.IsPending && c.Author == m.currentUser {
+			result = append(result, c)
+		}
+	}
+	return result
 }
 
 // View renders the submit screen.
@@ -196,25 +181,15 @@ func (m Model) View() string {
 
 	b.WriteString(styles.Title.Render("Submit Review") + "\n\n")
 
-	// Comment count
-	b.WriteString(fmt.Sprintf("%d inline comments pending\n\n",
-		len(m.pendingReview.Comments)))
+	pending := m.pendingComments()
 
-	// Show comment summaries with sync status
-	for i, c := range m.pendingReview.Comments {
-		syncIcon := " "
-		switch c.SyncStatus {
-		case review.SyncComplete:
-			syncIcon = "✓"
-		case review.SyncInFlight:
-			syncIcon = "..."
-		case review.SyncFailed:
-			syncIcon = "✗"
-		case review.SyncPending:
-			syncIcon = "○"
-		}
+	// Comment count
+	b.WriteString(fmt.Sprintf("%d inline comments pending\n\n", len(pending)))
+
+	// Show comment summaries
+	for i, c := range pending {
 		summary := truncate(c.Body, m.width-25)
-		b.WriteString(fmt.Sprintf("  %s %d. %s:%d - %s\n", syncIcon, i+1, c.Path, c.Line, summary))
+		b.WriteString(fmt.Sprintf("  %d. %s:%d - %s\n", i+1, c.Path, c.Line, summary))
 	}
 	b.WriteString("\n")
 
@@ -257,23 +232,7 @@ func (m Model) View() string {
 
 	b.WriteString("\n")
 
-	// Show sync failure warnings
-	failedComments := 0
-	for _, c := range m.pendingReview.Comments {
-		if c.SyncStatus == review.SyncFailed {
-			failedComments++
-		}
-	}
-	if failedComments > 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).
-			Render(fmt.Sprintf("Warning: %d comment(s) failed to sync to GitHub", failedComments)) + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).
-			Render("These comments will be included in the batch submit as fallback.") + "\n\n")
-	}
-
-	if m.waitingForSync {
-		b.WriteString(m.spinner.View() + " Waiting for comments to sync...\n")
-	} else if m.submitting {
+	if m.submitting {
 		b.WriteString(m.spinner.View() + " Submitting review...\n")
 	} else if m.err != nil {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).

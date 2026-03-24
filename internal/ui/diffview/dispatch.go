@@ -137,7 +137,7 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 		return newM, cmd, true
 	case key.Matches(msg, keys.DeleteComment):
 		refs := m.commentRefsAtCursor()
-		if m.nav.cursor.CommentIdx >= 0 && m.nav.cursor.CommentIdx < len(refs) && refs[m.nav.cursor.CommentIdx].isLocal {
+		if m.nav.cursor.CommentIdx >= 0 && m.nav.cursor.CommentIdx < len(refs) && refs[m.nav.cursor.CommentIdx].editable {
 			m.confirmDelete = true
 			return m, nil, true
 		}

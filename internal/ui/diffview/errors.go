@@ -13,10 +13,9 @@ import (
 type errCategory int
 
 const (
-	errCatLoad        errCategory = iota // diff/comment loading failures
-	errCatReview                         // pending review creation failures
-	errCatViewed                         // viewed-file sync failures
-	errCatCommentSync                    // per-comment sync/delete/edit failures (keyed by localID)
+	errCatLoad   errCategory = iota // diff/comment loading failures
+	errCatReview                    // pending review creation failures
+	errCatViewed                    // viewed-file sync failures
 )
 
 // errorStore provides unified error tracking for the diffview.
@@ -83,9 +82,7 @@ func (s *errorStore) renderSyncErrors() string {
 	if err := s.get(errCatViewed); err != nil {
 		lines = append(lines, errStyle.Render(fmt.Sprintf("Viewed error: %v", err)))
 	}
-	if n := s.count(errCatCommentSync); n > 0 {
-		lines = append(lines, errStyle.Render(fmt.Sprintf("Comment sync errors: %d failed", n)))
-	}
+
 
 	if len(lines) == 0 {
 		return ""

@@ -20,8 +20,8 @@ import (
 
 // commentRef identifies a single comment in the rendered comment list for a diff line.
 type commentRef struct {
-	isLocal bool // true for local pending (m.pendingReview.Comments)
-	localID int  // InlineComment.LocalID (only meaningful when isLocal)
+	commentID int  // Comment.ID (may be negative for optimistic)
+	editable  bool // true if this is the current user's pending comment
 }
 
 // commentRefsAtLine returns all expanded comments below the given diff line index, in render order.
@@ -39,11 +39,9 @@ func (m *Model) commentRefsAtLine(diffIdx int) []commentRef {
 		if !m.comments.expanded[ck] {
 			return
 		}
-		for range m.comments.CommentsForLine(path, line, side) {
-			refs = append(refs, commentRef{})
-		}
-		for _, c := range m.comments.LocalPendingForLine(path, line, side) {
-			refs = append(refs, commentRef{isLocal: true, localID: c.LocalID})
+		for _, c := range m.comments.CommentsForLine(path, line, side) {
+			editable := c.IsPending && c.Author == m.currentUser
+			refs = append(refs, commentRef{commentID: c.ID, editable: editable})
 		}
 	}
 
@@ -62,53 +60,48 @@ func (m *Model) commentRefsAtCursor() []commentRef {
 	return m.commentRefsAtLine(m.nav.cursor.LineIdx)
 }
 
-// editSelectedComment opens the inline editor for the selected local pending comment.
+// editSelectedComment opens the inline editor for the selected editable comment.
 func (m Model) editSelectedComment() (Model, tea.Cmd) {
 	refs := m.commentRefsAtCursor()
 	if !m.nav.cursor.IsComment() || m.nav.cursor.CommentIdx >= len(refs) {
 		return m, nil
 	}
 	ref := refs[m.nav.cursor.CommentIdx]
-	if !ref.isLocal {
+	if !ref.editable {
 		return m, nil
 	}
 
-	c := m.pendingReview.FindByLocalID(ref.localID)
+	c := m.findCommentByID(ref.commentID)
 	if c == nil {
 		return m, nil
 	}
 
 	m.nav.cursor = m.nav.cursor.AsLine()
-	m.editor.OpenForEdit(c.Path, c.Line, c.StartLine, c.Side, c.LocalID, c.Body, m.inlineTextareaWidth())
+	m.editor.OpenForEdit(c.Path, c.Line, c.StartLine, c.Side, c.ID, c.Body, m.inlineTextareaWidth())
 	m.updateViewports()
 
 	return m, m.editor.BlinkCmd()
 }
 
-// deleteSelectedComment deletes the selected local pending comment.
+// deleteSelectedComment deletes the selected editable comment.
 func (m Model) deleteSelectedComment() (Model, tea.Cmd) {
 	refs := m.commentRefsAtCursor()
 	if !m.nav.cursor.IsComment() || m.nav.cursor.CommentIdx >= len(refs) {
 		return m, nil
 	}
 	ref := refs[m.nav.cursor.CommentIdx]
-	if !ref.isLocal {
+	if !ref.editable {
 		return m, nil
 	}
 
-	c := m.pendingReview.FindByLocalID(ref.localID)
-	if c == nil {
-		return m, nil
-	}
+	commentID := ref.commentID
 
-	localID := c.LocalID
-	forgeID := c.ForgeID
-
-	m.removeLocalComment(localID)
+	// Optimistically remove
+	m.removeCommentByID(commentID)
 	m.nav.cursor = m.nav.cursor.AsLine()
 	m.updateDiffContent()
 
-	return m, m.deleteCommentCmd(localID, forgeID)
+	return m, m.deleteCommentCmd(commentID)
 }
 
 // --- Comment helpers ---
@@ -152,7 +145,6 @@ func (m *Model) buildCommentPopupContent(width int) string {
 	path := m.files[m.nav.fileCursor].Path
 
 	authorStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
-	pendingStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Warning)
 	draftStyle := lipgloss.NewStyle().Foreground(styles.Warning)
 	bodyStyle := lipgloss.NewStyle().Width(width)
 	sepStyle := lipgloss.NewStyle().Foreground(styles.Muted)
@@ -160,7 +152,7 @@ func (m *Model) buildCommentPopupContent(width int) string {
 
 	var b strings.Builder
 
-	writeExisting := func(lineNum int, side string) {
+	writeComments := func(lineNum int, side string) {
 		for _, c := range m.comments.CommentsForLine(path, lineNum, side) {
 			label := "💬"
 			if c.IsPending {
@@ -176,90 +168,99 @@ func (m *Model) buildCommentPopupContent(width int) string {
 			b.WriteString(separator + "\n\n")
 		}
 	}
-	writeLocal := func(lineNum int, side string) {
-		for _, c := range m.comments.LocalPendingForLine(path, lineNum, side) {
-			syncLabel := ""
-			switch c.SyncStatus {
-			case review.SyncInFlight:
-				syncLabel = " ..."
-			case review.SyncComplete:
-				syncLabel = " ✓"
-			case review.SyncFailed:
-				syncLabel = " ✗"
-			}
-			b.WriteString("📝 " + pendingStyle.Render("(pending)") + syncLabel + "\n\n")
-			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
-			b.WriteString(bodyStyle.Render(rendered) + "\n\n")
-			b.WriteString(separator + "\n\n")
-		}
-	}
-
-	writeSide := func(lineNum int, side string) {
-		writeExisting(lineNum, side)
-		writeLocal(lineNum, side)
-	}
 
 	if dl.newLine > 0 {
-		writeSide(dl.newLine, "RIGHT")
+		writeComments(dl.newLine, "RIGHT")
 	}
 	if dl.oldLine > 0 {
-		writeSide(dl.oldLine, "LEFT")
+		writeComments(dl.oldLine, "LEFT")
 	}
 
 	return strings.TrimRight(b.String(), "\n")
 }
 
-
 // --- Comment mutation methods ---
 // All comment data mutations go through these methods, which automatically
 // rebuild the comment index via CommentPanel.RebuildIndex().
 
-// setExistingComments replaces the existing comments and rebuilds the index.
-func (m *Model) setExistingComments(comments []review.ExistingComment) {
-	m.comments.existing = comments
-	m.comments.RebuildIndex(m.pendingReview.Comments)
+// setComments replaces the full comment list and rebuilds the index.
+func (m *Model) setComments(comments []review.Comment) {
+	m.comments.comments = comments
+	m.pr.Comments = comments
+	m.comments.RebuildIndex()
 }
 
-// addLocalComment adds a new local pending comment and rebuilds the index.
-// Returns the assigned LocalID.
-func (m *Model) addLocalComment(c review.InlineComment) int {
-	id := m.pendingReview.AddCommentDirect(c)
-	m.comments.RebuildIndex(m.pendingReview.Comments)
-	return id
+// mergePendingComments adds pending review comments to the comment list,
+// avoiding duplicates (by ID).
+func (m *Model) mergePendingComments(pending []review.Comment) {
+	existing := make(map[int]bool, len(m.comments.comments))
+	for _, c := range m.comments.comments {
+		existing[c.ID] = true
+	}
+	for _, c := range pending {
+		if !existing[c.ID] {
+			m.comments.comments = append(m.comments.comments, c)
+		}
+	}
+	m.pr.Comments = m.comments.comments
+	m.comments.RebuildIndex()
 }
 
-// removeLocalComment removes a local pending comment by LocalID and rebuilds
-// the index. Returns the removed comment's ForgeID.
-func (m *Model) removeLocalComment(localID int) int {
-	forgeID := m.pendingReview.RemoveCommentByLocalID(localID)
-	m.comments.RebuildIndex(m.pendingReview.Comments)
-	return forgeID
+// addOptimisticComment appends a comment with a temp ID and rebuilds the index.
+// Returns the temp ID assigned.
+func (m *Model) addOptimisticComment(c review.Comment) int {
+	tempID := m.pendingReview.NextTempID()
+	c.ID = tempID
+	m.comments.comments = append(m.comments.comments, c)
+	m.pr.Comments = m.comments.comments
+	m.comments.RebuildIndex()
+	return tempID
 }
 
-// updateLocalComment finds a comment by LocalID and applies the given mutation,
-// then rebuilds the index.
-func (m *Model) updateLocalComment(localID int, fn func(*review.InlineComment)) {
-	if c := m.pendingReview.FindByLocalID(localID); c != nil {
-		fn(c)
-		m.comments.RebuildIndex(m.pendingReview.Comments)
+// replaceComment swaps an optimistic comment (by temp ID) with a real one from the server.
+func (m *Model) replaceComment(tempID int, real review.Comment) {
+	for i, c := range m.comments.comments {
+		if c.ID == tempID {
+			m.comments.comments[i] = real
+			m.pr.Comments = m.comments.comments
+			m.comments.RebuildIndex()
+			return
+		}
 	}
 }
 
-// restoreForgeComments batch-adds comments from the forge (crash recovery)
-// and sets forgeComments, rebuilding the index once at the end.
-func (m *Model) restoreForgeComments(pendingComments []review.ExistingComment, forgeComments []review.ExistingComment) {
-	for _, ec := range pendingComments {
-		m.pendingReview.AddCommentDirect(review.InlineComment{
-			Path:       ec.Path,
-			Line:       ec.Line,
-			Side:       ec.Side,
-			Body:       ec.Body,
-			ForgeID:    ec.ID,
-			SyncStatus: review.SyncComplete,
-		})
+// removeCommentByID removes a comment by ID and rebuilds the index.
+func (m *Model) removeCommentByID(id int) {
+	for i, c := range m.comments.comments {
+		if c.ID == id {
+			m.comments.comments = append(m.comments.comments[:i], m.comments.comments[i+1:]...)
+			m.pr.Comments = m.comments.comments
+			m.comments.RebuildIndex()
+			return
+		}
 	}
-	m.comments.forgeComments = forgeComments
-	m.comments.RebuildIndex(m.pendingReview.Comments)
+}
+
+// updateCommentBody updates the body of a comment by ID and rebuilds the index.
+func (m *Model) updateCommentBody(id int, body string) {
+	for i, c := range m.comments.comments {
+		if c.ID == id {
+			m.comments.comments[i].Body = body
+			m.pr.Comments = m.comments.comments
+			m.comments.RebuildIndex()
+			return
+		}
+	}
+}
+
+// findCommentByID returns a pointer to the comment with the given ID, or nil.
+func (m *Model) findCommentByID(id int) *review.Comment {
+	for i := range m.comments.comments {
+		if m.comments.comments[i].ID == id {
+			return &m.comments.comments[i]
+		}
+	}
+	return nil
 }
 
 func lineAndSide(dl diffLineInfo) (int, string) {
@@ -315,19 +316,9 @@ func (m *Model) commentKeysForFile(path string) []string {
 			keys = append(keys, ck)
 		}
 	}
-	for _, c := range m.comments.existing {
+	for _, c := range m.comments.comments {
 		if c.Path == path {
 			add(commentKey(path, c.Line))
-		}
-	}
-	for _, c := range m.comments.forgeComments {
-		if c.Path == path {
-			add(commentKey(path, c.Line))
-		}
-	}
-	for _, c := range m.pendingReview.Comments {
-		if c.Path == path {
-			add(commentKey(c.Path, c.Line))
 		}
 	}
 	return keys
@@ -489,16 +480,15 @@ func (m Model) inlineTextareaWidth() int {
 // handleEditorSave processes a save message from the InlineEditor.
 func (m Model) handleEditorSave(msg inlineEditorSaveMsg) (Model, tea.Cmd) {
 	// Editing an existing comment
-	if msg.editLocalID != 0 {
-		c := m.pendingReview.FindByLocalID(msg.editLocalID)
+	if msg.editCommentID != 0 {
+		c := m.findCommentByID(msg.editCommentID)
 		if c != nil {
-			localID := c.LocalID
-			forgeID := c.ForgeID
-			m.updateLocalComment(localID, func(c *review.InlineComment) {
-				c.Body = msg.body
-			})
+			oldBody := c.Body
+			commentID := c.ID
+			// Optimistically update body
+			m.updateCommentBody(commentID, msg.body)
 			m.closeInlineComment()
-			return m, m.editCommentCmd(localID, forgeID, msg.body)
+			return m, m.editCommentCmd(commentID, msg.body, oldBody)
 		}
 		m.closeInlineComment()
 		return m, nil
@@ -509,32 +499,23 @@ func (m Model) handleEditorSave(msg inlineEditorSaveMsg) (Model, tea.Cmd) {
 		side = "RIGHT"
 	}
 
-	syncStatus := review.SyncPending
-	if m.pendingReview.ReviewNodeID != "" {
-		syncStatus = review.SyncInFlight
+	// Create optimistic comment
+	optimistic := review.Comment{
+		Path:      msg.path,
+		Line:      msg.line,
+		StartLine: msg.startLine,
+		Side:      side,
+		Body:      msg.body,
+		Author:    m.currentUser,
+		IsPending: true,
 	}
-
-	newComment := review.InlineComment{
-		Path:       msg.path,
-		Line:       msg.line,
-		StartLine:  msg.startLine,
-		Side:       side,
-		Body:       msg.body,
-		SyncStatus: syncStatus,
-	}
-	m.addLocalComment(newComment)
-
-	// Get the comment back with its assigned LocalID
-	added := m.pendingReview.Comments[len(m.pendingReview.Comments)-1]
+	tempID := m.addOptimisticComment(optimistic)
+	m.inflight[tempID] = true
 
 	m.closeInlineComment()
 
-	// If no pending review exists on the forge yet, create one now.
-	// The reviewCreatedMsg handler will flush all pending comments.
-	if m.pendingReview.ReviewNodeID == "" {
-		return m, m.createPendingReviewCmd()
-	}
-	return m, m.syncCommentCmd(added)
+	// Fire background command to create review (if needed) + add comment
+	return m, m.addReviewCommentCmd(tempID, msg.path, msg.line, msg.startLine, side, msg.body)
 }
 
 func (m Model) openExternalEditorForComment() tea.Cmd {

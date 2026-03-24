@@ -18,10 +18,10 @@ type MockService struct {
 	ListPRsFn               func(ctx context.Context, filter review.PRFilter) ([]review.PullRequest, error)
 	GetPRFn                 func(ctx context.Context, number int) (*review.PullRequest, error)
 	FetchDiffFilesFn        func(ctx context.Context, number int) ([]diff.DiffFile, error)
-	FetchExistingCommentsFn func(ctx context.Context, number int) ([]review.ExistingComment, error)
-	FetchPendingReviewFn    func(ctx context.Context, number int) (int, string, []review.ExistingComment, error)
-	CreatePendingReviewFn   func(ctx context.Context, prNumber int) (int, string, error)
-	AddReviewCommentFn      func(ctx context.Context, reviewNodeID string, comment review.InlineComment) (int, error)
+	FetchCommentsFn       func(ctx context.Context, number int) ([]review.Comment, error)
+	FetchPendingReviewFn  func(ctx context.Context, number int) (int, string, []review.Comment, error)
+	CreatePendingReviewFn func(ctx context.Context, prNumber int) (int, string, error)
+	AddReviewCommentFn    func(ctx context.Context, reviewNodeID string, path string, line, startLine int, side, body string) (int, error)
 	DeleteReviewCommentFn   func(ctx context.Context, prNumber, commentID int) error
 	EditReviewCommentFn     func(ctx context.Context, prNumber, commentID int, body string) error
 	SubmitReviewFn          func(ctx context.Context, pr *review.PullRequest, review *review.PendingReview) error
@@ -84,14 +84,14 @@ func (m *MockService) FetchDiffFiles(ctx context.Context, number int) ([]diff.Di
 	return nil, nil
 }
 
-func (m *MockService) FetchExistingComments(ctx context.Context, number int) ([]review.ExistingComment, error) {
-	if m.FetchExistingCommentsFn != nil {
-		return m.FetchExistingCommentsFn(ctx, number)
+func (m *MockService) FetchComments(ctx context.Context, number int) ([]review.Comment, error) {
+	if m.FetchCommentsFn != nil {
+		return m.FetchCommentsFn(ctx, number)
 	}
 	return nil, nil
 }
 
-func (m *MockService) FetchPendingReview(ctx context.Context, number int) (int, string, []review.ExistingComment, error) {
+func (m *MockService) FetchPendingReview(ctx context.Context, number int) (int, string, []review.Comment, error) {
 	if m.FetchPendingReviewFn != nil {
 		return m.FetchPendingReviewFn(ctx, number)
 	}
@@ -105,9 +105,9 @@ func (m *MockService) CreatePendingReview(ctx context.Context, prNumber int) (in
 	return 1, "R_node1", nil
 }
 
-func (m *MockService) AddReviewComment(ctx context.Context, reviewNodeID string, comment review.InlineComment) (int, error) {
+func (m *MockService) AddReviewComment(ctx context.Context, reviewNodeID string, path string, line, startLine int, side, body string) (int, error) {
 	if m.AddReviewCommentFn != nil {
-		return m.AddReviewCommentFn(ctx, reviewNodeID, comment)
+		return m.AddReviewCommentFn(ctx, reviewNodeID, path, line, startLine, side, body)
 	}
 	return 1, nil
 }

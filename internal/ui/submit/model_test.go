@@ -12,13 +12,25 @@ import (
 	"github.com/jethrokuan/pry/internal/review/reviewtest"
 )
 
+const testUser = "testuser"
+
 func newTestModel(svc *reviewtest.MockService) Model {
 	pr := &review.PullRequest{
 		Number:        42,
 		Title:         "Test PR",
 		PendingReview: review.NewPendingReview(),
 	}
-	return New(svc, pr)
+	return New(svc, pr, testUser)
+}
+
+func newTestModelWithComments(svc *reviewtest.MockService, comments []review.Comment) Model {
+	pr := &review.PullRequest{
+		Number:        42,
+		Title:         "Test PR",
+		PendingReview: review.NewPendingReview(),
+		Comments:      comments,
+	}
+	return New(svc, pr, testUser)
 }
 
 func sized(m Model) Model {
@@ -47,6 +59,12 @@ var _ = ginkgo.Describe("Submit Model", func() {
 			gomega.Expect(m.pendingReview.Event).To(gomega.Equal(review.ReviewEventComment))
 			gomega.Expect(m.submitting).To(gomega.BeFalse())
 			gomega.Expect(m.submitted).To(gomega.BeFalse())
+		})
+
+		ginkgo.It("stores the current user", func() {
+			svc := &reviewtest.MockService{}
+			m := newTestModel(svc)
+			gomega.Expect(m.currentUser).To(gomega.Equal(testUser))
 		})
 	})
 
@@ -160,48 +178,47 @@ var _ = ginkgo.Describe("Submit Model", func() {
 			msg := cmd()
 			gomega.Expect(msg).To(gomega.BeAssignableToTypeOf(SubmittedMsg{}))
 		})
+
+		ginkgo.It("calls svc.SubmitReview directly", func() {
+			var submitted bool
+			svc := &reviewtest.MockService{
+				SubmitReviewFn: func(_ context.Context, _ *review.PullRequest, _ *review.PendingReview) error {
+					submitted = true
+					return nil
+				},
+			}
+			m := sized(newTestModel(svc))
+			_, cmd := pressCtrlS(m)
+			gomega.Expect(cmd).ToNot(gomega.BeNil())
+			// Execute the batch command to trigger the submit
+			// The batch contains spinner tick and submit func
+			msgs := executeBatch(cmd)
+			// After executing, the mock should have been called
+			gomega.Expect(submitted).To(gomega.BeTrue())
+			_ = msgs
+		})
 	})
 
-	ginkgo.Describe("sync waiting", func() {
-		ginkgo.It("waits for in-flight comments before submitting", func() {
+	ginkgo.Describe("pendingComments", func() {
+		ginkgo.It("filters comments by IsPending and current user", func() {
 			svc := &reviewtest.MockService{}
-			m := sized(newTestModel(svc))
-			m.pendingReview.AddComment("file.go", 10, "test comment")
-			m.pendingReview.Comments[0].SyncStatus = review.SyncInFlight
-
-			m, cmd := pressCtrlS(m)
-			gomega.Expect(m.waitingForSync).To(gomega.BeTrue())
-			gomega.Expect(cmd).ToNot(gomega.BeNil())
+			comments := []review.Comment{
+				{ID: 1, Path: "file.go", Line: 10, Body: "my pending", Author: testUser, IsPending: true},
+				{ID: 2, Path: "file.go", Line: 20, Body: "other pending", Author: "other", IsPending: true},
+				{ID: 3, Path: "file.go", Line: 30, Body: "my submitted", Author: testUser, IsPending: false},
+			}
+			m := sized(newTestModelWithComments(svc, comments))
+			pending := m.pendingComments()
+			gomega.Expect(pending).To(gomega.HaveLen(1))
+			gomega.Expect(pending[0].ID).To(gomega.Equal(1))
+			gomega.Expect(pending[0].Body).To(gomega.Equal("my pending"))
 		})
 
-		ginkgo.It("proceeds to submit when no in-flight comments", func() {
+		ginkgo.It("returns empty when no pending comments", func() {
 			svc := &reviewtest.MockService{}
 			m := sized(newTestModel(svc))
-			m.pendingReview.AddComment("file.go", 10, "test comment")
-			m.pendingReview.Comments[0].SyncStatus = review.SyncComplete
-
-			m, _ = pressCtrlS(m)
-			gomega.Expect(m.submitting).To(gomega.BeTrue())
-			gomega.Expect(m.waitingForSync).To(gomega.BeFalse())
-		})
-
-		ginkgo.It("transitions from waiting to submitting when sync completes", func() {
-			svc := &reviewtest.MockService{}
-			m := sized(newTestModel(svc))
-			m.waitingForSync = true
-			m, cmd := m.Update(waitForSyncMsg{})
-			gomega.Expect(cmd).ToNot(gomega.BeNil())
-		})
-
-		ginkgo.It("continues waiting if comments still in-flight", func() {
-			svc := &reviewtest.MockService{}
-			m := sized(newTestModel(svc))
-			m.waitingForSync = true
-			m.pendingReview.AddComment("file.go", 10, "test")
-			m.pendingReview.Comments[0].SyncStatus = review.SyncInFlight
-
-			m, cmd := m.Update(waitForSyncMsg{})
-			gomega.Expect(cmd).ToNot(gomega.BeNil())
+			pending := m.pendingComments()
+			gomega.Expect(pending).To(gomega.BeEmpty())
 		})
 	})
 
@@ -214,29 +231,24 @@ var _ = ginkgo.Describe("Submit Model", func() {
 
 		ginkgo.It("shows comment count", func() {
 			svc := &reviewtest.MockService{}
-			m := sized(newTestModel(svc))
-			m.pendingReview.AddComment("file.go", 10, "fix this")
-			m.pendingReview.AddComment("main.go", 20, "and this")
+			comments := []review.Comment{
+				{ID: 1, Path: "file.go", Line: 10, Body: "fix this", Author: testUser, IsPending: true},
+				{ID: 2, Path: "main.go", Line: 20, Body: "and this", Author: testUser, IsPending: true},
+			}
+			m := sized(newTestModelWithComments(svc, comments))
 			view := m.View()
 			gomega.Expect(view).To(gomega.ContainSubstring("2 inline comments pending"))
 		})
 
-		ginkgo.It("shows sync status icons", func() {
+		ginkgo.It("does not count other users pending comments", func() {
 			svc := &reviewtest.MockService{}
-			m := sized(newTestModel(svc))
-			m.pendingReview.AddComment("file.go", 10, "pending comment")
-			m.pendingReview.Comments[0].SyncStatus = review.SyncComplete
+			comments := []review.Comment{
+				{ID: 1, Path: "file.go", Line: 10, Body: "mine", Author: testUser, IsPending: true},
+				{ID: 2, Path: "file.go", Line: 20, Body: "theirs", Author: "other", IsPending: true},
+			}
+			m := sized(newTestModelWithComments(svc, comments))
 			view := m.View()
-			gomega.Expect(view).To(gomega.ContainSubstring("✓"))
-		})
-
-		ginkgo.It("shows failed sync warning", func() {
-			svc := &reviewtest.MockService{}
-			m := sized(newTestModel(svc))
-			m.pendingReview.AddComment("file.go", 10, "failed comment")
-			m.pendingReview.Comments[0].SyncStatus = review.SyncFailed
-			view := m.View()
-			gomega.Expect(view).To(gomega.ContainSubstring("1 comment(s) failed to sync"))
+			gomega.Expect(view).To(gomega.ContainSubstring("1 inline comments pending"))
 		})
 
 		ginkgo.It("shows error message after submit failure", func() {
@@ -256,14 +268,6 @@ var _ = ginkgo.Describe("Submit Model", func() {
 			gomega.Expect(view).To(gomega.ContainSubstring("Submitting review..."))
 		})
 
-		ginkgo.It("shows waiting for sync text", func() {
-			svc := &reviewtest.MockService{}
-			m := sized(newTestModel(svc))
-			m.waitingForSync = true
-			view := m.View()
-			gomega.Expect(view).To(gomega.ContainSubstring("Waiting for comments to sync..."))
-		})
-
 		ginkgo.It("shows selected action", func() {
 			svc := &reviewtest.MockService{}
 			m := sized(newTestModel(svc))
@@ -274,3 +278,22 @@ var _ = ginkgo.Describe("Submit Model", func() {
 		})
 	})
 })
+
+// executeBatch runs a tea.Cmd and collects results. For batch commands,
+// it runs all sub-commands. Returns all messages produced.
+func executeBatch(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var msgs []tea.Msg
+		for _, c := range batch {
+			if c != nil {
+				msgs = append(msgs, c())
+			}
+		}
+		return msgs
+	}
+	return []tea.Msg{msg}
+}

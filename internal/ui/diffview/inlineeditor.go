@@ -22,7 +22,7 @@ type inlineEditorSaveMsg struct {
 	startLine   int
 	side        string
 	mode        commentMode
-	editLocalID int // non-zero when editing an existing comment
+	editCommentID int // non-zero when editing an existing comment
 }
 
 // inlineEditorCancelMsg is emitted when the user cancels the editor.
@@ -46,7 +46,7 @@ type InlineEditor struct {
 	side           string
 	mode           commentMode
 	suggestion     string // original code for suggestion mode
-	editLocalID    int    // non-zero when editing an existing comment
+	editCommentID    int    // non-zero when editing an existing comment
 	confirmDiscard bool   // true after first esc with unsaved content
 	width          int
 
@@ -70,7 +70,7 @@ func (e *InlineEditor) Open(path string, line, startLine int, side string, mode 
 	e.side = side
 	e.mode = mode
 	e.suggestion = suggestion
-	e.editLocalID = 0
+	e.editCommentID = 0
 	e.confirmDiscard = false
 	e.width = width
 
@@ -89,7 +89,7 @@ func (e *InlineEditor) Open(path string, line, startLine int, side string, mode 
 }
 
 // OpenForEdit activates the inline editor to edit an existing comment.
-func (e *InlineEditor) OpenForEdit(path string, line, startLine int, side string, localID int, body string, width int) {
+func (e *InlineEditor) OpenForEdit(path string, line, startLine int, side string, commentID int, body string, width int) {
 	e.active = true
 	e.path = path
 	e.line = line
@@ -97,7 +97,7 @@ func (e *InlineEditor) OpenForEdit(path string, line, startLine int, side string
 	e.side = side
 	e.mode = commentModeComment
 	e.suggestion = ""
-	e.editLocalID = localID
+	e.editCommentID = commentID
 	e.confirmDiscard = false
 	e.width = width
 
@@ -115,7 +115,7 @@ func (e *InlineEditor) OpenForEdit(path string, line, startLine int, side string
 // Close deactivates the inline editor and resets state.
 func (e *InlineEditor) Close() {
 	e.active = false
-	e.editLocalID = 0
+	e.editCommentID = 0
 	e.confirmDiscard = false
 	e.mentionActive = false
 }
@@ -188,7 +188,7 @@ func (e InlineEditor) HandleKey(msg tea.KeyPressMsg) (InlineEditor, tea.Cmd, any
 			startLine:   e.startLine,
 			side:        e.side,
 			mode:        e.mode,
-			editLocalID: e.editLocalID,
+			editCommentID: e.editCommentID,
 		}
 		e.Close()
 		return e, nil, saveMsg

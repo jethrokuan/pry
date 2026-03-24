@@ -31,16 +31,16 @@ func (s *stubService) GetPR(_ context.Context, _ int) (*review.PullRequest, erro
 func (s *stubService) FetchDiffFiles(_ context.Context, _ int) ([]diff.DiffFile, error) {
 	return nil, nil
 }
-func (s *stubService) FetchExistingComments(_ context.Context, _ int) ([]review.ExistingComment, error) {
+func (s *stubService) FetchComments(_ context.Context, _ int) ([]review.Comment, error) {
 	return nil, nil
 }
-func (s *stubService) FetchPendingReview(_ context.Context, _ int) (int, string, []review.ExistingComment, error) {
+func (s *stubService) FetchPendingReview(_ context.Context, _ int) (int, string, []review.Comment, error) {
 	return 0, "", nil, nil
 }
 func (s *stubService) CreatePendingReview(_ context.Context, _ int) (int, string, error) {
 	return 0, "", nil
 }
-func (s *stubService) AddReviewComment(_ context.Context, _ string, _ review.InlineComment) (int, error) {
+func (s *stubService) AddReviewComment(_ context.Context, _ string, _ string, _, _ int, _, _ string) (int, error) {
 	return 0, nil
 }
 func (s *stubService) DeleteReviewComment(_ context.Context, _, _ int) error { return nil }

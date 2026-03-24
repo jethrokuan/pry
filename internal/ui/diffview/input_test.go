@@ -636,10 +636,13 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
 			// Add a pending comment so hasUnsavedWork returns true
-			m.pendingReview.Comments = append(m.pendingReview.Comments, review.InlineComment{
-				Path: "src/main.go",
-				Line: 1,
-				Body: "test comment",
+			m.comments.comments = append(m.comments.comments, review.Comment{
+				ID:        -1,
+				Path:      "src/main.go",
+				Line:      1,
+				Body:      "test comment",
+				Author:    m.currentUser,
+				IsPending: true,
 			})
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})

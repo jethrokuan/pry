@@ -238,13 +238,7 @@ func (m Model) toggleAllFolds() Model {
 
 	// Toggle all comments
 	allCommentKeys := make(map[string]bool)
-	for _, c := range m.comments.existing {
-		allCommentKeys[commentKey(c.Path, c.Line)] = true
-	}
-	for _, c := range m.comments.forgeComments {
-		allCommentKeys[commentKey(c.Path, c.Line)] = true
-	}
-	for _, c := range m.pendingReview.Comments {
+	for _, c := range m.comments.comments {
 		allCommentKeys[commentKey(c.Path, c.Line)] = true
 	}
 	for ck := range allCommentKeys {

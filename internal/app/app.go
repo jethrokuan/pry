@@ -84,6 +84,7 @@ func (m Model) diffviewOpts() []diffview.Option {
 	var opts []diffview.Option
 	if m.userIdentity != nil {
 		opts = append(opts, diffview.WithUserIdentity(m.userIdentity))
+		opts = append(opts, diffview.WithCurrentUser(m.userIdentity.Login))
 	}
 	if len(m.mentionableUsers) > 0 {
 		opts = append(opts, diffview.WithMentionableUsers(m.mentionableUsers))
@@ -289,7 +290,11 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case diffview.SubmitReviewMsg:
 		m.selectedPR.PendingReview = m.diffView.PendingReview()
-		m.submit = submit.New(m.svc, m.selectedPR)
+		currentUser := ""
+		if m.userIdentity != nil {
+			currentUser = m.userIdentity.Login
+		}
+		m.submit = submit.New(m.svc, m.selectedPR, currentUser)
 		m.screen = ScreenSubmit
 		return m, tea.Batch(m.submit.Init(), m.windowSizeCmd())
 	case diffview.BackMsg:
@@ -301,10 +306,10 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Update the shared PR in-place so diffview sees the change.
 			// Preserve review state that the new PR data doesn't carry.
 			pendingReview := m.selectedPR.PendingReview
-			existingComments := m.selectedPR.ExistingComments
+			comments := m.selectedPR.Comments
 			*m.selectedPR = *msg.pr
 			m.selectedPR.PendingReview = pendingReview
-			m.selectedPR.ExistingComments = existingComments
+			m.selectedPR.Comments = comments
 		}
 		// Forward to diffview as PRBodyLoadedMsg
 		var dvCmd tea.Cmd

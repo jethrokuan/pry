@@ -459,7 +459,7 @@ var _ = Describe("FetchDiffFiles", func() {
 	})
 })
 
-var _ = Describe("FetchExistingComments", func() {
+var _ = Describe("FetchComments", func() {
 	var (
 		rest *mockREST
 		gql  *mockGraphQL
@@ -483,7 +483,7 @@ var _ = Describe("FetchExistingComments", func() {
 			}, resp)
 		}
 
-		comments, err := c.FetchExistingComments(ctx, 42)
+		comments, err := c.FetchComments(ctx, 42)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(comments).To(HaveLen(1))
 		Expect(comments[0].ID).To(Equal(1))
@@ -508,7 +508,7 @@ var _ = Describe("FetchExistingComments", func() {
 			}, resp)
 		}
 
-		comments, err := c.FetchExistingComments(ctx, 42)
+		comments, err := c.FetchComments(ctx, 42)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(comments).To(HaveLen(101))
 		Expect(callCount).To(Equal(2))
@@ -519,7 +519,7 @@ var _ = Describe("FetchExistingComments", func() {
 			return errors.New("500 error")
 		}
 
-		_, err := c.FetchExistingComments(ctx, 42)
+		_, err := c.FetchComments(ctx, 42)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("failed to fetch comments"))
 	})
@@ -668,11 +668,11 @@ var _ = Describe("SubmitReview", func() {
 		Expect(rest.calls).To(HaveLen(1))
 	})
 
-	It("creates and submits a new review when ReviewID is 0", func() {
+	It("submits a review with ReviewID 0", func() {
 		rest.doHandler = func(method, path string, body io.Reader, resp interface{}) error {
 			Expect(method).To(Equal("POST"))
 			Expect(path).To(ContainSubstring("pulls/42/reviews"))
-			Expect(path).NotTo(ContainSubstring("events"))
+			Expect(path).To(ContainSubstring("events"))
 			return nil
 		}
 
@@ -680,9 +680,6 @@ var _ = Describe("SubmitReview", func() {
 		rev := &review.PendingReview{
 			ReviewID: 0,
 			Event:    review.ReviewEventComment,
-			Comments: []review.InlineComment{
-				{Path: "main.go", Line: 10, Side: "RIGHT", Body: "nit"},
-			},
 		}
 		err := c.SubmitReview(ctx, pr, rev)
 		Expect(err).NotTo(HaveOccurred())
@@ -842,9 +839,7 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		id, err := c.AddReviewComment(ctx, "PRR_123", review.InlineComment{
-			Path: "main.go", Line: 10, Side: "RIGHT", Body: "nit: typo",
-		})
+		id, err := c.AddReviewComment(ctx, "PRR_123", "main.go", 10, 0, "RIGHT", "nit: typo")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(id).To(Equal(555))
 	})
@@ -866,9 +861,7 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		_, err := c.AddReviewComment(ctx, "PRR_123", review.InlineComment{
-			Path: "main.go", Line: 10, StartLine: 5, Side: "RIGHT", Body: "refactor this block",
-		})
+		_, err := c.AddReviewComment(ctx, "PRR_123", "main.go", 10, 5, "RIGHT", "refactor this block")
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -885,9 +878,7 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		_, err := c.AddReviewComment(ctx, "PRR_123", review.InlineComment{
-			Path: "main.go", Line: 10, Side: "RIGHT", Body: "test",
-		})
+		_, err := c.AddReviewComment(ctx, "PRR_123", "main.go", 10, 0, "RIGHT", "test")
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("no comment returned"))
 	})

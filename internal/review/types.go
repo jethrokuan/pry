@@ -1,7 +1,6 @@
 package review
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -10,16 +9,6 @@ type PRFilter struct {
 	Name      string
 	Qualifier string
 }
-
-// SyncStatus tracks the sync state of a comment with the forge.
-type SyncStatus int
-
-const (
-	SyncPending  SyncStatus = iota // Not yet sent to forge
-	SyncInFlight                   // Currently being sent
-	SyncComplete                   // Successfully synced, has ForgeID set
-	SyncFailed                     // Sync failed
-)
 
 // CheckRunStatus represents the execution status of a check run.
 type CheckRunStatus string
@@ -99,22 +88,22 @@ type PullRequest struct {
 	MyReviewState  string     // Authenticated user's latest review: APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, or ""
 
 	// Review state (populated when user enters review)
-	PendingReview    *PendingReview    // nil until user starts reviewing
-	ExistingComments []ExistingComment // populated from forge
+	PendingReview *PendingReview // nil until user starts reviewing
+	Comments      []Comment      // populated from forge
 }
 
 // MergeEnriched replaces all fields in pr with those from enriched,
-// then restores any active review state (PendingReview, ExistingComments)
+// then restores any active review state (PendingReview, Comments)
 // that was already set on the receiver.
 func (pr *PullRequest) MergeEnriched(enriched *PullRequest) {
 	savedReview := pr.PendingReview
-	savedComments := pr.ExistingComments
+	savedComments := pr.Comments
 	*pr = *enriched
 	if savedReview != nil {
 		pr.PendingReview = savedReview
 	}
 	if savedComments != nil {
-		pr.ExistingComments = savedComments
+		pr.Comments = savedComments
 	}
 }
 
@@ -127,44 +116,32 @@ const (
 	ReviewEventRequestChanges ReviewEvent = "REQUEST_CHANGES"
 )
 
-// InlineComment represents a pending inline comment.
-type InlineComment struct {
+// Comment represents a review comment on a PR.
+// Used for both existing (submitted/draft) comments from the forge and
+// optimistic comments not yet confirmed by the server (identified by negative IDs).
+type Comment struct {
+	ID        int    // Forge ID (negative = optimistic/temp, not yet confirmed)
 	Path      string
 	Line      int
 	StartLine int    // for multi-line (0 = single line)
 	Side      string // RIGHT (new) or LEFT (old)
-	Body      string
-
-	// Sync tracking
-	LocalID    int        // Monotonic local ID for async tracking
-	ForgeID   int        // Forge comment ID once synced (0 if not yet)
-	SyncStatus SyncStatus // Current sync state
-	SyncError  error      // Last sync error, if any
-}
-
-// ExistingComment represents an existing review comment on a PR.
-type ExistingComment struct {
-	ID        int
-	Path      string
-	Line      int
-	Side      string
 	Body      string
 	Author    string
 	CreatedAt string
 	IsPending bool // true if part of a PENDING (draft) review
 }
 
-// PendingReview accumulates comments before submission.
+// PendingReview tracks the state of an in-progress review.
+// Comments are stored on PullRequest.Comments (the single source of truth);
+// PendingReview only tracks the review envelope (ID, event, body, viewed files).
 type PendingReview struct {
 	ReviewID     int    // Forge review ID (0 if not yet created)
 	ReviewNodeID string // Forge-specific GraphQL ID for the review
-	Comments     []InlineComment
 	Body         string
 	Event        ReviewEvent
 	ViewedFiles  map[string]bool
 
-	// Sync tracking
-	nextLocalID int
+	nextTempID int // Decrementing counter for optimistic temp IDs
 }
 
 // StartReview creates a new pending review on this PR and returns it.
@@ -176,125 +153,13 @@ func (pr *PullRequest) StartReview() *PendingReview {
 // NewPendingReview creates a new empty pending review.
 func NewPendingReview() *PendingReview {
 	return &PendingReview{
-		Comments:    make([]InlineComment, 0),
 		Event:       ReviewEventComment,
 		ViewedFiles: make(map[string]bool),
 	}
 }
 
-// nextID returns the next local ID and increments the counter.
-func (r *PendingReview) nextID() int {
-	r.nextLocalID++
-	return r.nextLocalID
-}
-
-// AddComment adds an inline comment to the pending review and returns its LocalID.
-func (r *PendingReview) AddComment(path string, line int, body string) int {
-	id := r.nextID()
-	r.Comments = append(r.Comments, InlineComment{
-		Path:       path,
-		Line:       line,
-		Side:       "RIGHT",
-		Body:       body,
-		LocalID:    id,
-		SyncStatus: SyncPending,
-	})
-	return id
-}
-
-// AddMultiLineComment adds a multi-line inline comment and returns its LocalID.
-func (r *PendingReview) AddMultiLineComment(path string, startLine, endLine int, body string) int {
-	id := r.nextID()
-	r.Comments = append(r.Comments, InlineComment{
-		Path:       path,
-		Line:       endLine,
-		StartLine:  startLine,
-		Side:       "RIGHT",
-		Body:       body,
-		LocalID:    id,
-		SyncStatus: SyncPending,
-	})
-	return id
-}
-
-// AddSuggestion adds a code suggestion comment and returns its LocalID.
-func (r *PendingReview) AddSuggestion(path string, line int, suggestion string) int {
-	body := fmt.Sprintf("```suggestion\n%s\n```", suggestion)
-	return r.AddComment(path, line, body)
-}
-
-// AddMultiLineSuggestion adds a multi-line code suggestion and returns its LocalID.
-func (r *PendingReview) AddMultiLineSuggestion(path string, startLine, endLine int, suggestion string) int {
-	body := fmt.Sprintf("```suggestion\n%s\n```", suggestion)
-	return r.AddMultiLineComment(path, startLine, endLine, body)
-}
-
-// AddCommentDirect adds a fully constructed InlineComment and assigns it a LocalID.
-func (r *PendingReview) AddCommentDirect(c InlineComment) int {
-	id := r.nextID()
-	c.LocalID = id
-	r.Comments = append(r.Comments, c)
-	return id
-}
-
-// RemoveComment removes a comment by index.
-func (r *PendingReview) RemoveComment(index int) {
-	if index >= 0 && index < len(r.Comments) {
-		r.Comments = append(r.Comments[:index], r.Comments[index+1:]...)
-	}
-}
-
-// RemoveCommentByLocalID removes a comment by its local ID. Returns the removed comment's ForgeID (0 if not synced).
-func (r *PendingReview) RemoveCommentByLocalID(localID int) int {
-	for i, c := range r.Comments {
-		if c.LocalID == localID {
-			forgeID := c.ForgeID
-			r.Comments = append(r.Comments[:i], r.Comments[i+1:]...)
-			return forgeID
-		}
-	}
-	return 0
-}
-
-// FindByLocalID returns a pointer to the comment with the given LocalID, or nil.
-func (r *PendingReview) FindByLocalID(localID int) *InlineComment {
-	for i := range r.Comments {
-		if r.Comments[i].LocalID == localID {
-			return &r.Comments[i]
-		}
-	}
-	return nil
-}
-
-// InFlightCount returns the number of comments currently being synced.
-func (r *PendingReview) InFlightCount() int {
-	count := 0
-	for _, c := range r.Comments {
-		if c.SyncStatus == SyncInFlight {
-			count++
-		}
-	}
-	return count
-}
-
-// UnsyncedComments returns all comments that haven't been synced yet.
-func (r *PendingReview) UnsyncedComments() []InlineComment {
-	var result []InlineComment
-	for _, c := range r.Comments {
-		if c.SyncStatus == SyncPending || c.SyncStatus == SyncFailed {
-			result = append(result, c)
-		}
-	}
-	return result
-}
-
-// SetSyncStatus updates the sync status of a comment by LocalID.
-func (r *PendingReview) SetSyncStatus(localID int, status SyncStatus, forgeID int, err error) {
-	if c := r.FindByLocalID(localID); c != nil {
-		c.SyncStatus = status
-		if forgeID > 0 {
-			c.ForgeID = forgeID
-		}
-		c.SyncError = err
-	}
+// NextTempID returns the next temporary (negative) ID for optimistic comments.
+func (r *PendingReview) NextTempID() int {
+	r.nextTempID--
+	return r.nextTempID
 }

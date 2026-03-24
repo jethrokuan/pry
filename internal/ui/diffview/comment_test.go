@@ -11,130 +11,221 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 	var m Model
 
 	ginkgo.BeforeEach(func() {
-		pendingReview := &review.PendingReview{
-			ViewedFiles: make(map[string]bool),
-		}
+		pendingReview := review.NewPendingReview()
 		m = Model{
 			pr: &review.PullRequest{
 				PendingReview: pendingReview,
 			},
 			pendingReview: pendingReview,
+			currentUser:   "testuser",
+			inflight:      make(map[int]bool),
 			comments: CommentPanel{
-				expanded:          make(map[string]bool),
-				existingIndex:     make(map[string][]review.ExistingComment),
-				localPendingIndex: make(map[string][]review.InlineComment),
-				fileCommentIndex:  make(map[string]bool),
+				expanded:         make(map[string]bool),
+				commentIndex:     make(map[string][]review.Comment),
+				fileCommentIndex: make(map[string]bool),
 			},
 		}
 	})
 
-	ginkgo.Describe("addLocalComment", func() {
-		ginkgo.It("adds a comment and updates the local pending index", func() {
-			id := m.addLocalComment(review.InlineComment{
-				Path: "main.go", Line: 10, Side: "RIGHT", Body: "fix this",
+	ginkgo.Describe("setComments", func() {
+		ginkgo.It("replaces the full comment list and rebuilds the index", func() {
+			m.setComments([]review.Comment{
+				{ID: 1, Path: "main.go", Line: 5, Side: "RIGHT", Body: "looks good", Author: "alice"},
+				{ID: 2, Path: "main.go", Line: 5, Side: "RIGHT", Body: "agreed", Author: "bob"},
+				{ID: 3, Path: "util.go", Line: 12, Side: "LEFT", Body: "why?", Author: "carol"},
 			})
-			gomega.Expect(id).To(gomega.BeNumerically(">", 0))
-			gomega.Expect(m.pendingReview.Comments).To(gomega.HaveLen(1))
-			gomega.Expect(m.pendingReview.Comments[0].LocalID).To(gomega.Equal(id))
-			gomega.Expect(m.pendingReview.Comments[0].Body).To(gomega.Equal("fix this"))
 
-			pending := m.comments.localPendingIndex[commentIndexKey("main.go", 10, "RIGHT")]
-			gomega.Expect(pending).To(gomega.HaveLen(1))
-			gomega.Expect(pending[0].LocalID).To(gomega.Equal(id))
+			gomega.Expect(m.comments.comments).To(gomega.HaveLen(3))
+			gomega.Expect(m.pr.Comments).To(gomega.HaveLen(3))
+
+			gomega.Expect(m.comments.commentIndex[commentIndexKey("main.go", 5, "RIGHT")]).To(gomega.HaveLen(2))
+			gomega.Expect(m.comments.commentIndex[commentIndexKey("util.go", 12, "LEFT")]).To(gomega.HaveLen(1))
+			gomega.Expect(m.comments.fileCommentIndex["main.go"]).To(gomega.BeTrue())
+			gomega.Expect(m.comments.fileCommentIndex["util.go"]).To(gomega.BeTrue())
+		})
+
+		ginkgo.It("replaces previous comments entirely", func() {
+			m.setComments([]review.Comment{
+				{ID: 1, Path: "old.go", Line: 1, Side: "RIGHT", Body: "old"},
+			})
+			m.setComments([]review.Comment{
+				{ID: 2, Path: "new.go", Line: 2, Side: "LEFT", Body: "new"},
+			})
+
+			gomega.Expect(m.comments.comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.comments.comments[0].Path).To(gomega.Equal("new.go"))
+			gomega.Expect(m.comments.fileCommentIndex["old.go"]).To(gomega.BeFalse())
+			gomega.Expect(m.comments.fileCommentIndex["new.go"]).To(gomega.BeTrue())
+		})
+
+		ginkgo.It("syncs pr.Comments with the panel", func() {
+			comments := []review.Comment{
+				{ID: 10, Path: "a.go", Line: 1, Side: "RIGHT", Body: "hello"},
+			}
+			m.setComments(comments)
+			gomega.Expect(m.pr.Comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.pr.Comments[0].ID).To(gomega.Equal(10))
+		})
+	})
+
+	ginkgo.Describe("addOptimisticComment", func() {
+		ginkgo.It("adds a comment with a negative temp ID and updates the index", func() {
+			tempID := m.addOptimisticComment(review.Comment{
+				Path: "main.go", Line: 10, Side: "RIGHT", Body: "fix this",
+				Author: "testuser", IsPending: true,
+			})
+			gomega.Expect(tempID).To(gomega.BeNumerically("<", 0))
+			gomega.Expect(m.comments.comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.comments.comments[0].ID).To(gomega.Equal(tempID))
+			gomega.Expect(m.comments.comments[0].Body).To(gomega.Equal("fix this"))
+
+			indexed := m.comments.commentIndex[commentIndexKey("main.go", 10, "RIGHT")]
+			gomega.Expect(indexed).To(gomega.HaveLen(1))
+			gomega.Expect(indexed[0].ID).To(gomega.Equal(tempID))
 		})
 
 		ginkgo.It("assigns unique IDs to multiple comments", func() {
-			id1 := m.addLocalComment(review.InlineComment{
+			id1 := m.addOptimisticComment(review.Comment{
 				Path: "a.go", Line: 1, Side: "RIGHT", Body: "first",
+				Author: "testuser", IsPending: true,
 			})
-			id2 := m.addLocalComment(review.InlineComment{
+			id2 := m.addOptimisticComment(review.Comment{
 				Path: "a.go", Line: 1, Side: "RIGHT", Body: "second",
+				Author: "testuser", IsPending: true,
 			})
 			gomega.Expect(id1).NotTo(gomega.Equal(id2))
-			gomega.Expect(m.pendingReview.Comments).To(gomega.HaveLen(2))
+			gomega.Expect(m.comments.comments).To(gomega.HaveLen(2))
 
-			pending := m.comments.localPendingIndex[commentIndexKey("a.go", 1, "RIGHT")]
-			gomega.Expect(pending).To(gomega.HaveLen(2))
+			indexed := m.comments.commentIndex[commentIndexKey("a.go", 1, "RIGHT")]
+			gomega.Expect(indexed).To(gomega.HaveLen(2))
 		})
 
 		ginkgo.It("indexes comments on different files separately", func() {
-			m.addLocalComment(review.InlineComment{
+			m.addOptimisticComment(review.Comment{
 				Path: "a.go", Line: 5, Side: "RIGHT", Body: "comment a",
+				Author: "testuser", IsPending: true,
 			})
-			m.addLocalComment(review.InlineComment{
+			m.addOptimisticComment(review.Comment{
 				Path: "b.go", Line: 5, Side: "RIGHT", Body: "comment b",
+				Author: "testuser", IsPending: true,
 			})
 
-			gomega.Expect(m.comments.localPendingIndex[commentIndexKey("a.go", 5, "RIGHT")]).To(gomega.HaveLen(1))
-			gomega.Expect(m.comments.localPendingIndex[commentIndexKey("b.go", 5, "RIGHT")]).To(gomega.HaveLen(1))
+			gomega.Expect(m.comments.commentIndex[commentIndexKey("a.go", 5, "RIGHT")]).To(gomega.HaveLen(1))
+			gomega.Expect(m.comments.commentIndex[commentIndexKey("b.go", 5, "RIGHT")]).To(gomega.HaveLen(1))
 			gomega.Expect(m.comments.fileCommentIndex["a.go"]).To(gomega.BeTrue())
 			gomega.Expect(m.comments.fileCommentIndex["b.go"]).To(gomega.BeTrue())
 		})
 	})
 
-	ginkgo.Describe("removeLocalComment", func() {
+	ginkgo.Describe("removeCommentByID", func() {
 		ginkgo.It("removes a comment and clears it from the index", func() {
-			id := m.addLocalComment(review.InlineComment{
+			tempID := m.addOptimisticComment(review.Comment{
 				Path: "main.go", Line: 10, Side: "RIGHT", Body: "fix this",
+				Author: "testuser", IsPending: true,
 			})
 
-			forgeID := m.removeLocalComment(id)
-			gomega.Expect(forgeID).To(gomega.Equal(0)) // not synced
-			gomega.Expect(m.pendingReview.Comments).To(gomega.BeEmpty())
+			m.removeCommentByID(tempID)
+			gomega.Expect(m.comments.comments).To(gomega.BeEmpty())
 
-			pending := m.comments.localPendingIndex[commentIndexKey("main.go", 10, "RIGHT")]
-			gomega.Expect(pending).To(gomega.BeEmpty())
-		})
-
-		ginkgo.It("returns the ForgeID of a synced comment", func() {
-			id := m.addLocalComment(review.InlineComment{
-				Path: "main.go", Line: 10, Side: "RIGHT", Body: "synced",
-				ForgeID: 42, SyncStatus: review.SyncComplete,
-			})
-
-			forgeID := m.removeLocalComment(id)
-			gomega.Expect(forgeID).To(gomega.Equal(42))
+			indexed := m.comments.commentIndex[commentIndexKey("main.go", 10, "RIGHT")]
+			gomega.Expect(indexed).To(gomega.BeEmpty())
 		})
 
 		ginkgo.It("removes only the targeted comment, leaving others intact", func() {
-			id1 := m.addLocalComment(review.InlineComment{
+			id1 := m.addOptimisticComment(review.Comment{
 				Path: "main.go", Line: 10, Side: "RIGHT", Body: "first",
+				Author: "testuser", IsPending: true,
 			})
-			id2 := m.addLocalComment(review.InlineComment{
+			id2 := m.addOptimisticComment(review.Comment{
 				Path: "main.go", Line: 10, Side: "RIGHT", Body: "second",
+				Author: "testuser", IsPending: true,
 			})
 
-			m.removeLocalComment(id1)
-			gomega.Expect(m.pendingReview.Comments).To(gomega.HaveLen(1))
-			gomega.Expect(m.pendingReview.Comments[0].LocalID).To(gomega.Equal(id2))
+			m.removeCommentByID(id1)
+			gomega.Expect(m.comments.comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.comments.comments[0].ID).To(gomega.Equal(id2))
 
-			pending := m.comments.localPendingIndex[commentIndexKey("main.go", 10, "RIGHT")]
-			gomega.Expect(pending).To(gomega.HaveLen(1))
-			gomega.Expect(pending[0].LocalID).To(gomega.Equal(id2))
+			indexed := m.comments.commentIndex[commentIndexKey("main.go", 10, "RIGHT")]
+			gomega.Expect(indexed).To(gomega.HaveLen(1))
+			gomega.Expect(indexed[0].ID).To(gomega.Equal(id2))
 		})
 
 		ginkgo.It("clears fileCommentIndex when last comment on a file is removed", func() {
-			id := m.addLocalComment(review.InlineComment{
+			tempID := m.addOptimisticComment(review.Comment{
 				Path: "only.go", Line: 1, Side: "RIGHT", Body: "lone comment",
+				Author: "testuser", IsPending: true,
 			})
 			gomega.Expect(m.comments.fileCommentIndex["only.go"]).To(gomega.BeTrue())
 
-			m.removeLocalComment(id)
+			m.removeCommentByID(tempID)
 			gomega.Expect(m.comments.fileCommentIndex["only.go"]).To(gomega.BeFalse())
+		})
+
+		ginkgo.It("is a no-op for non-existent ID", func() {
+			m.addOptimisticComment(review.Comment{
+				Path: "a.go", Line: 1, Side: "RIGHT", Body: "keep",
+				Author: "testuser", IsPending: true,
+			})
+			m.removeCommentByID(9999)
+			gomega.Expect(m.comments.comments).To(gomega.HaveLen(1))
 		})
 	})
 
-	ginkgo.Describe("updateLocalComment", func() {
-		ginkgo.It("updates the comment body while preserving position", func() {
-			id := m.addLocalComment(review.InlineComment{
+	ginkgo.Describe("replaceComment", func() {
+		ginkgo.It("swaps an optimistic comment with a real one from the server", func() {
+			tempID := m.addOptimisticComment(review.Comment{
+				Path: "main.go", Line: 10, Side: "RIGHT", Body: "draft",
+				Author: "testuser", IsPending: true,
+			})
+
+			realComment := review.Comment{
+				ID: 42, Path: "main.go", Line: 10, Side: "RIGHT",
+				Body: "draft", Author: "testuser", IsPending: true,
+			}
+			m.replaceComment(tempID, realComment)
+
+			gomega.Expect(m.comments.comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.comments.comments[0].ID).To(gomega.Equal(42))
+
+			// Index should reference the new ID
+			indexed := m.comments.commentIndex[commentIndexKey("main.go", 10, "RIGHT")]
+			gomega.Expect(indexed).To(gomega.HaveLen(1))
+			gomega.Expect(indexed[0].ID).To(gomega.Equal(42))
+		})
+
+		ginkgo.It("is a no-op for non-existent temp ID", func() {
+			m.addOptimisticComment(review.Comment{
+				Path: "a.go", Line: 1, Side: "RIGHT", Body: "keep",
+				Author: "testuser", IsPending: true,
+			})
+			m.replaceComment(9999, review.Comment{ID: 100, Body: "nope"})
+			gomega.Expect(m.comments.comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.comments.comments[0].Body).To(gomega.Equal("keep"))
+		})
+
+		ginkgo.It("syncs pr.Comments after replacement", func() {
+			tempID := m.addOptimisticComment(review.Comment{
+				Path: "a.go", Line: 1, Side: "RIGHT", Body: "temp",
+				Author: "testuser", IsPending: true,
+			})
+			m.replaceComment(tempID, review.Comment{
+				ID: 55, Path: "a.go", Line: 1, Side: "RIGHT", Body: "real",
+			})
+			gomega.Expect(m.pr.Comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.pr.Comments[0].ID).To(gomega.Equal(55))
+		})
+	})
+
+	ginkgo.Describe("updateCommentBody", func() {
+		ginkgo.It("updates the comment body while preserving other fields", func() {
+			tempID := m.addOptimisticComment(review.Comment{
 				Path: "main.go", Line: 10, Side: "RIGHT", Body: "original",
+				Author: "testuser", IsPending: true,
 			})
 
-			m.updateLocalComment(id, func(c *review.InlineComment) {
-				c.Body = "updated"
-			})
+			m.updateCommentBody(tempID, "updated")
 
-			c := m.pendingReview.FindByLocalID(id)
+			c := m.findCommentByID(tempID)
 			gomega.Expect(c).NotTo(gomega.BeNil())
 			gomega.Expect(c.Body).To(gomega.Equal("updated"))
 			gomega.Expect(c.Path).To(gomega.Equal("main.go"))
@@ -142,130 +233,129 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 			gomega.Expect(c.Side).To(gomega.Equal("RIGHT"))
 		})
 
-		ginkgo.It("preserves index after update", func() {
-			id := m.addLocalComment(review.InlineComment{
+		ginkgo.It("rebuilds the index after update", func() {
+			tempID := m.addOptimisticComment(review.Comment{
 				Path: "main.go", Line: 10, Side: "RIGHT", Body: "original",
+				Author: "testuser", IsPending: true,
 			})
 
-			m.updateLocalComment(id, func(c *review.InlineComment) {
-				c.Body = "updated"
-			})
+			m.updateCommentBody(tempID, "updated")
 
-			pending := m.comments.localPendingIndex[commentIndexKey("main.go", 10, "RIGHT")]
-			gomega.Expect(pending).To(gomega.HaveLen(1))
-			gomega.Expect(pending[0].Body).To(gomega.Equal("updated"))
+			indexed := m.comments.commentIndex[commentIndexKey("main.go", 10, "RIGHT")]
+			gomega.Expect(indexed).To(gomega.HaveLen(1))
+			gomega.Expect(indexed[0].Body).To(gomega.Equal("updated"))
 		})
 
-		ginkgo.It("is a no-op for non-existent LocalID", func() {
-			m.addLocalComment(review.InlineComment{
+		ginkgo.It("is a no-op for non-existent ID", func() {
+			m.addOptimisticComment(review.Comment{
 				Path: "main.go", Line: 10, Side: "RIGHT", Body: "original",
+				Author: "testuser", IsPending: true,
 			})
 
-			m.updateLocalComment(9999, func(c *review.InlineComment) {
-				c.Body = "should not happen"
-			})
+			m.updateCommentBody(9999, "should not happen")
 
-			gomega.Expect(m.pendingReview.Comments).To(gomega.HaveLen(1))
-			gomega.Expect(m.pendingReview.Comments[0].Body).To(gomega.Equal("original"))
+			gomega.Expect(m.comments.comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.comments.comments[0].Body).To(gomega.Equal("original"))
 		})
 	})
 
-	ginkgo.Describe("setExistingComments", func() {
-		ginkgo.It("indexes existing comments by path/line/side", func() {
-			m.setExistingComments([]review.ExistingComment{
-				{ID: 1, Path: "main.go", Line: 5, Side: "RIGHT", Body: "looks good", Author: "alice"},
-				{ID: 2, Path: "main.go", Line: 5, Side: "RIGHT", Body: "agreed", Author: "bob"},
-				{ID: 3, Path: "util.go", Line: 12, Side: "LEFT", Body: "why?", Author: "carol"},
+	ginkgo.Describe("findCommentByID", func() {
+		ginkgo.It("returns a pointer to the matching comment", func() {
+			tempID := m.addOptimisticComment(review.Comment{
+				Path: "a.go", Line: 1, Side: "RIGHT", Body: "find me",
+				Author: "testuser", IsPending: true,
 			})
 
-			gomega.Expect(m.comments.existingIndex[commentIndexKey("main.go", 5, "RIGHT")]).To(gomega.HaveLen(2))
-			gomega.Expect(m.comments.existingIndex[commentIndexKey("util.go", 12, "LEFT")]).To(gomega.HaveLen(1))
-			gomega.Expect(m.comments.fileCommentIndex["main.go"]).To(gomega.BeTrue())
-			gomega.Expect(m.comments.fileCommentIndex["util.go"]).To(gomega.BeTrue())
+			c := m.findCommentByID(tempID)
+			gomega.Expect(c).NotTo(gomega.BeNil())
+			gomega.Expect(c.Body).To(gomega.Equal("find me"))
+		})
+
+		ginkgo.It("returns nil for non-existent ID", func() {
+			c := m.findCommentByID(9999)
+			gomega.Expect(c).To(gomega.BeNil())
 		})
 	})
 
-	ginkgo.Describe("rebuildCommentIndex", func() {
-		ginkgo.It("produces correct mappings from all comment sources", func() {
-			// Set up existing comments
-			m.comments.existing = []review.ExistingComment{
-				{ID: 1, Path: "a.go", Line: 10, Side: "RIGHT", Body: "existing"},
-			}
-			// Set up forge comments
-			m.comments.forgeComments = []review.ExistingComment{
-				{ID: 2, Path: "a.go", Line: 10, Side: "RIGHT", Body: "forge"},
-				{ID: 3, Path: "b.go", Line: 5, Side: "LEFT", Body: "forge b"},
-			}
-			// Set up local pending comments
-			m.pendingReview.AddCommentDirect(review.InlineComment{
-				Path: "a.go", Line: 10, Side: "RIGHT", Body: "local pending",
+	ginkgo.Describe("mergePendingComments", func() {
+		ginkgo.It("adds pending comments that are not already present", func() {
+			m.setComments([]review.Comment{
+				{ID: 1, Path: "a.go", Line: 10, Side: "RIGHT", Body: "existing", Author: "alice"},
 			})
 
-			m.comments.RebuildIndex(m.pendingReview.Comments)
+			m.mergePendingComments([]review.Comment{
+				{ID: 2, Path: "a.go", Line: 10, Side: "RIGHT", Body: "pending", Author: "testuser", IsPending: true},
+				{ID: 3, Path: "b.go", Line: 5, Side: "LEFT", Body: "another", Author: "testuser", IsPending: true},
+			})
 
-			// Existing + forge on same key
-			existing := m.comments.existingIndex[commentIndexKey("a.go", 10, "RIGHT")]
-			gomega.Expect(existing).To(gomega.HaveLen(2))
+			gomega.Expect(m.comments.comments).To(gomega.HaveLen(3))
+			gomega.Expect(m.comments.fileCommentIndex["a.go"]).To(gomega.BeTrue())
+			gomega.Expect(m.comments.fileCommentIndex["b.go"]).To(gomega.BeTrue())
+		})
 
-			// Forge on different key
-			forgeB := m.comments.existingIndex[commentIndexKey("b.go", 5, "LEFT")]
-			gomega.Expect(forgeB).To(gomega.HaveLen(1))
+		ginkgo.It("skips duplicates by ID", func() {
+			m.setComments([]review.Comment{
+				{ID: 1, Path: "a.go", Line: 10, Side: "RIGHT", Body: "existing", Author: "alice"},
+			})
 
-			// Local pending
-			local := m.comments.localPendingIndex[commentIndexKey("a.go", 10, "RIGHT")]
-			gomega.Expect(local).To(gomega.HaveLen(1))
+			m.mergePendingComments([]review.Comment{
+				{ID: 1, Path: "a.go", Line: 10, Side: "RIGHT", Body: "duplicate", Author: "alice"},
+			})
 
-			// fileCommentIndex covers all files
+			gomega.Expect(m.comments.comments).To(gomega.HaveLen(1))
+			gomega.Expect(m.comments.comments[0].Body).To(gomega.Equal("existing"))
+		})
+
+		ginkgo.It("syncs pr.Comments after merge", func() {
+			m.setComments([]review.Comment{
+				{ID: 1, Path: "a.go", Line: 1, Side: "RIGHT", Body: "one"},
+			})
+			m.mergePendingComments([]review.Comment{
+				{ID: 2, Path: "b.go", Line: 2, Side: "LEFT", Body: "two"},
+			})
+			gomega.Expect(m.pr.Comments).To(gomega.HaveLen(2))
+		})
+	})
+
+	ginkgo.Describe("CommentPanel.RebuildIndex", func() {
+		ginkgo.It("produces correct mappings from the comment list", func() {
+			m.comments.comments = []review.Comment{
+				{ID: 1, Path: "a.go", Line: 10, Side: "RIGHT", Body: "existing", Author: "alice"},
+				{ID: 2, Path: "a.go", Line: 10, Side: "RIGHT", Body: "pending", Author: "testuser", IsPending: true},
+				{ID: 3, Path: "b.go", Line: 5, Side: "LEFT", Body: "other file", Author: "bob"},
+			}
+
+			m.comments.RebuildIndex()
+
+			aComments := m.comments.commentIndex[commentIndexKey("a.go", 10, "RIGHT")]
+			gomega.Expect(aComments).To(gomega.HaveLen(2))
+
+			bComments := m.comments.commentIndex[commentIndexKey("b.go", 5, "LEFT")]
+			gomega.Expect(bComments).To(gomega.HaveLen(1))
+
 			gomega.Expect(m.comments.fileCommentIndex["a.go"]).To(gomega.BeTrue())
 			gomega.Expect(m.comments.fileCommentIndex["b.go"]).To(gomega.BeTrue())
 		})
 
 		ginkgo.It("clears stale entries on rebuild", func() {
-			m.addLocalComment(review.InlineComment{
+			m.addOptimisticComment(review.Comment{
 				Path: "old.go", Line: 1, Side: "RIGHT", Body: "stale",
+				Author: "testuser", IsPending: true,
 			})
 			gomega.Expect(m.comments.fileCommentIndex["old.go"]).To(gomega.BeTrue())
 
-			// Remove via the review directly, then rebuild
-			m.pendingReview.Comments = nil
-			m.comments.RebuildIndex(m.pendingReview.Comments)
+			// Clear comments and rebuild
+			m.comments.comments = nil
+			m.comments.RebuildIndex()
 
-			gomega.Expect(m.comments.localPendingIndex[commentIndexKey("old.go", 1, "RIGHT")]).To(gomega.BeEmpty())
+			gomega.Expect(m.comments.commentIndex[commentIndexKey("old.go", 1, "RIGHT")]).To(gomega.BeEmpty())
 			gomega.Expect(m.comments.fileCommentIndex["old.go"]).To(gomega.BeFalse())
 		})
 	})
 
-	ginkgo.Describe("restoreForgeComments", func() {
-		ginkgo.It("restores pending and forge comments into correct indexes", func() {
-			pending := []review.ExistingComment{
-				{ID: 50, Path: "a.go", Line: 10, Side: "RIGHT", Body: "restored pending"},
-			}
-			forge := []review.ExistingComment{
-				{ID: 51, Path: "b.go", Line: 20, Side: "LEFT", Body: "forge comment"},
-			}
-
-			m.restoreForgeComments(pending, forge)
-
-			// Pending comments are added as local comments
-			gomega.Expect(m.pendingReview.Comments).To(gomega.HaveLen(1))
-			gomega.Expect(m.pendingReview.Comments[0].ForgeID).To(gomega.Equal(50))
-			gomega.Expect(m.pendingReview.Comments[0].SyncStatus).To(gomega.Equal(review.SyncComplete))
-
-			local := m.comments.localPendingIndex[commentIndexKey("a.go", 10, "RIGHT")]
-			gomega.Expect(local).To(gomega.HaveLen(1))
-
-			// Forge comments in existing index
-			existingB := m.comments.existingIndex[commentIndexKey("b.go", 20, "LEFT")]
-			gomega.Expect(existingB).To(gomega.HaveLen(1))
-
-			gomega.Expect(m.comments.fileCommentIndex["a.go"]).To(gomega.BeTrue())
-			gomega.Expect(m.comments.fileCommentIndex["b.go"]).To(gomega.BeTrue())
-		})
-	})
-
-	ginkgo.Describe("commentsForLine", func() {
+	ginkgo.Describe("CommentsForLine", func() {
 		ginkgo.It("returns exact side matches", func() {
-			m.setExistingComments([]review.ExistingComment{
+			m.setComments([]review.Comment{
 				{ID: 1, Path: "f.go", Line: 10, Side: "RIGHT", Body: "right"},
 				{ID: 2, Path: "f.go", Line: 10, Side: "LEFT", Body: "left"},
 			})
@@ -280,7 +370,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 		})
 
 		ginkgo.It("includes empty-side comments in any side query", func() {
-			m.setExistingComments([]review.ExistingComment{
+			m.setComments([]review.Comment{
 				{ID: 1, Path: "f.go", Line: 10, Side: "", Body: "no side"},
 				{ID: 2, Path: "f.go", Line: 10, Side: "RIGHT", Body: "right"},
 			})
@@ -292,21 +382,6 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 		ginkgo.It("returns nil for lines with no comments", func() {
 			result := m.comments.CommentsForLine("f.go", 999, "RIGHT")
 			gomega.Expect(result).To(gomega.BeEmpty())
-		})
-	})
-
-	ginkgo.Describe("localPendingForLine", func() {
-		ginkgo.It("returns local pending comments for a specific line", func() {
-			m.addLocalComment(review.InlineComment{
-				Path: "f.go", Line: 10, Side: "RIGHT", Body: "pending",
-			})
-			m.addLocalComment(review.InlineComment{
-				Path: "f.go", Line: 20, Side: "RIGHT", Body: "other line",
-			})
-
-			result := m.comments.LocalPendingForLine("f.go", 10, "RIGHT")
-			gomega.Expect(result).To(gomega.HaveLen(1))
-			gomega.Expect(result[0].Body).To(gomega.Equal("pending"))
 		})
 	})
 

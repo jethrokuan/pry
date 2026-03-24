@@ -39,11 +39,11 @@ type Service interface {
 	// FetchDiffFiles fetches and parses the changed files for a PR.
 	FetchDiffFiles(ctx context.Context, number int) ([]diff.DiffFile, error)
 
-	// FetchExistingComments gets all submitted review comments on a PR.
-	FetchExistingComments(ctx context.Context, number int) ([]ExistingComment, error)
+	// FetchComments gets all review comments on a PR (both submitted and pending).
+	FetchComments(ctx context.Context, number int) ([]Comment, error)
 	// FetchPendingReview finds the user's existing pending/draft review.
 	// Returns the review ID, node ID ("" if none) and any pre-existing comments.
-	FetchPendingReview(ctx context.Context, number int) (int, string, []ExistingComment, error)
+	FetchPendingReview(ctx context.Context, number int) (int, string, []Comment, error)
 
 	// CreatePendingReview creates a PENDING (draft) review on the forge.
 	// Returns the review ID and the forge-specific node ID.
@@ -51,7 +51,7 @@ type Service interface {
 
 	// AddReviewComment adds a single comment to an existing pending review.
 	// Returns the forge comment ID.
-	AddReviewComment(ctx context.Context, reviewNodeID string, comment InlineComment) (int, error)
+	AddReviewComment(ctx context.Context, reviewNodeID string, path string, line, startLine int, side, body string) (int, error)
 
 	// DeleteReviewComment deletes a pending review comment by its forge ID.
 	DeleteReviewComment(ctx context.Context, prNumber, commentID int) error

@@ -121,7 +121,9 @@ var _ = ginkgo.Describe("Model factories", func() {
 	ginkgo.It("NewDiffViewModelWithReview uses the provided review", func() {
 		pr := testutil.NewPR().BuildPtr()
 		rev := review.NewPendingReview()
-		rev.AddComment("test.go", 10, "looks good")
+		pr.Comments = append(pr.Comments, review.Comment{
+			ID: -1, Path: "test.go", Line: 10, Side: "RIGHT", Body: "looks good", IsPending: true,
+		})
 		m := testutil.NewDiffViewModelWithReview(svc, pr, rev)
 		_ = m.View()
 	})

@@ -12,7 +12,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/diff"
-	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/mdutil"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
@@ -428,10 +427,9 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 	ck := commentKey(path, line)
 	expanded := m.comments.expanded[ck]
 
-	existing := m.comments.CommentsForLine(path, line, side)
-	localPending := m.comments.LocalPendingForLine(path, line, side)
+	comments := m.comments.CommentsForLine(path, line, side)
 
-	totalCount := len(existing) + len(localPending)
+	totalCount := len(comments)
 	if totalCount == 0 {
 		return 0
 	}
@@ -450,12 +448,21 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 
 	if !expanded {
 		foldPrefix := gutterBase + " "
-		parts := make([]string, 0, 2)
-		if len(existing) > 0 {
-			parts = append(parts, commentStyle.Render(fmt.Sprintf("💬 %d comment(s)", len(existing))))
+		submitted := 0
+		pending := 0
+		for _, c := range comments {
+			if c.IsPending {
+				pending++
+			} else {
+				submitted++
+			}
 		}
-		if len(localPending) > 0 {
-			parts = append(parts, pendingStyle.Render(fmt.Sprintf("📝 %d pending", len(localPending))))
+		parts := make([]string, 0, 2)
+		if submitted > 0 {
+			parts = append(parts, commentStyle.Render(fmt.Sprintf("💬 %d comment(s)", submitted)))
+		}
+		if pending > 0 {
+			parts = append(parts, pendingStyle.Render(fmt.Sprintf("📝 %d pending", pending)))
 		}
 		b.WriteString(foldPrefix + strings.Join(parts, "  ") + "  " +
 			mutedStyle.Render("[tab to expand]") + "\n")
@@ -489,8 +496,7 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 		allLines = append(allLines, gutterBase)
 	}
 
-	idx := 0
-	for _, c := range existing {
+	for idx, c := range comments {
 		bg := commentBg
 		if idx == selectedIdx {
 			bg = cursorBg
@@ -502,26 +508,6 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 		header := fmt.Sprintf("%s %s:", label,
 			styles.CommentAuthor.Render("@"+c.Author))
 		buildComment(header, c.Body, bg)
-		idx++
-	}
-	for _, c := range localPending {
-		bg := commentBg
-		if idx == selectedIdx {
-			bg = cursorBg
-		}
-		syncIndicator := ""
-		switch c.SyncStatus {
-		case review.SyncInFlight:
-			syncIndicator = " ..."
-		case review.SyncComplete:
-			syncIndicator = " ✓"
-		case review.SyncFailed:
-			syncIndicator = " ✗"
-		}
-		header := fmt.Sprintf("📝 %s%s:",
-			pendingStyle.Render("(pending)"), syncIndicator)
-		buildComment(header, c.Body, bg)
-		idx++
 	}
 
 	// Check if capping is needed
@@ -667,33 +653,21 @@ func (m *Model) buildPRInfoContent(width int) string {
 		b.WriteString(rendered)
 	}
 
-	// Existing PR comments section
-	if len(m.comments.existing) > 0 || len(m.comments.forgeComments) > 0 {
+	// Review comments section
+	if len(m.comments.comments) > 0 {
 		b.WriteString("\n\n" + separator + "\n")
 		commentHeader := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
-		total := len(m.comments.existing) + len(m.comments.forgeComments)
-		b.WriteString(commentHeader.Render(fmt.Sprintf("Review Comments (%d)", total)) + "\n\n")
+		b.WriteString(commentHeader.Render(fmt.Sprintf("Review Comments (%d)", len(m.comments.comments))) + "\n\n")
 
 		bodyStyle := lipgloss.NewStyle().Width(width)
 		innerSep := sepStyle.Render(strings.Repeat("─", width/2))
 
-		for _, c := range m.comments.existing {
+		for _, c := range m.comments.comments {
 			icon := "💬"
 			if c.IsPending {
 				icon = "📝"
 			}
 			b.WriteString(icon + " " + authorStyle.Render("@"+c.Author))
-			if c.Path != "" {
-				b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", c.Path, c.Line)))
-			}
-			b.WriteString("\n")
-			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
-			b.WriteString(bodyStyle.Render(rendered) + "\n")
-			b.WriteString(innerSep + "\n\n")
-		}
-
-		for _, c := range m.comments.forgeComments {
-			b.WriteString("📝 " + authorStyle.Render("@"+c.Author))
 			if c.Path != "" {
 				b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", c.Path, c.Line)))
 			}

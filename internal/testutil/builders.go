@@ -131,5 +131,5 @@ func NewSubmitModel(svc review.Service, pr *review.PullRequest) submit.Model {
 	if pr.PendingReview == nil {
 		pr.StartReview()
 	}
-	return submit.New(svc, pr)
+	return submit.New(svc, pr, "test-user")
 }
