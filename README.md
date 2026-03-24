@@ -39,15 +39,14 @@ pry
 ### Flow
 
 ```
-PR List → PR Detail → Diff View → Submit Review
-                          ↕
-                    Comment Editor
+PR List → Diff View → Submit Review
+              ↕
+        Comment Editor
 ```
 
-1. **PR List** — Browse open PRs filtered by review requests, all open, or authored by you.
-2. **PR Detail** — Read the description, check CI status, and start reviewing.
-3. **Diff View** — Navigate files and diffs, leave inline comments and code suggestions. Mark files as viewed (synced to GitHub). Expand/fold comment threads with tab/shift-tab.
-4. **Submit** — Choose Comment, Approve, or Request Changes and submit your review.
+1. **PR List** — Browse open PRs filtered by review requests, all open, or authored by you. Preview PR details in the sidebar.
+2. **Diff View** — Navigate files and diffs, leave inline comments and code suggestions. Mark files as viewed (synced to GitHub). Expand/fold comment threads with tab/shift-tab.
+3. **Submit** — Choose Comment, Approve, or Request Changes and submit your review.
 
 ### Features
 
@@ -63,21 +62,15 @@ PR List → PR Detail → Diff View → Submit Review
 |-----|--------|
 | `j` / `k` | Navigate up/down |
 | `enter` | Select PR |
-| `f` | Toggle filter picker |
+| `tab` / `shift+tab` | Next/previous tab |
 | `/` | Edit filter text |
 | `r` | Refresh |
+| `J` / `K` | Scroll preview down/up |
+| `ctrl+d` / `ctrl+u` | Half page down/up |
+| `w` | Open PR in browser |
+| `y` | Copy PR number |
+| `Y` | Copy PR URL |
 | `?` | Show help |
-| `ctrl+c` | Quit |
-
-### PR Detail
-
-| Key | Action |
-|-----|--------|
-| `j` / `k` | Scroll description |
-| `enter` | Start review (open diffs) |
-| `c` | Checkout PR locally |
-| `w` | Open in browser |
-| `esc` / `backspace` | Back to list |
 | `ctrl+c` | Quit |
 
 ### Diff View
@@ -105,10 +98,11 @@ PR List → PR Detail → Diff View → Submit Review
 | `ctrl+o` / `ctrl+i` | Jump back/forward in history |
 | `i` | Toggle PR info popup |
 | `w` | Open PR in browser |
+| `y` | Copy link to current line |
 | `ctrl+e` | Open file in `$EDITOR` at current line |
 | `ctrl+s` | Submit review |
 | `?` | Show help |
-| `esc` | Back to PR detail |
+| `esc` | Back to PR list |
 
 #### Comment Selection Mode
 
@@ -130,6 +124,7 @@ When a comment is selected:
 | `ctrl+s` | Save comment |
 | `ctrl+t` | Toggle comment / suggestion mode |
 | `ctrl+e` | Open in `$EDITOR` |
+| `ctrl+v` | Paste image from clipboard |
 | `esc` | Cancel |
 
 ### Submit Review
@@ -171,7 +166,6 @@ internal/
     renderer.go              Built-in ANSI rendering
   ui/
     prlist/model.go          PR list screen
-    prdetail/model.go        PR detail screen
     diffview/model.go        Diff viewer with file tree
     comment/model.go         Comment/suggestion editor
     submit/model.go          Review submission screen
