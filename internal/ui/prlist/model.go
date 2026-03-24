@@ -168,6 +168,11 @@ type Model struct {
 
 	// Help overlay
 	showHelp bool
+
+	// Cached layout dimensions (recomputed on resize via recalcLayout)
+	sidebarWidth int
+	tableWidth   int
+	mainHeight   int
 }
 
 // tab returns a pointer to the currently active tab state.
@@ -221,24 +226,24 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
-// layoutDimensions returns sidebar width and main content height.
-// Used by Update() for sizing estimates. View() uses render-then-measure
-// for the authoritative layout, so keep these values in sync.
-func (m Model) layoutDimensions() (sidebarW, mainHeight int) {
-	sidebarW = m.width * 45 / 100
-	// Estimate: header 2 lines (tab bar + separator) + footer 2 lines (gap + help text).
-	// View() computes this precisely via lipgloss.Height().
-	mainHeight = m.height - 4
-	if mainHeight < 3 {
-		mainHeight = 3
+// recalcLayout recomputes cached layout dimensions by rendering the header
+// and footer and measuring their actual heights. Call after width/height change.
+func (m *Model) recalcLayout() {
+	m.tabBar.SetWidth(m.width)
+	header := m.renderHeader()
+	footer := m.renderFooter()
+	// +2 accounts for the separator newlines between header/content/footer.
+	m.mainHeight = m.height - lipgloss.Height(header) - lipgloss.Height(footer) - 2
+	if m.mainHeight < 3 {
+		m.mainHeight = 3
 	}
-	return
+	m.sidebarWidth = m.width * 45 / 100
+	m.tableWidth = m.width - m.sidebarWidth
 }
 
 func (m Model) halfPageSize() int {
-	_, mainHeight := m.layoutDimensions()
 	rowHeight := 4
-	visibleRows := mainHeight / rowHeight
+	visibleRows := m.mainHeight / rowHeight
 	half := visibleRows / 2
 	if half < 1 {
 		half = 1
@@ -280,9 +285,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-				// Pre-size sidebar so viewport is initialized before content is set
-		sw, mh := m.layoutDimensions()
-		m.preview.SetSize(sw, mh)
+		m.recalcLayout()
+		m.preview.SetSize(m.sidebarWidth, m.mainHeight)
 
 	case prsLoadedMsg:
 		// Route response to the correct tab.
@@ -590,35 +594,26 @@ type renderCtx struct {
 	userTeams map[string]bool // "org/team-slug" → true
 }
 
+// renderHeader renders the tab bar and separator line.
+func (m Model) renderHeader() string {
+	return m.tabBar.View() + "\n" +
+		lipgloss.NewStyle().Foreground(styles.Muted).Render(strings.Repeat("─", m.width))
+}
+
 // View renders the PR list.
 func (m Model) View() string {
 	if m.width == 0 {
 		return m.spinner.View() + " Loading..."
 	}
 
-	// Render fixed elements first, then measure to compute remaining space.
-	// This avoids fragile hardcoded arithmetic (e.g. "m.height - 4").
-
-	// Header: tab bar + separator
 	m.tabBar.SetWidth(m.width)
-	header := m.tabBar.View() + "\n" +
-		lipgloss.NewStyle().Foreground(styles.Muted).Render(strings.Repeat("─", m.width)) + "\n"
+	header := m.renderHeader()
+	footer := m.renderFooter()
 
-	// Footer
-	footer := "\n" + m.renderFooter()
+	m.preview.SetSize(m.sidebarWidth, m.mainHeight)
+	content := lipgloss.JoinHorizontal(lipgloss.Top, m.renderLeftPane(m.tableWidth, m.mainHeight), m.preview.View())
 
-	// Main content fills the remaining vertical space
-	mainHeight := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
-	if mainHeight < 3 {
-		mainHeight = 3
-	}
-	sidebarW := m.width * 45 / 100
-	tableWidth := m.width - sidebarW
-
-	m.preview.SetSize(sidebarW, mainHeight)
-	content := lipgloss.JoinHorizontal(lipgloss.Top, m.renderLeftPane(tableWidth, mainHeight), m.preview.View())
-
-	result := header + content + footer
+	result := header + "\n" + content + "\n" + footer
 	if m.showHelp {
 		popup := helppopup.Render(helpSections(), m.width)
 		result = helppopup.Overlay(result, popup, m.width, m.height)

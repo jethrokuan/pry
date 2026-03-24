@@ -51,6 +51,7 @@ func (m *Model) SetContent(content string) {
 		return
 	}
 	m.viewport.SetContent(content)
+	m.viewport.GotoTop()
 }
 
 // ScrollDown scrolls down by n lines.
