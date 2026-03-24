@@ -36,7 +36,7 @@ func samplePRs(n int) []review.PullRequest {
 // and returns the model in a ready (non-loading) state.
 func loadModel(svc *reviewtest.MockService, prs []review.PullRequest, filters ...review.PRFilter) Model {
 	m := newTestModel(svc, filters...)
-	m, _ = m.Update(prsLoadedMsg{prs: prs})
+	m, _ = m.Update(prsLoadedMsg{tabIdx: 0, prs: prs})
 	m, _ = m.Update(userTeamsLoadedMsg{teams: nil})
 	return m
 }
@@ -47,26 +47,52 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		ginkgo.It("stores PRs and resets cursor", func() {
 			svc := &reviewtest.MockService{}
 			m := newTestModel(svc)
-			gomega.Expect(m.loading).To(gomega.BeTrue())
+			gomega.Expect(m.tabs[0].loading).To(gomega.BeTrue())
 
 			prs := samplePRs(3)
-			m, _ = m.Update(prsLoadedMsg{prs: prs})
+			m, _ = m.Update(prsLoadedMsg{tabIdx: 0, prs: prs})
 
-			gomega.Expect(m.loading).To(gomega.BeFalse())
-			gomega.Expect(m.prs).To(gomega.HaveLen(3))
-			gomega.Expect(m.cursor).To(gomega.Equal(0))
-			gomega.Expect(m.err).To(gomega.BeNil())
+			gomega.Expect(m.tabs[0].loading).To(gomega.BeFalse())
+			gomega.Expect(m.tabs[0].prs).To(gomega.HaveLen(3))
+			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(0))
+			gomega.Expect(m.tabs[0].err).To(gomega.BeNil())
 		})
 
 		ginkgo.It("tracks error state on failure", func() {
 			svc := &reviewtest.MockService{}
 			m := newTestModel(svc)
 
-			m, _ = m.Update(prsLoadedMsg{err: fmt.Errorf("API failure")})
+			m, _ = m.Update(prsLoadedMsg{tabIdx: 0, err: fmt.Errorf("API failure")})
 
-			gomega.Expect(m.loading).To(gomega.BeFalse())
-			gomega.Expect(m.err).To(gomega.MatchError("API failure"))
-			gomega.Expect(m.prs).To(gomega.BeNil())
+			gomega.Expect(m.tabs[0].loading).To(gomega.BeFalse())
+			gomega.Expect(m.tabs[0].err).To(gomega.MatchError("API failure"))
+			gomega.Expect(m.tabs[0].prs).To(gomega.BeNil())
+		})
+
+		ginkgo.It("routes response to correct tab", func() {
+			svc := &reviewtest.MockService{}
+			filters := []review.PRFilter{
+				{Name: "Open", Qualifier: "is:open"},
+				{Name: "Mine", Qualifier: "author:@me"},
+			}
+			m := newTestModel(svc, filters...)
+
+			// Load tab 1 while tab 0 is active
+			prs := samplePRs(2)
+			m, _ = m.Update(prsLoadedMsg{tabIdx: 1, prs: prs})
+
+			gomega.Expect(m.tabs[1].prs).To(gomega.HaveLen(2))
+			gomega.Expect(m.tabs[1].fetched).To(gomega.BeTrue())
+			// Tab 0 should still be loading
+			gomega.Expect(m.tabs[0].prs).To(gomega.BeNil())
+		})
+
+		ginkgo.It("ignores out-of-range tab index", func() {
+			svc := &reviewtest.MockService{}
+			m := newTestModel(svc)
+
+			m, _ = m.Update(prsLoadedMsg{tabIdx: 99, prs: samplePRs(1)})
+			gomega.Expect(m.tabs[0].prs).To(gomega.BeNil())
 		})
 	})
 
@@ -99,46 +125,46 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			m := loadModel(svc, samplePRs(5))
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.cursor).To(gomega.Equal(1))
+			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(1))
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.cursor).To(gomega.Equal(2))
+			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(2))
 		})
 
 		ginkgo.It("moves cursor up with k", func() {
 			svc := &reviewtest.MockService{}
 			m := loadModel(svc, samplePRs(5))
-			m.cursor = 3
+			m.tabs[0].cursor = 3
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
-			gomega.Expect(m.cursor).To(gomega.Equal(2))
+			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(2))
 		})
 
 		ginkgo.It("clamps cursor at top", func() {
 			svc := &reviewtest.MockService{}
 			m := loadModel(svc, samplePRs(5))
-			gomega.Expect(m.cursor).To(gomega.Equal(0))
+			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(0))
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
-			gomega.Expect(m.cursor).To(gomega.Equal(0))
+			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(0))
 		})
 
 		ginkgo.It("clamps cursor at bottom", func() {
 			svc := &reviewtest.MockService{}
 			m := loadModel(svc, samplePRs(3))
-			m.cursor = 2
+			m.tabs[0].cursor = 2
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.cursor).To(gomega.Equal(2))
+			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(2))
 		})
 
 		ginkgo.It("ignores navigation while loading", func() {
 			svc := &reviewtest.MockService{}
 			m := newTestModel(svc) // loading=true
-			m.cursor = 0
+			m.tabs[0].cursor = 0
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.cursor).To(gomega.Equal(0))
+			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(0))
 		})
 	})
 
@@ -147,7 +173,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			svc := &reviewtest.MockService{}
 			prs := samplePRs(3)
 			m := loadModel(svc, prs)
-			m.cursor = 1
+			m.tabs[0].cursor = 1
 
 			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
@@ -184,7 +210,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(1))
 			gomega.Expect(m.tabBar.Active()).To(gomega.Equal(1))
-			gomega.Expect(m.loading).To(gomega.BeFalse()) // non-blocking refresh
+			gomega.Expect(m.tabs[1].loading).To(gomega.BeTrue()) // new tab triggers fetch
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
 		})
 
@@ -197,7 +223,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(1))
 			gomega.Expect(m.tabBar.Active()).To(gomega.Equal(1))
-			gomega.Expect(m.loading).To(gomega.BeFalse()) // non-blocking refresh
+			gomega.Expect(m.tabs[1].loading).To(gomega.BeTrue()) // new tab triggers fetch
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
 		})
 
@@ -209,7 +235,6 @@ var _ = ginkgo.Describe("PRList Model", func() {
 
 			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(2))
-			gomega.Expect(m.loading).To(gomega.BeFalse())
 			gomega.Expect(cmd).To(gomega.BeNil())
 		})
 
@@ -219,7 +244,6 @@ var _ = ginkgo.Describe("PRList Model", func() {
 
 			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(0))
-			gomega.Expect(m.loading).To(gomega.BeFalse())
 			gomega.Expect(cmd).To(gomega.BeNil())
 		})
 
@@ -230,8 +254,30 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			m, cmd := m.Update(tea.KeyPressMsg{Code: '2'})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(1))
 			gomega.Expect(m.tabBar.Active()).To(gomega.Equal(1))
-			gomega.Expect(m.loading).To(gomega.BeFalse()) // non-blocking refresh
+			gomega.Expect(m.tabs[1].loading).To(gomega.BeTrue()) // new tab triggers fetch
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
+		})
+
+		ginkgo.It("returns cached data instantly when switching back", func() {
+			svc := &reviewtest.MockService{}
+			filters := []review.PRFilter{
+				{Name: "Open", Qualifier: "is:open"},
+				{Name: "Mine", Qualifier: "author:@me"},
+			}
+			m := loadModel(svc, samplePRs(3), filters...)
+			// Tab 0 is loaded with 3 PRs, move cursor
+			m.tabs[0].cursor = 2
+
+			// Switch to tab 1, load it
+			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+			m, _ = m.Update(prsLoadedMsg{tabIdx: 1, prs: samplePRs(5)})
+			gomega.Expect(m.tabs[1].prs).To(gomega.HaveLen(5))
+
+			// Switch back to tab 0 — cursor should be preserved
+			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+			gomega.Expect(m.filterIdx).To(gomega.Equal(0))
+			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(2))
+			gomega.Expect(m.tabs[0].prs).To(gomega.HaveLen(3))
 		})
 	})
 
@@ -266,7 +312,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			gomega.Expect(m.customFilter).NotTo(gomega.BeNil())
 			gomega.Expect(m.customFilter.Name).To(gomega.Equal("Custom"))
 			gomega.Expect(m.customFilter.Qualifier).To(gomega.Equal("author:octocat"))
-			gomega.Expect(m.loading).To(gomega.BeFalse()) // non-blocking refresh
+			gomega.Expect(m.tabs[0].loading).To(gomega.BeFalse()) // non-blocking refresh (tab has data)
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
 		})
 	})
@@ -277,7 +323,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			m := loadModel(svc, samplePRs(1))
 
 			m, cmd := m.Update(tea.KeyPressMsg{Code: 'r'})
-			gomega.Expect(m.loading).To(gomega.BeFalse()) // non-blocking refresh
+			gomega.Expect(m.tabs[0].loading).To(gomega.BeFalse()) // non-blocking refresh
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
 		})
 	})
