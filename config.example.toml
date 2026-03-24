@@ -37,24 +37,24 @@
 # Uses GitHub search qualifiers (https://docs.github.com/en/search-github).
 #
 # Default filters (used when none are configured):
+#   "My PRs"                    author:@me
+#   "All Open"                  (empty qualifier)
 #   "Needs My Review"           review-requested:@me
 #   "My Team Pending"           team-review-requested:@my-teams
 #   "Reviewed, Not Approved"    reviewed-by:@me -review:approved
 #   "Awaiting My Review"        -reviewed-by:@me -review:approved review:required
-#   "All Open"                  (empty qualifier)
-#   "Authored by Me"            author:@me
 #
 # [[filters]]
-# name      = "Needs My Review"
-# qualifier = "review-requested:@me"
-#
-# [[filters]]
-# name      = "My Team Pending"
-# qualifier = "team-review-requested:@my-teams"
+# name      = "My PRs"
+# qualifier = "author:@me"
 #
 # [[filters]]
 # name      = "All Open"
 # qualifier = ""
+#
+# [[filters]]
+# name      = "Needs My Review"
+# qualifier = "review-requested:@me"
 
 # ---------------------------------------------------------------------------
 # PR List Columns

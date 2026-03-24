@@ -189,7 +189,7 @@ page_size = 30
 			cfg := Config{}
 			filters := cfg.PRFilters()
 			gomega.Expect(filters).To(gomega.HaveLen(6))
-			gomega.Expect(filters[0].Name).To(gomega.Equal("Needs My Review"))
+			gomega.Expect(filters[0].Name).To(gomega.Equal("My PRs"))
 		})
 	})
 
@@ -207,9 +207,9 @@ page_size = 30
 		ginkgo.It("returns 6 built-in filters", func() {
 			filters := DefaultFilters()
 			gomega.Expect(filters).To(gomega.HaveLen(6))
-			gomega.Expect(filters[0].Name).To(gomega.Equal("Needs My Review"))
-			gomega.Expect(filters[4].Name).To(gomega.Equal("All Open"))
-			gomega.Expect(filters[5].Name).To(gomega.Equal("Authored by Me"))
+			gomega.Expect(filters[0].Name).To(gomega.Equal("My PRs"))
+			gomega.Expect(filters[1].Name).To(gomega.Equal("All Open"))
+			gomega.Expect(filters[2].Name).To(gomega.Equal("Needs My Review"))
 		})
 	})
 

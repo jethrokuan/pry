@@ -131,12 +131,12 @@ func load(path *string) Config {
 // DefaultFilters returns the built-in filter presets.
 func DefaultFilters() []FilterConfig {
 	return []FilterConfig{
+		{Name: "My PRs", Qualifier: "author:@me"},
+		{Name: "All Open", Qualifier: ""},
 		{Name: "Needs My Review", Qualifier: "review-requested:@me"},
 		{Name: "My Team Pending", Qualifier: "team-review-requested:@my-teams"},
 		{Name: "Reviewed, Not Approved", Qualifier: "reviewed-by:@me -review:approved"},
 		{Name: "Awaiting My Review", Qualifier: "-reviewed-by:@me -review:approved review:required"},
-		{Name: "All Open", Qualifier: ""},
-		{Name: "Authored by Me", Qualifier: "author:@me"},
 	}
 }
 
