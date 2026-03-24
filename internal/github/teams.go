@@ -27,6 +27,7 @@ func (c *Client) UserTeams(_ context.Context) ([]string, error) {
 func (c *Client) getUserTeams() ([]string, error) {
 	var teams []string
 	if c.cache.Get("user_teams", &teams) {
+		slog.Debug("getUserTeams: cache hit", "teams", teams)
 		return teams, nil
 	}
 
@@ -56,6 +57,6 @@ func (c *Client) fetchUserTeams() ([]string, error) {
 		}
 	}
 
-	slog.Debug("fetched user teams", "total", len(allTeams), "orgFiltered", len(filtered))
+	slog.Debug("fetched user teams", "total", len(allTeams), "orgFiltered", len(filtered), "teams", filtered)
 	return filtered, nil
 }

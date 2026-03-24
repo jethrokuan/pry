@@ -124,15 +124,18 @@ func (c *Client) ListPRs(_ context.Context, filter review.PRFilter) ([]review.Pu
 	key := listPRsCacheKey(filter.Qualifier)
 	var cached []review.PullRequest
 	if c.cache.Get(key, &cached) {
+		slog.Debug("ListPRs: cache hit", "qualifier", filter.Qualifier, "count", len(cached))
 		return cached, nil
 	}
 
+	slog.Debug("ListPRs: cache miss, fetching", "qualifier", filter.Qualifier)
 	prs, err := c.searchPRs(filter.Qualifier)
 	if err != nil {
 		return nil, err
 	}
 
 	c.cache.Set(key, prs, c.prTTL)
+	slog.Debug("ListPRs: fetched and cached", "qualifier", filter.Qualifier, "count", len(prs))
 	return prs, nil
 }
 
@@ -286,7 +289,7 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		}
 	}
 
-	return review.PullRequest{
+	pr := review.PullRequest{
 		NodeID:         node.ID,
 		Number:         node.Number,
 		Title:          node.Title,
@@ -315,10 +318,59 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		PendingTeams:   pendingTeams,
 		MyReviewState:  myReviewState,
 	}
+
+	// Log all merge-status-related fields for debugging.
+	slog.Debug("nodeToPR: merge status",
+		"number", pr.Number,
+		"title", pr.Title,
+		"mergeState", pr.MergeState,
+		"mergeable", pr.Mergeable,
+		"reviewDecision", pr.ReviewDecision,
+		"draft", pr.Draft,
+		"checksPass", pr.ChecksPass,
+		"checkRunCount", len(pr.CheckRuns),
+		"reviewerCount", len(pr.Reviewers),
+		"pendingTeams", pr.PendingTeams,
+		"myReviewState", pr.MyReviewState,
+		"viewer", viewer,
+	)
+	if len(node.Commits.Nodes) > 0 {
+		rollupState := node.Commits.Nodes[len(node.Commits.Nodes)-1].Commit.StatusCheckRollup.State
+		slog.Debug("nodeToPR: rollup state",
+			"number", pr.Number,
+			"rollupState", rollupState,
+		)
+	}
+	for _, cr := range pr.CheckRuns {
+		slog.Debug("nodeToPR: check run",
+			"number", pr.Number,
+			"name", cr.Name,
+			"status", cr.Status,
+			"conclusion", cr.Conclusion,
+		)
+	}
+	for _, rv := range pr.Reviewers {
+		slog.Debug("nodeToPR: reviewer",
+			"number", pr.Number,
+			"login", rv.Login,
+			"state", rv.State,
+			"isTeam", rv.IsTeam,
+		)
+	}
+
+	return pr
 }
 
 // graphqlContextToCheckRun converts a GraphQL check context (CheckRun or StatusContext) to a domain CheckRun.
 func graphqlContextToCheckRun(ctx graphqlCheckContext) review.CheckRun {
+	slog.Debug("graphqlContextToCheckRun: raw context",
+		"typename", ctx.TypeName,
+		"name", ctx.Name,
+		"status", ctx.Status,
+		"conclusion", ctx.Conclusion,
+		"context", ctx.Context,
+		"state", ctx.State,
+	)
 	cr := review.CheckRun{}
 
 	if ctx.TypeName == "CheckRun" {
@@ -360,6 +412,12 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 	key := fmt.Sprintf("pr__%d", number)
 	var cached review.PullRequest
 	if c.cache.Get(key, &cached) {
+		slog.Debug("GetPR: cache hit",
+			"number", number,
+			"mergeState", cached.MergeState,
+			"mergeable", cached.Mergeable,
+			"reviewDecision", cached.ReviewDecision,
+		)
 		return &cached, nil
 	}
 
@@ -400,7 +458,7 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 						commit {
 							statusCheckRollup {
 								state
-								contexts(first: 25) {
+								contexts(first: 100) {
 									nodes {
 										__typename
 										... on CheckRun {
@@ -453,13 +511,19 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 	}
 
 	pr := nodeToPR(resp.Repository.PullRequest, "")
-	slog.Debug("fetched PR", "number", pr.Number, "nodeID", pr.NodeID, "title", pr.Title)
 
 	// Best-effort: detect which files have merge conflicts using local git.
 	if pr.Mergeable == "CONFLICTING" {
 		pr.ConflictFiles = git.MergeConflictFiles("origin/"+pr.Base, pr.HeadSHA)
+		slog.Debug("GetPR: conflict files",
+			"number", number,
+			"base", "origin/"+pr.Base,
+			"headSHA", pr.HeadSHA,
+			"conflictFiles", pr.ConflictFiles,
+		)
 	}
 
 	c.cache.Set(key, pr, c.prTTL)
+	slog.Debug("GetPR: cached result", "number", number)
 	return &pr, nil
 }
