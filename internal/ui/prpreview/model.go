@@ -238,7 +238,32 @@ func truncateLines(s string, max int) string {
 // renderReviewStatus renders the review/approval status line with pending reviewer names.
 func renderReviewStatus(b *strings.Builder, pr *review.PullRequest, userIdentity *review.UserIdentity) {
 	if pr.ReviewDecision == "CHANGES_REQUESTED" {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Changes requested") + "\n")
+		// Collect reviewers who requested changes
+		var requesters []string
+		for _, r := range pr.Reviewers {
+			if r.State == "CHANGES_REQUESTED" {
+				requesters = append(requesters, r.Login)
+			}
+		}
+
+		if len(requesters) == 0 {
+			b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Changes requested") + "\n")
+		} else {
+			const maxVisible = 4
+			display := requesters
+			var overflow int
+			if len(display) > maxVisible {
+				overflow = len(display) - maxVisible
+				display = display[:maxVisible]
+			}
+			dangerStyle := lipgloss.NewStyle().Foreground(styles.Danger)
+			names := strings.Join(display, dangerStyle.Render(", "))
+			suffix := ""
+			if overflow > 0 {
+				suffix = lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf(", +%d more", overflow))
+			}
+			b.WriteString(dangerStyle.Render("  ✗ Changes requested by: ") + names + suffix + "\n")
+		}
 		return
 	}
 	if pr.ReviewDecision != "REVIEW_REQUIRED" {
