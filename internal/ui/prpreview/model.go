@@ -263,6 +263,18 @@ func renderReviewStatus(b *strings.Builder, pr *review.PullRequest, userIdentity
 		pending = append(pending, stripOrgPrefix(t))
 	}
 
+	// If no explicit pending reviewers, show reviewers who interacted but haven't approved
+	// (e.g., COMMENTED or DISMISSED — they're still required to approve).
+	// This handles cases where a team reviewer commented (removing the team from
+	// reviewRequests) but hasn't approved yet.
+	if len(pending) == 0 {
+		for _, r := range pr.Reviewers {
+			if r.State != "" && r.State != "APPROVED" && r.State != "PENDING" {
+				pending = append(pending, r.Login)
+			}
+		}
+	}
+
 	if len(pending) == 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("  ○ Awaiting required reviews") + "\n")
 		return

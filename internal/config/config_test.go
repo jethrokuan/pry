@@ -134,7 +134,7 @@ page_size = 30
 			gomega.Expect(cfg.PageSize).To(gomega.Equal(30))
 			// Columns and filters fall back to defaults via accessor methods
 			gomega.Expect(cfg.PRColumns()).To(gomega.Equal(DefaultColumns()))
-			gomega.Expect(cfg.PRFilters()).To(gomega.HaveLen(6))
+			gomega.Expect(cfg.PRFilters()).To(gomega.HaveLen(3))
 		})
 	})
 
@@ -188,7 +188,7 @@ page_size = 30
 		ginkgo.It("falls back to default filters when empty", func() {
 			cfg := Config{}
 			filters := cfg.PRFilters()
-			gomega.Expect(filters).To(gomega.HaveLen(6))
+			gomega.Expect(filters).To(gomega.HaveLen(3))
 			gomega.Expect(filters[0].Name).To(gomega.Equal("My PRs"))
 		})
 	})
@@ -204,12 +204,12 @@ page_size = 30
 	})
 
 	ginkgo.Describe("DefaultFilters", func() {
-		ginkgo.It("returns 6 built-in filters", func() {
+		ginkgo.It("returns 3 built-in filters", func() {
 			filters := DefaultFilters()
-			gomega.Expect(filters).To(gomega.HaveLen(6))
+			gomega.Expect(filters).To(gomega.HaveLen(3))
 			gomega.Expect(filters[0].Name).To(gomega.Equal("My PRs"))
-			gomega.Expect(filters[1].Name).To(gomega.Equal("All Open"))
-			gomega.Expect(filters[2].Name).To(gomega.Equal("Needs My Review"))
+			gomega.Expect(filters[1].Name).To(gomega.Equal("Needs My Review"))
+			gomega.Expect(filters[2].Name).To(gomega.Equal("Reviewed, Not Approved"))
 		})
 	})
 

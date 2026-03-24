@@ -6,14 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jethrokuan/pry/internal/git"
 	"github.com/jethrokuan/pry/internal/review"
 )
-
-const myTeamsPlaceholder = "@my-teams"
 
 type graphqlPRNode struct {
 	ID             string    `json:"id"`
@@ -130,13 +127,7 @@ func (c *Client) ListPRs(_ context.Context, filter review.PRFilter) ([]review.Pu
 		return cached, nil
 	}
 
-	var prs []review.PullRequest
-	var err error
-	if strings.Contains(filter.Qualifier, myTeamsPlaceholder) {
-		prs, err = c.listPRsForTeams(filter)
-	} else {
-		prs, err = c.searchPRs(filter.Qualifier)
-	}
+	prs, err := c.searchPRs(filter.Qualifier)
 	if err != nil {
 		return nil, err
 	}
@@ -212,59 +203,6 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 	}
 
 	return prs, nil
-}
-
-// listPRsForTeams expands @my-teams into parallel per-team queries and deduplicates.
-func (c *Client) listPRsForTeams(filter review.PRFilter) ([]review.PullRequest, error) {
-	teams, err := c.getUserTeams()
-	if err != nil {
-		return nil, err
-	}
-	if len(teams) == 0 {
-		return nil, nil
-	}
-
-	type result struct {
-		prs []review.PullRequest
-		err error
-	}
-
-	results := make([]result, len(teams))
-	var wg sync.WaitGroup
-
-	// Cap concurrency to avoid firing too many heavy queries in parallel.
-	const maxConcurrent = 5
-	sem := make(chan struct{}, maxConcurrent)
-
-	for i, team := range teams {
-		wg.Add(1)
-		go func(idx int, teamSlug string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			qualifier := strings.ReplaceAll(filter.Qualifier, myTeamsPlaceholder, teamSlug)
-			prs, err := c.searchPRs(qualifier)
-			results[idx] = result{prs: prs, err: err}
-		}(i, team)
-	}
-	wg.Wait()
-
-	// Merge and deduplicate by PR number, preserving order.
-	seen := make(map[int]bool)
-	var merged []review.PullRequest
-	for _, r := range results {
-		if r.err != nil {
-			return nil, r.err
-		}
-		for _, pr := range r.prs {
-			if !seen[pr.Number] {
-				seen[pr.Number] = true
-				merged = append(merged, pr)
-			}
-		}
-	}
-
-	return merged, nil
 }
 
 // nodeToPR converts a GraphQL node to a domain PullRequest.

@@ -38,11 +38,11 @@
 #
 # Default filters (used when none are configured):
 #   "My PRs"                    author:@me
-#   "All Open"                  (empty qualifier)
-#   "Needs My Review"           review-requested:@me
-#   "My Team Pending"           team-review-requested:@my-teams
+#   "Needs My Review"           review-requested:@me draft:false
 #   "Reviewed, Not Approved"    reviewed-by:@me -review:approved
-#   "Awaiting My Review"        -reviewed-by:@me -review:approved review:required
+#
+# To filter to a specific team instead of all your review requests:
+#   qualifier = "team-review-requested:@org/team-name draft:false"
 #
 # [[filters]]
 # name      = "My PRs"
