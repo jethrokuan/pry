@@ -371,19 +371,17 @@ func renderCheckRunsDetail(b *strings.Builder, pr *review.PullRequest) {
 	}
 	b.WriteString(prefix + rest + "\n")
 
-	// Detail line: show non-passing checks inline with ' · ' separator
-	// Sort: failed first, then running
+	// Detail lines: show failed and running checks, one per line
 	var detailChecks []review.CheckRun
 	detailChecks = append(detailChecks, failed...)
 	detailChecks = append(detailChecks, running...)
 
-	const maxDetailChecks = 4
+	const maxDetailChecks = 6
 	showChecks := detailChecks
 	if len(showChecks) > maxDetailChecks {
 		showChecks = showChecks[:maxDetailChecks]
 	}
 
-	var detailParts []string
 	for _, cr := range showChecks {
 		var icon string
 		var style lipgloss.Style
@@ -406,14 +404,12 @@ func renderCheckRunsDetail(b *strings.Builder, pr *review.PullRequest) {
 		if dur != "" {
 			entry += " (" + dur + ")"
 		}
-		detailParts = append(detailParts, style.Render(entry))
+		b.WriteString("    " + style.Render(entry) + "\n")
 	}
 
 	if len(detailChecks) > maxDetailChecks {
-		detailParts = append(detailParts, lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("+%d more", len(detailChecks)-maxDetailChecks)))
+		b.WriteString("    " + lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("+%d more", len(detailChecks)-maxDetailChecks)) + "\n")
 	}
-
-	b.WriteString("    " + strings.Join(detailParts, lipgloss.NewStyle().Foreground(styles.Muted).Render(" · ")) + "\n")
 }
 
 // renderCleanStatus renders the status line when PR is ready to merge.
