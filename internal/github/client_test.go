@@ -558,11 +558,22 @@ var _ = Describe("SubmitReview", func() {
 		Expect(rest.calls).To(HaveLen(1))
 	})
 
-	It("submits a review with ReviewID 0", func() {
+	It("creates a pending review first when ReviewID is 0", func() {
+		callCount := 0
 		rest.doHandler = func(method, path string, body io.Reader, resp interface{}) error {
+			callCount++
 			Expect(method).To(Equal("POST"))
-			Expect(path).To(ContainSubstring("pulls/42/reviews"))
-			Expect(path).To(ContainSubstring("events"))
+			if callCount == 1 {
+				// First call: CreatePendingReview
+				Expect(path).To(Equal("repos/testowner/testrepo/pulls/42/reviews"))
+				if resp != nil {
+					raw, _ := json.Marshal(map[string]interface{}{"id": 77, "node_id": "PRR_77"})
+					json.Unmarshal(raw, resp)
+				}
+			} else {
+				// Second call: submit the review
+				Expect(path).To(ContainSubstring("reviews/77/events"))
+			}
 			return nil
 		}
 
@@ -573,6 +584,8 @@ var _ = Describe("SubmitReview", func() {
 		}
 		err := c.SubmitReview(ctx, pr, rev)
 		Expect(err).NotTo(HaveOccurred())
+		Expect(callCount).To(Equal(2))
+		Expect(rev.ReviewID).To(Equal(77))
 	})
 
 	It("returns an error on submission failure", func() {

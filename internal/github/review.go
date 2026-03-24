@@ -210,7 +210,18 @@ func (c *Client) EditReviewComment(_ context.Context, prNumber, commentID int, b
 
 // SubmitReview submits the pending review to GitHub.
 // Comments are already on the server; this just finalizes the review with an event.
-func (c *Client) SubmitReview(_ context.Context, pr *review.PullRequest, rev *review.PendingReview) error {
+func (c *Client) SubmitReview(ctx context.Context, pr *review.PullRequest, rev *review.PendingReview) error {
+	// If no pending review exists on GitHub yet (e.g. approving without inline
+	// comments), create one so we have a valid review ID to submit.
+	if rev.ReviewID == 0 {
+		id, nodeID, err := c.CreatePendingReview(ctx, pr.Number)
+		if err != nil {
+			return fmt.Errorf("failed to create pending review before submit: %w", err)
+		}
+		rev.ReviewID = id
+		rev.ReviewNodeID = nodeID
+	}
+
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews/%d/events",
 		c.owner, c.repo, pr.Number, rev.ReviewID)
 
