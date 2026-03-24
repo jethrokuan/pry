@@ -20,6 +20,7 @@ const (
 	StyleSuccess Style = iota // green, auto-expires
 	StyleInfo                 // muted, auto-expires
 	StyleSpinner              // animated spinner prefix, no auto-expiry
+	StyleDanger               // danger/red, auto-expires
 )
 
 // item is a single flash entry.
@@ -121,6 +122,8 @@ func (m Model) View() string {
 			rendered = m.spinner.View() + " " + it.Text
 		case StyleSuccess:
 			rendered = lipgloss.NewStyle().Foreground(styles.Success).Bold(true).Render(it.Text)
+		case StyleDanger:
+			rendered = lipgloss.NewStyle().Foreground(styles.Danger).Bold(true).Render(it.Text)
 		default:
 			rendered = it.Text
 		}

@@ -188,6 +188,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		style := flash.StyleSuccess
 		if msg.Spinner {
 			style = flash.StyleSpinner
+		} else if msg.Danger {
+			style = flash.StyleDanger
 		}
 		m.flash, flashCmd = m.flash.Update(flash.ShowMsg{
 			ID:      msg.ID,

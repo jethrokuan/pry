@@ -54,19 +54,20 @@ var _ = ginkgo.Describe("PRList Model", func() {
 
 			gomega.Expect(m.tabs[0].loading).To(gomega.BeFalse())
 			gomega.Expect(m.tabs[0].prs).To(gomega.HaveLen(3))
-			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(0))
-			gomega.Expect(m.tabs[0].err).To(gomega.BeNil())
+			gomega.Expect(m.tabs[0].cur()).To(gomega.Equal(0))
+			// err field removed; errors are now shown via flash
 		})
 
-		ginkgo.It("tracks error state on failure", func() {
+		ginkgo.It("emits flash on failure", func() {
 			svc := &reviewtest.MockService{}
 			m := newTestModel(svc)
 
-			m, _ = m.Update(prsLoadedMsg{tabIdx: 0, err: fmt.Errorf("API failure")})
+			m, cmd := m.Update(prsLoadedMsg{tabIdx: 0, err: fmt.Errorf("API failure")})
 
 			gomega.Expect(m.tabs[0].loading).To(gomega.BeFalse())
-			gomega.Expect(m.tabs[0].err).To(gomega.MatchError("API failure"))
 			gomega.Expect(m.tabs[0].prs).To(gomega.BeNil())
+			// Error is communicated via flash command, not stored in tab state.
+			gomega.Expect(cmd).NotTo(gomega.BeNil())
 		})
 
 		ginkgo.It("routes response to correct tab", func() {
@@ -125,46 +126,45 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			m := loadModel(svc, samplePRs(5))
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(1))
+			gomega.Expect(m.tabs[0].cur()).To(gomega.Equal(1))
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(2))
+			gomega.Expect(m.tabs[0].cur()).To(gomega.Equal(2))
 		})
 
 		ginkgo.It("moves cursor up with k", func() {
 			svc := &reviewtest.MockService{}
 			m := loadModel(svc, samplePRs(5))
-			m.tabs[0].cursor = 3
+			m.tabs[0].setCursor(3)
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
-			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(2))
+			gomega.Expect(m.tabs[0].cur()).To(gomega.Equal(2))
 		})
 
 		ginkgo.It("clamps cursor at top", func() {
 			svc := &reviewtest.MockService{}
 			m := loadModel(svc, samplePRs(5))
-			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(0))
+			gomega.Expect(m.tabs[0].cur()).To(gomega.Equal(0))
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
-			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(0))
+			gomega.Expect(m.tabs[0].cur()).To(gomega.Equal(0))
 		})
 
 		ginkgo.It("clamps cursor at bottom", func() {
 			svc := &reviewtest.MockService{}
 			m := loadModel(svc, samplePRs(3))
-			m.tabs[0].cursor = 2
+			m.tabs[0].setCursor(2)
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(2))
+			gomega.Expect(m.tabs[0].cur()).To(gomega.Equal(2))
 		})
 
 		ginkgo.It("ignores navigation while loading", func() {
 			svc := &reviewtest.MockService{}
-			m := newTestModel(svc) // loading=true
-			m.tabs[0].cursor = 0
+			m := newTestModel(svc) // loading=true, cursor is nil
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(0))
+			gomega.Expect(m.tabs[0].cursor).To(gomega.BeNil())
 		})
 	})
 
@@ -173,7 +173,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			svc := &reviewtest.MockService{}
 			prs := samplePRs(3)
 			m := loadModel(svc, prs)
-			m.tabs[0].cursor = 1
+			m.tabs[0].setCursor(1)
 
 			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			gomega.Expect(cmd).NotTo(gomega.BeNil())
@@ -266,7 +266,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			}
 			m := loadModel(svc, samplePRs(3), filters...)
 			// Tab 0 is loaded with 3 PRs, move cursor
-			m.tabs[0].cursor = 2
+			m.tabs[0].setCursor(2)
 
 			// Switch to tab 1, load it
 			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
@@ -276,7 +276,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			// Switch back to tab 0 — cursor should be preserved
 			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(0))
-			gomega.Expect(m.tabs[0].cursor).To(gomega.Equal(2))
+			gomega.Expect(m.tabs[0].cur()).To(gomega.Equal(2))
 			gomega.Expect(m.tabs[0].prs).To(gomega.HaveLen(3))
 		})
 	})

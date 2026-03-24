@@ -48,6 +48,7 @@ type FlashMsg struct {
 	ID      string
 	Text    string
 	Spinner bool          // true = animated spinner style
+	Danger  bool          // true = danger/error style
 	Expires time.Duration // 0 = manual dismiss
 }
 
@@ -119,11 +120,28 @@ var keys = KeyMap{
 // cursor position, and enrichment state independently.
 type tabState struct {
 	prs       []review.PullRequest
-	cursor    int
+	cursor    *int // nil when no entries; index into prs otherwise
 	loading   bool
-	err       error
 	enrichMap map[int]enrichState
 	fetched   bool // true once at least one successful fetch has completed
+}
+
+// cur returns the cursor value, defaulting to 0 if nil.
+func (t *tabState) cur() int {
+	if t.cursor == nil {
+		return 0
+	}
+	return *t.cursor
+}
+
+// setCursor sets the cursor to the given value.
+func (t *tabState) setCursor(v int) {
+	t.cursor = &v
+}
+
+// hasCursor returns true if a PR is selected.
+func (t *tabState) hasCursor() bool {
+	return t.cursor != nil
 }
 
 // Model is the Bubble Tea model for the PR list screen.
@@ -276,11 +294,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		t.fetched = true
 		dismissCmd := func() tea.Msg { return DismissFlashMsg{ID: "pr-refresh"} }
 		if msg.err != nil {
-			t.err = msg.err
-			return m, dismissCmd
+			errFlash := emitDangerFlash("fetch-error", fmt.Sprintf("Fetch failed: %v", msg.err), 5*time.Second)
+			return m, tea.Batch(dismissCmd, errFlash)
 		}
 		t.prs = msg.prs
-		t.cursor = 0
+		if len(t.prs) > 0 {
+			t.setCursor(0)
+		} else {
+			t.cursor = nil
+		}
 		t.enrichMap = make(map[int]enrichState)
 		m.tabBar.SetCount(msg.tabIdx, len(t.prs))
 		// Only update sidebar/enrich if this is the active tab.
@@ -325,12 +347,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 		// Update sidebar if this is the active tab and the currently selected PR.
-		if msg.tabIdx == m.filterIdx && len(t.prs) > 0 && t.cursor < len(t.prs) && t.prs[t.cursor].Number == msg.PRNumber {
+		if msg.tabIdx == m.filterIdx && t.hasCursor() && t.cur() < len(t.prs) && t.prs[t.cur()].Number == msg.PRNumber {
 			m.preview.HandleBodyLoaded(prpreview.BodyLoadedMsg{
 				PRNumber: msg.PRNumber,
 				Body:     msg.FullPR.Body,
 				FullPR:   msg.FullPR,
-			}, &t.prs[t.cursor])
+			}, &t.prs[t.cur()])
 		}
 		return m, nil
 
@@ -377,34 +399,36 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.Quit):
 			return m, tea.Quit
 		case key.Matches(msg, keys.Up):
-			if t.cursor > 0 {
-				t.cursor--
+			if t.hasCursor() && t.cur() > 0 {
+				t.setCursor(t.cur() - 1)
 				return m, m.refreshSidebarPreview()
 			}
 		case key.Matches(msg, keys.Down):
-			if t.cursor < len(t.prs)-1 {
-				t.cursor++
+			if t.hasCursor() && t.cur() < len(t.prs)-1 {
+				t.setCursor(t.cur() + 1)
 				return m, m.refreshSidebarPreview()
 			}
 		case key.Matches(msg, keys.HalfPageDown):
-			if len(t.prs) > 0 {
-				t.cursor += m.halfPageSize()
-				if t.cursor >= len(t.prs) {
-					t.cursor = len(t.prs) - 1
+			if t.hasCursor() {
+				c := t.cur() + m.halfPageSize()
+				if c >= len(t.prs) {
+					c = len(t.prs) - 1
 				}
+				t.setCursor(c)
 				return m, m.refreshSidebarPreview()
 			}
 		case key.Matches(msg, keys.HalfPageUp):
-			if len(t.prs) > 0 {
-				t.cursor -= m.halfPageSize()
-				if t.cursor < 0 {
-					t.cursor = 0
+			if t.hasCursor() {
+				c := t.cur() - m.halfPageSize()
+				if c < 0 {
+					c = 0
 				}
+				t.setCursor(c)
 				return m, m.refreshSidebarPreview()
 			}
 		case key.Matches(msg, keys.Select):
-			if len(t.prs) > 0 {
-				pr := t.prs[t.cursor]
+			if t.hasCursor() {
+				pr := t.prs[t.cur()]
 				return m, func() tea.Msg {
 					return PRSelectedMsg{PR: &pr}
 				}
@@ -432,8 +456,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.SidebarUp):
 			m.preview.ScrollUp(3)
 		case key.Matches(msg, keys.OpenInBrowser):
-			if len(t.prs) > 0 {
-				return m, openBrowser(t.prs[t.cursor].URL)
+			if t.hasCursor() {
+				return m, openBrowser(t.prs[t.cur()].URL)
 			}
 		case key.Matches(msg, keys.Refresh):
 			if inv, ok := m.svc.(review.CacheInvalidator); ok {
@@ -441,8 +465,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			return m, m.startFetch()
 		case key.Matches(msg, keys.CopyNumber):
-			if len(t.prs) > 0 {
-				pr := t.prs[t.cursor]
+			if t.hasCursor() {
+				pr := t.prs[t.cur()]
 				text := fmt.Sprintf("%d", pr.Number)
 				if err := clipboard.WriteText(text); err != nil {
 					return m, emitFlash("copy", "Copy failed: "+err.Error(), 1500*time.Millisecond)
@@ -450,8 +474,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				return m, emitFlash("copy", fmt.Sprintf("Copied #%d", pr.Number), 1500*time.Millisecond)
 			}
 		case key.Matches(msg, keys.CopyURL):
-			if len(t.prs) > 0 {
-				pr := t.prs[t.cursor]
+			if t.hasCursor() {
+				pr := t.prs[t.cur()]
 				if err := clipboard.WriteText(pr.URL); err != nil {
 					return m, emitFlash("copy", "Copy failed: "+err.Error(), 1500*time.Millisecond)
 				}
@@ -481,11 +505,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 // and ensures the selected PR is being enriched.
 func (m *Model) refreshSidebarPreview() tea.Cmd {
 	t := m.tab()
-	if len(t.prs) == 0 || t.cursor >= len(t.prs) {
+	if !t.hasCursor() || t.cur() >= len(t.prs) {
 		m.preview.SetNoSelection()
 		return nil
 	}
-	pr := &t.prs[t.cursor]
+	pr := &t.prs[t.cur()]
 	m.preview.Refresh(pr)
 
 	// Ensure selected PR gets enriched even if outside the initial batch.
@@ -517,8 +541,8 @@ func (m *Model) enrichVisible() tea.Cmd {
 
 	// Build fetch list: cursor PR first, then others up to limit.
 	var toFetch []int
-	if t.cursor < len(t.prs) {
-		num := t.prs[t.cursor].Number
+	if t.hasCursor() && t.cur() < len(t.prs) {
+		num := t.prs[t.cur()].Number
 		if t.enrichMap[num] == enrichNone {
 			toFetch = append(toFetch, num)
 			t.enrichMap[num] = enrichPending
@@ -639,12 +663,9 @@ func (m Model) renderLeftPane(tableWidth, mainHeight int) string {
 	if t.loading {
 		loadingText := m.spinner.View() + " Loading PRs..."
 		leftPane.WriteString(lipgloss.Place(tableWidth, tableHeight, lipgloss.Center, lipgloss.Center, loadingText))
-	} else if t.err != nil {
-		leftPane.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("Error: %v", t.err)))
-		leftPane.WriteString("\n\nPress 'r' to retry or ctrl+c to quit")
-	} else if len(t.prs) == 0 {
+	} else if !t.hasCursor() {
 		leftPane.WriteString("No PRs found for this filter.\n")
-		leftPane.WriteString("\nPress tab to switch filters or ctrl+c to quit")
+		leftPane.WriteString("\nPress 'r' to retry, tab to switch filters, or ctrl+c to quit")
 	} else {
 		scrollbarWidth := 1
 		tableContent := m.renderTable(tableWidth-scrollbarWidth, tableHeight)
@@ -729,6 +750,13 @@ func emitFlash(id, text string, expires time.Duration) tea.Cmd {
 	}
 }
 
+// emitDangerFlash returns a command that emits a danger-styled flash message.
+func emitDangerFlash(id, text string, expires time.Duration) tea.Cmd {
+	return func() tea.Msg {
+		return FlashMsg{ID: id, Text: text, Danger: true, Expires: expires}
+	}
+}
+
 // visibleRange computes the start and end indices of visible PR rows given
 // the available height in terminal lines. Each PR row is 4 lines tall.
 func (m Model) visibleRange(height int) (start, end int) {
@@ -739,8 +767,8 @@ func (m Model) visibleRange(height int) (start, end int) {
 		visibleRows = 1
 	}
 	start = 0
-	if t.cursor >= visibleRows {
-		start = t.cursor - visibleRows + 1
+	if t.cur() >= visibleRows {
+		start = t.cur() - visibleRows + 1
 	}
 	end = start + visibleRows
 	if end > len(t.prs) {
@@ -764,7 +792,7 @@ func (m Model) renderTable(width, height int) string {
 	var b strings.Builder
 
 	visiblePRs := t.prs[start:end]
-	cursorInView := t.cursor - start
+	cursorInView := t.cur() - start
 
 	for i, pr := range visiblePRs {
 		isSelected := i == cursorInView

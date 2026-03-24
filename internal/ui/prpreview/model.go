@@ -97,7 +97,7 @@ func (m *Model) ResetCache() {
 
 // SetNoSelection shows a placeholder when no PR is selected.
 func (m *Model) SetNoSelection() {
-	m.sidebar.SetContent("No PR selected")
+	m.sidebar.SetContent("Nothing selected yet")
 }
 
 func (m *Model) renderContent(pr *review.PullRequest, body string) {
