@@ -169,9 +169,6 @@ func (m Model) toggleFoldAll() Model {
 }
 
 // toggleFoldAtDiffCursor toggles folding based on what's at the cursor in the diff view.
-// If the cursor is on a collapsed hunk placeholder, expand it.
-// If the cursor line has comments, toggle comment fold.
-// Otherwise, collapse the current hunk.
 func (m Model) toggleFoldAtDiffCursor() Model {
 	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
 		return m
@@ -180,28 +177,25 @@ func (m Model) toggleFoldAtDiffCursor() Model {
 		return m
 	}
 
-	dl := m.nav.diffLines[m.nav.cursor.LineIdx]
-	path := m.files[m.nav.fileCursor].Path
-
-	// If it's a collapsed hunk placeholder, expand it
-	if dl.collapsed {
-		hk := hunkKey(path, dl.hunkIdx)
-		delete(m.nav.collapsedHunks, hk)
-		m.nav.buildDiffLines(m.files)
-		m.updateDiffContent()
-		return m
-	}
-
-	// If cursor line has comments, toggle comment fold
-	if m.comments.LineHasComments(path, dl) {
+	if m.nav.cursor.IsComment() {
 		return m.toggleCommentAtCursor()
 	}
+	return m.toggleHunkAtCursor()
+}
 
-	// Otherwise, collapse the current hunk
+// toggleHunkAtCursor collapses or expands the hunk at the current cursor position.
+func (m Model) toggleHunkAtCursor() Model {
+	dl := m.nav.diffLines[m.nav.cursor.LineIdx]
+	path := m.files[m.nav.fileCursor].Path
 	hk := hunkKey(path, dl.hunkIdx)
-	m.nav.collapsedHunks[hk] = true
+
+	if dl.collapsed {
+		delete(m.nav.collapsedHunks, hk)
+	} else {
+		m.nav.collapsedHunks[hk] = true
+	}
+
 	m.nav.buildDiffLines(m.files)
-	// Clamp cursor if it's now past the end
 	if m.nav.cursor.LineIdx >= len(m.nav.diffLines) {
 		m.nav.cursor.LineIdx = len(m.nav.diffLines) - 1
 	}
