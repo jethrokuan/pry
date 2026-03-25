@@ -781,10 +781,10 @@ func (m *Model) syncViewportToCursorWithComments() {
 // corresponding to the given diffCursor index, accounting for hunk headers,
 // comment blocks, and inter-hunk blank lines.
 func (m *Model) renderedLineForCursor(cursor int) int {
-	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+	if len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
 		return cursor
 	}
-	file := m.files[m.nav.fileCursor]
+	file := m.files[m.nav.cursor.FileIdx]
 	if file.IsBinary {
 		return 0
 	}
@@ -820,11 +820,11 @@ func (m *Model) renderedLineForCursor(cursor int) int {
 // commentBlockHeight returns the total rendered line count for all comments
 // attached to the diff line at the given cursor index.
 func (m *Model) commentBlockHeight(cursor int) int {
-	if cursor < 0 || cursor >= len(m.nav.diffLines) || len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+	if cursor < 0 || cursor >= len(m.nav.diffLines) || len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
 		return 0
 	}
 	dl := m.nav.diffLines[cursor]
-	path := m.files[m.nav.fileCursor].Path
+	path := m.files[m.nav.cursor.FileIdx].Path
 	h := 0
 	if dl.newLine > 0 {
 		h += m.commentRenderedLines(path, dl.newLine, "RIGHT")
@@ -939,11 +939,11 @@ func (m *Model) updateViewports() {
 // copyForgeLink builds a GitHub permalink for the current file+line (or selection)
 // and copies it to the system clipboard.
 func (m *Model) copyForgeLink() tea.Cmd {
-	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+	if len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
 		return m.setFlash("No file to copy link for")
 	}
 
-	file := m.files[m.nav.fileCursor]
+	file := m.files[m.nav.cursor.FileIdx]
 	sha := m.pr.HeadSHA
 	owner := m.svc.RepoOwner()
 	repo := m.svc.RepoName()
@@ -1026,7 +1026,7 @@ func openBrowser(url string) tea.Cmd {
 }
 
 func (m *Model) updateDiffContent() {
-	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+	if len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
 		m.nav.diffViewport.SetContent("No files to display")
 		if m.treeDirty {
 			m.nav.treeViewport.SetContent(m.renderFileTree())
@@ -1042,7 +1042,7 @@ func (m *Model) updateDiffContent() {
 		}
 		return
 	}
-	file := m.files[m.nav.fileCursor]
+	file := m.files[m.nav.cursor.FileIdx]
 	m.nav.diffViewport.SetContent(m.renderDiffWithCursor(&file))
 	if m.treeDirty {
 		m.nav.treeViewport.SetContent(m.renderFileTree())
@@ -1132,13 +1132,13 @@ func (m Model) View() string {
 
 	// File name bar
 	if len(m.files) > 0 {
-		fileName := m.files[m.nav.fileCursor].Path
+		fileName := m.files[m.nav.cursor.FileIdx].Path
 		viewed := ""
 		if m.pendingReview.ViewedFiles[fileName] {
 			viewed = " ✓"
 		}
 		b.WriteString(styles.StatusBar.Render(
-			fmt.Sprintf(" %s (%d/%d)%s ", fileName, m.nav.fileCursor+1, len(m.files), viewed)) + "\n")
+			fmt.Sprintf(" %s (%d/%d)%s ", fileName, m.nav.cursor.FileIdx+1, len(m.files), viewed)) + "\n")
 	}
 
 	// Main content
@@ -1265,12 +1265,12 @@ func (m Model) View() string {
 func (m Model) currentPosition() (label string, index int, total int) {
 	switch m.nav.activeCycler {
 	case CyclerFile:
-		return "File", m.nav.fileCursor + 1, len(m.files)
+		return "File", m.nav.cursor.FileIdx + 1, len(m.files)
 	case CyclerComment:
-		if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+		if len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
 			return "Comment", 0, 0
 		}
-		path := m.files[m.nav.fileCursor].Path
+		path := m.files[m.nav.cursor.FileIdx].Path
 		t, p := 0, 0
 		for i, dl := range m.nav.diffLines {
 			if m.comments.LineHasComments(path, dl) {
@@ -1298,10 +1298,10 @@ func (m Model) currentPosition() (label string, index int, total int) {
 		return "Match", p, t
 	default:
 		// Default: show hunk position
-		if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+		if len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
 			return "Hunk", 0, 0
 		}
-		file := m.files[m.nav.fileCursor]
+		file := m.files[m.nav.cursor.FileIdx]
 		hunkIdx := 0
 		if len(m.nav.diffLines) > 0 && m.nav.cursor.LineIdx < len(m.nav.diffLines) {
 			hunkIdx = m.nav.diffLines[m.nav.cursor.LineIdx].hunkIdx + 1

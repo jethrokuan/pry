@@ -262,31 +262,31 @@ var _ = ginkgo.Describe("Input Handling", func() {
 		ginkgo.It("should navigate to next file with f key", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
-			m.nav.fileCursor = 0
+			m.nav.cursor.FileIdx = 0
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'f'})
-			gomega.Expect(m.nav.fileCursor).To(gomega.Equal(1))
+			gomega.Expect(m.nav.cursor.FileIdx).To(gomega.Equal(1))
 			gomega.Expect(m.nav.cursor.LineIdx).To(gomega.Equal(0), "diff cursor should reset to 0")
 		})
 
 		ginkgo.It("should navigate to previous file with F key", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
-			m.nav.fileCursor = 1
+			m.nav.cursor.FileIdx = 1
 			m.nav.buildDiffLines(m.files)
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'F'})
-			gomega.Expect(m.nav.fileCursor).To(gomega.Equal(0))
+			gomega.Expect(m.nav.cursor.FileIdx).To(gomega.Equal(0))
 		})
 
 		ginkgo.It("should wrap around at last file", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
-			m.nav.fileCursor = len(m.files) - 1
+			m.nav.cursor.FileIdx = len(m.files) - 1
 			m.nav.buildDiffLines(m.files)
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'f'})
-			gomega.Expect(m.nav.fileCursor).To(gomega.Equal(0))
+			gomega.Expect(m.nav.cursor.FileIdx).To(gomega.Equal(0))
 		})
 	})
 
@@ -557,7 +557,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			// Select it
 			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			gomega.Expect(m.search.filterActive).To(gomega.BeFalse())
-			gomega.Expect(m.nav.fileCursor).To(gomega.Equal(1)) // index of src/util.go
+			gomega.Expect(m.nav.cursor.FileIdx).To(gomega.Equal(1)) // index of src/util.go
 		})
 
 		ginkgo.It("should navigate filter list with up/down", func() {
@@ -623,7 +623,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 
 			// All hunks for current file should be collapsed
-			file := m.files[m.nav.fileCursor]
+			file := m.files[m.nav.cursor.FileIdx]
 			for hi := range file.Hunks {
 				hk := hunkKey(file.Path, hi)
 				gomega.Expect(m.nav.collapsedHunks[hk]).To(gomega.BeTrue())

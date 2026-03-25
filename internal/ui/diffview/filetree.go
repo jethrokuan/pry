@@ -245,7 +245,7 @@ func (m Model) renderFileTree() string {
 			// File node
 			fileIdx := row.node.fileIdx
 			file := m.files[fileIdx]
-			isActiveFile := fileIdx == m.nav.fileCursor
+			isActiveFile := fileIdx == m.nav.cursor.FileIdx
 
 			cursor := "  "
 			if isCursorRow {

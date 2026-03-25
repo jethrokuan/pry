@@ -26,11 +26,11 @@ type commentRef struct {
 
 // commentRefsAtLine returns all expanded comments below the given diff line index, in render order.
 func (m *Model) commentRefsAtLine(diffIdx int) []commentRef {
-	if diffIdx < 0 || diffIdx >= len(m.nav.diffLines) || len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+	if diffIdx < 0 || diffIdx >= len(m.nav.diffLines) || len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
 		return nil
 	}
 	dl := m.nav.diffLines[diffIdx]
-	path := m.files[m.nav.fileCursor].Path
+	path := m.files[m.nav.cursor.FileIdx].Path
 
 	var refs []commentRef
 
@@ -142,7 +142,7 @@ func (m *Model) openCommentPopup() {
 // into a string suitable for display in the popup viewport.
 func (m *Model) buildCommentPopupContent(width int) string {
 	dl := m.nav.diffLines[m.nav.cursor.LineIdx]
-	path := m.files[m.nav.fileCursor].Path
+	path := m.files[m.nav.cursor.FileIdx].Path
 
 	authorStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
 	draftStyle := lipgloss.NewStyle().Foreground(styles.Warning)
@@ -274,10 +274,10 @@ func lineAndSide(dl diffLineInfo) (int, string) {
 
 func (m Model) toggleCommentAtCursor() Model {
 	m.nav.cursor = m.nav.cursor.AsLine()
-	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+	if len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
 		return m
 	}
-	path := m.files[m.nav.fileCursor].Path
+	path := m.files[m.nav.cursor.FileIdx].Path
 
 	if m.nav.focus == FocusDiff && m.nav.cursor.LineIdx < len(m.nav.diffLines) {
 		dl := m.nav.diffLines[m.nav.cursor.LineIdx]
@@ -327,10 +327,10 @@ func (m *Model) commentKeysForFile(path string) []string {
 // --- Mark as viewed ---
 
 func (m Model) markCurrentFileViewed() (Model, tea.Cmd) {
-	if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
+	if len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
 		return m, nil
 	}
-	file := m.files[m.nav.fileCursor]
+	file := m.files[m.nav.cursor.FileIdx]
 	path := file.Path
 	prNodeID := m.pr.NodeID
 
@@ -367,16 +367,15 @@ func (m *Model) navigateToNextUnviewed() {
 	}
 	// Search forward from current position
 	for i := 1; i < n; i++ {
-		idx := (m.nav.fileCursor + i) % n
+		idx := (m.nav.cursor.FileIdx + i) % n
 		if !m.filter.isIncluded(idx) {
 			continue
 		}
 		if !m.pendingReview.ViewedFiles[m.files[idx].Path] {
-			oldIdx := m.nav.fileCursor
-			m.nav.fileCursor = idx
+			oldIdx := m.nav.cursor.FileIdx
+			m.nav.cursor = CursorTarget{Kind: CursorLine, FileIdx: idx}
 			m.nav.buildDiffLines(m.files)
-			m.nav.cursor = CursorTarget{Kind: CursorLine}
-			m.autoFollowFile(oldIdx, m.nav.fileCursor)
+			m.autoFollowFile(oldIdx, idx)
 			return
 		}
 	}
@@ -394,7 +393,7 @@ func (m Model) markTreeItemViewed() (Model, tea.Cmd) {
 
 	if row.node.fileIdx >= 0 {
 		// Single file — sync fileCursor to tree selection and delegate
-		m.nav.fileCursor = row.node.fileIdx
+		m.nav.cursor.FileIdx = row.node.fileIdx
 		return m.markCurrentFileViewed()
 	}
 
@@ -571,7 +570,7 @@ func (m *Model) startComment() tea.Cmd {
 		return nil
 	}
 	dl := m.nav.diffLines[m.nav.cursor.LineIdx]
-	path := m.files[m.nav.fileCursor].Path
+	path := m.files[m.nav.cursor.FileIdx].Path
 	line, side := lineAndSide(dl)
 
 	if m.nav.visualMode {
@@ -603,7 +602,7 @@ func (m Model) openInEditor() tea.Cmd {
 	if len(m.files) == 0 {
 		return nil
 	}
-	file := m.files[m.nav.fileCursor]
+	file := m.files[m.nav.cursor.FileIdx]
 	line := 1
 	if m.nav.cursor.LineIdx < len(m.nav.diffLines) {
 		if dl := m.nav.diffLines[m.nav.cursor.LineIdx]; dl.newLine > 0 {

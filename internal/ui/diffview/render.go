@@ -538,7 +538,7 @@ func (m Model) renderCommentPopup() string {
 	path := ""
 	lineNum := 0
 	if len(m.files) > 0 && m.nav.cursor.LineIdx < len(m.nav.diffLines) {
-		path = m.files[m.nav.fileCursor].Path
+		path = m.files[m.nav.cursor.FileIdx].Path
 		dl := m.nav.diffLines[m.nav.cursor.LineIdx]
 		if dl.newLine > 0 {
 			lineNum = dl.newLine

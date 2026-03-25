@@ -21,7 +21,6 @@ const (
 // DiffNav manages cursor positions, viewport scrolling, diff line mapping,
 // and file tree navigation state.
 type DiffNav struct {
-	fileCursor   int
 	cursor       CursorTarget
 	diffViewport viewport.Model
 	treeViewport viewport.Model
@@ -49,30 +48,24 @@ type DiffNav struct {
 	activeCycler CyclerKind
 
 	// Jump list for Ctrl-o / Ctrl-i navigation
-	jumpList    []jumpPos
-	jumpCursor  int // points to current position in jumpList (-1 = at head)
-}
-
-// jumpPos records a cursor position for the jump list.
-type jumpPos struct {
-	fileCursor int
-	cursor     CursorTarget
+	jumpList   []CursorTarget
+	jumpCursor int // points to current position in jumpList (-1 = at head)
 }
 
 // buildDiffLines flattens the hunks of the current file into a flat diffLines slice.
 // Collapsed hunks are represented by a single placeholder entry.
 func (n *DiffNav) buildDiffLines(files []diff.DiffFile) {
 	n.diffLines = nil
-	if len(files) == 0 || n.fileCursor >= len(files) {
+	if len(files) == 0 || n.cursor.FileIdx >= len(files) {
 		return
 	}
-	file := files[n.fileCursor]
+	file := files[n.cursor.FileIdx]
 	for hi, hunk := range file.Hunks {
 		hk := hunkKey(file.Path, hi)
 		if n.collapsedHunks[hk] {
 			// Single placeholder for the collapsed hunk
 			n.diffLines = append(n.diffLines, diffLineInfo{
-				fileIdx:   n.fileCursor,
+				fileIdx:   n.cursor.FileIdx,
 				hunkIdx:   hi,
 				lineIdx:   0,
 				collapsed: true,
@@ -81,7 +74,7 @@ func (n *DiffNav) buildDiffLines(files []diff.DiffFile) {
 		}
 		for li, line := range hunk.Lines {
 			n.diffLines = append(n.diffLines, diffLineInfo{
-				fileIdx:  n.fileCursor,
+				fileIdx:  n.cursor.FileIdx,
 				hunkIdx:  hi,
 				lineIdx:  li,
 				newLine:  line.NewNum,
@@ -110,7 +103,7 @@ func (n *DiffNav) rebuildTreeRows() {
 // syncTreeCursorToFileCursor finds the tree row matching fileCursor and updates treeCursor.
 func (n *DiffNav) syncTreeCursorToFileCursor() {
 	for i, row := range n.treeRows {
-		if row.node.fileIdx == n.fileCursor {
+		if row.node.fileIdx == n.cursor.FileIdx {
 			n.treeCursor = i
 			n.syncTreeViewportToCursor()
 			return
@@ -151,7 +144,7 @@ func (n *DiffNav) syncTreeViewportToCursor() {
 // pushJump records the current position in the jump list before a navigation jump.
 // Truncates any forward history if we're not at the head.
 func (n *DiffNav) pushJump() {
-	pos := jumpPos{fileCursor: n.fileCursor, cursor: n.cursor}
+	pos := n.cursor
 
 	// If we have forward history, truncate it
 	if n.jumpCursor >= 0 && n.jumpCursor < len(n.jumpList)-1 {
@@ -160,8 +153,7 @@ func (n *DiffNav) pushJump() {
 
 	// Deduplicate: don't push if identical to the last entry
 	if len(n.jumpList) > 0 {
-		last := n.jumpList[len(n.jumpList)-1]
-		if last.fileCursor == pos.fileCursor && last.cursor == pos.cursor {
+		if n.jumpList[len(n.jumpList)-1] == pos {
 			n.jumpCursor = len(n.jumpList) - 1
 			return
 		}
@@ -179,9 +171,9 @@ func (n *DiffNav) pushJump() {
 
 // jumpBack moves to the previous position in the jump list.
 // Returns the position and true if a jump occurred.
-func (n *DiffNav) jumpBack() (jumpPos, bool) {
+func (n *DiffNav) jumpBack() (CursorTarget, bool) {
 	if len(n.jumpList) == 0 || n.jumpCursor <= 0 {
-		return jumpPos{}, false
+		return CursorTarget{}, false
 	}
 	n.jumpCursor--
 	return n.jumpList[n.jumpCursor], true
@@ -189,9 +181,9 @@ func (n *DiffNav) jumpBack() (jumpPos, bool) {
 
 // jumpForward moves to the next position in the jump list.
 // Returns the position and true if a jump occurred.
-func (n *DiffNav) jumpForward() (jumpPos, bool) {
+func (n *DiffNav) jumpForward() (CursorTarget, bool) {
 	if n.jumpCursor >= len(n.jumpList)-1 {
-		return jumpPos{}, false
+		return CursorTarget{}, false
 	}
 	n.jumpCursor++
 	return n.jumpList[n.jumpCursor], true
