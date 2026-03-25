@@ -865,7 +865,7 @@ func (m *Model) applyJumpPos(pos jumpPos) {
 		m.nav.buildDiffLines(m.files)
 		m.autoFollowFile(oldIdx, m.nav.fileCursor)
 	}
-	m.nav.cursor = CursorTarget{Kind: CursorLine, LineIdx: pos.lineIdx}
+	m.nav.cursor = pos.cursor
 	if m.nav.cursor.LineIdx >= len(m.nav.diffLines) {
 		m.nav.cursor.LineIdx = len(m.nav.diffLines) - 1
 	}
