@@ -8,6 +8,16 @@ import (
 	"github.com/jethrokuan/pry/internal/diff"
 )
 
+// CyclerKind identifies which navigation dimension the position counter displays.
+type CyclerKind int
+
+const (
+	CyclerHunk    CyclerKind = iota // default — hunk position
+	CyclerFile                      // file position
+	CyclerComment                   // comment position
+	CyclerSearch                    // search match position
+)
+
 // DiffNav manages cursor positions, viewport scrolling, diff line mapping,
 // and file tree navigation state.
 type DiffNav struct {
@@ -36,8 +46,7 @@ type DiffNav struct {
 	diffLines []diffLineInfo
 
 	// Active navigation type for the always-visible position counter.
-	// 'h' = hunk (default); 'f','F' = file/unviewed; 'c','C' = comment; '/' = search
-	activeCycler rune
+	activeCycler CyclerKind
 
 	// Jump list for Ctrl-o / Ctrl-i navigation
 	jumpList    []jumpPos

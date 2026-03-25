@@ -361,19 +361,19 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	// Dedicated navigation keys
 	case key.Matches(msg, keys.NextHunk):
-		m.nav.activeCycler = 'h'
+		m.nav.activeCycler = CyclerHunk
 		cmd := m.navigateHunk(true)
 		return m, cmd
 	case key.Matches(msg, keys.PrevHunk):
-		m.nav.activeCycler = 'h'
+		m.nav.activeCycler = CyclerHunk
 		cmd := m.navigateHunk(false)
 		return m, cmd
 	case key.Matches(msg, keys.NextComment):
-		m.nav.activeCycler = 'c'
+		m.nav.activeCycler = CyclerComment
 		cmd := m.navigateComment(true, false)
 		return m, cmd
 	case key.Matches(msg, keys.PrevComment):
-		m.nav.activeCycler = 'C'
+		m.nav.activeCycler = CyclerComment
 		cmd := m.navigateComment(false, false)
 		return m, cmd
 
@@ -383,12 +383,12 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, keys.NextSearch):
 		if m.search.Query() != "" {
-			m.nav.activeCycler = '/'
+			m.nav.activeCycler = CyclerSearch
 			return m, m.jumpToNextSearchMatch()
 		}
 	case key.Matches(msg, keys.PrevSearch):
 		if m.search.Query() != "" {
-			m.nav.activeCycler = '/'
+			m.nav.activeCycler = CyclerSearch
 			return m, m.jumpToPrevSearchMatch()
 		}
 
@@ -702,7 +702,7 @@ func (m Model) handleSearchBarKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case searchGotoLineMsg:
 		m.jumpToLine(ev.line)
 	case searchQueryConfirmedMsg:
-		m.nav.activeCycler = '/'
+		m.nav.activeCycler = CyclerSearch
 		cmd := m.jumpToNextSearchMatch()
 		m.updateDiffContent()
 		return m, cmd

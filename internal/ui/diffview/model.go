@@ -356,7 +356,7 @@ func New(svc review.Service, pr *review.PullRequest, opts ...Option) Model {
 			focus:          FocusDiff,
 			collapsedDirs:  make(map[string]bool),
 			collapsedHunks: make(map[string]bool),
-			activeCycler:   'h',
+			activeCycler:   CyclerHunk,
 		},
 		comments: CommentPanel{
 			expanded: make(map[string]bool),
@@ -1264,20 +1264,9 @@ func (m Model) View() string {
 // currentPosition dynamically computes the position counter for the active navigation type.
 func (m Model) currentPosition() (label string, index int, total int) {
 	switch m.nav.activeCycler {
-	case 'f':
+	case CyclerFile:
 		return "File", m.nav.fileCursor + 1, len(m.files)
-	case 'F':
-		t, p := 0, 0
-		for i, f := range m.files {
-			if !m.pendingReview.ViewedFiles[f.Path] {
-				t++
-				if i == m.nav.fileCursor {
-					p = t
-				}
-			}
-		}
-		return "Unviewed", p, t
-	case 'c':
+	case CyclerComment:
 		if len(m.files) == 0 || m.nav.fileCursor >= len(m.files) {
 			return "Comment", 0, 0
 		}
@@ -1292,18 +1281,7 @@ func (m Model) currentPosition() (label string, index int, total int) {
 			}
 		}
 		return "Comment", p, t
-	case 'C':
-		t, p := 0, 0
-		for i, f := range m.files {
-			if m.comments.FileHasComments(f.Path) {
-				t++
-				if i == m.nav.fileCursor {
-					p = t
-				}
-			}
-		}
-		return "Commented", p, t
-	case '/':
+	case CyclerSearch:
 		if m.search.Query() == "" {
 			return "Match", 0, 0
 		}
