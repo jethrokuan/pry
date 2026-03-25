@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 
-	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/jethrokuan/pry/internal/review"
 )
 
@@ -116,10 +114,43 @@ func (c *Client) CreatePendingReview(_ context.Context, prNumber int) (int, stri
 	return result.ID, result.NodeID, nil
 }
 
-// AddReviewComment adds a comment to an existing pending review on GitHub
-// using the GraphQL addPullRequestReviewThread mutation.
-// Returns the database ID of the created comment.
-func (c *Client) AddReviewComment(_ context.Context, reviewNodeID string, path string, line, startLine int, side, body string) (int, error) {
+// AddReviewComment ensures a pending review exists for the PR and adds a
+// comment to it using the GraphQL addPullRequestReviewThread mutation.
+// Returns the comment database ID and the review IDs (so callers stay in sync).
+func (c *Client) AddReviewComment(ctx context.Context, prNumber int, path string, line, startLine int, side, body string) (int, int, string, error) {
+	// Ensure a valid pending review exists (fetch existing or create new).
+	reviewID, reviewNodeID, err := c.ensurePendingReview(ctx, prNumber)
+	if err != nil {
+		return 0, 0, "", err
+	}
+
+	commentID, err := c.addReviewThread(reviewNodeID, path, line, startLine, side, body)
+	if err != nil {
+		return 0, reviewID, reviewNodeID, fmt.Errorf("failed to add comment to pending review: %w", err)
+	}
+	return commentID, reviewID, reviewNodeID, nil
+}
+
+// ensurePendingReview returns the user's existing pending review, creating
+// one if none exists. This is the single source of truth for obtaining a
+// valid review to attach comments to.
+func (c *Client) ensurePendingReview(ctx context.Context, prNumber int) (int, string, error) {
+	id, nodeID, _, err := c.FetchPendingReview(ctx, prNumber)
+	if err != nil {
+		return 0, "", fmt.Errorf("ensure pending review: fetch failed: %w", err)
+	}
+	if id != 0 {
+		return id, nodeID, nil
+	}
+	id, nodeID, err = c.CreatePendingReview(ctx, prNumber)
+	if err != nil {
+		return 0, "", fmt.Errorf("ensure pending review: create failed: %w", err)
+	}
+	return id, nodeID, nil
+}
+
+// addReviewThread performs the GraphQL addPullRequestReviewThread mutation.
+func (c *Client) addReviewThread(reviewNodeID string, path string, line, startLine int, side, body string) (int, error) {
 	mutation := `
 	mutation($reviewID: ID!, $body: String!, $path: String!, $line: Int!, $side: DiffSide!, $startLine: Int, $startSide: DiffSide) {
 		addPullRequestReviewThread(input: {
@@ -169,7 +200,7 @@ func (c *Client) AddReviewComment(_ context.Context, reviewNodeID string, path s
 	err := c.graphql.Do(mutation, vars, &resp)
 	if err != nil {
 		slog.Error("failed to add review comment", "reviewNodeID", reviewNodeID, "path", path, "line", line, "error", err)
-		return 0, fmt.Errorf("failed to add comment to pending review: %w", err)
+		return 0, fmt.Errorf("graphql addPullRequestReviewThread: %w", err)
 	}
 
 	nodes := resp.AddPullRequestReviewThread.Thread.Comments.Nodes
@@ -213,16 +244,14 @@ func (c *Client) EditReviewComment(_ context.Context, prNumber, commentID int, b
 // SubmitReview submits the pending review to GitHub.
 // Comments are already on the server; this just finalizes the review with an event.
 func (c *Client) SubmitReview(ctx context.Context, pr *review.PullRequest, rev *review.PendingReview) error {
-	// If no pending review exists on GitHub yet (e.g. approving without inline
-	// comments), create one so we have a valid review ID to submit.
-	if rev.ReviewID == 0 {
-		id, nodeID, err := c.CreatePendingReview(ctx, pr.Number)
-		if err != nil {
-			return fmt.Errorf("failed to create pending review before submit: %w", err)
-		}
-		rev.ReviewID = id
-		rev.ReviewNodeID = nodeID
+	// Always ensure a valid pending review exists — the locally cached ID may
+	// be stale (e.g. GitHub auto-deleted it when all comments were removed).
+	id, nodeID, err := c.ensurePendingReview(ctx, pr.Number)
+	if err != nil {
+		return fmt.Errorf("failed to ensure pending review before submit: %w", err)
 	}
+	rev.ReviewID = id
+	rev.ReviewNodeID = nodeID
 
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews/%d/events",
 		c.owner, c.repo, pr.Number, rev.ReviewID)
@@ -242,16 +271,6 @@ func (c *Client) SubmitReview(ctx context.Context, pr *review.PullRequest, rev *
 	slog.Debug("submitting review", "reviewID", rev.ReviewID, "event", rev.Event)
 	err = c.rest.Do(http.MethodPost, endpoint, bytes.NewReader(body), nil)
 	if err != nil {
-		// GitHub deletes the pending review when all its comments are removed.
-		// If we get a 404, create a fresh review and retry the submission.
-		var httpErr *api.HTTPError
-		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
-			slog.Info("pending review was deleted (all comments removed?), creating a fresh one",
-				"staleReviewID", rev.ReviewID)
-			rev.ReviewID = 0
-			rev.ReviewNodeID = ""
-			return c.SubmitReview(ctx, pr, rev)
-		}
 		slog.Error("failed to submit review", "reviewID", rev.ReviewID, "event", rev.Event, "error", err)
 		return fmt.Errorf("failed to submit review: %w", err)
 	}

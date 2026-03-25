@@ -40,8 +40,8 @@ func (s *stubService) FetchPendingReview(_ context.Context, _ int) (int, string,
 func (s *stubService) CreatePendingReview(_ context.Context, _ int) (int, string, error) {
 	return 0, "", nil
 }
-func (s *stubService) AddReviewComment(_ context.Context, _ string, _ string, _, _ int, _, _ string) (int, error) {
-	return 0, nil
+func (s *stubService) AddReviewComment(_ context.Context, _ int, _ string, _, _ int, _, _ string) (int, int, string, error) {
+	return 0, 0, "", nil
 }
 func (s *stubService) DeleteReviewComment(_ context.Context, _, _ int) error { return nil }
 func (s *stubService) EditReviewComment(_ context.Context, _, _ int, _ string) error {

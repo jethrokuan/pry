@@ -541,6 +541,12 @@ var _ = Describe("SubmitReview", func() {
 	})
 
 	It("submits an existing pending review", func() {
+		// ensurePendingReview fetches existing review via GET
+		rest.getHandler = func(path string, resp interface{}) error {
+			return jsonInto([]map[string]interface{}{
+				{"id": 99, "node_id": "PRR_99", "state": "PENDING", "user": map[string]string{"login": "me"}},
+			}, resp)
+		}
 		rest.doHandler = func(method, path string, body io.Reader, resp interface{}) error {
 			Expect(method).To(Equal("POST"))
 			Expect(path).To(ContainSubstring("reviews/99/events"))
@@ -555,23 +561,26 @@ var _ = Describe("SubmitReview", func() {
 		}
 		err := c.SubmitReview(ctx, pr, rev)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(rest.calls).To(HaveLen(1))
 	})
 
-	It("creates a pending review first when ReviewID is 0", func() {
-		callCount := 0
+	It("creates a pending review first when none exists", func() {
+		// ensurePendingReview: no existing review
+		rest.getHandler = func(path string, resp interface{}) error {
+			return jsonInto([]map[string]interface{}{}, resp)
+		}
+		doCallCount := 0
 		rest.doHandler = func(method, path string, body io.Reader, resp interface{}) error {
-			callCount++
+			doCallCount++
 			Expect(method).To(Equal("POST"))
-			if callCount == 1 {
-				// First call: CreatePendingReview
+			if doCallCount == 1 {
+				// CreatePendingReview
 				Expect(path).To(Equal("repos/testowner/testrepo/pulls/42/reviews"))
 				if resp != nil {
 					raw, _ := json.Marshal(map[string]interface{}{"id": 77, "node_id": "PRR_77"})
 					json.Unmarshal(raw, resp)
 				}
 			} else {
-				// Second call: submit the review
+				// Submit the review
 				Expect(path).To(ContainSubstring("reviews/77/events"))
 			}
 			return nil
@@ -584,11 +593,17 @@ var _ = Describe("SubmitReview", func() {
 		}
 		err := c.SubmitReview(ctx, pr, rev)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(callCount).To(Equal(2))
+		Expect(doCallCount).To(Equal(2))
 		Expect(rev.ReviewID).To(Equal(77))
 	})
 
 	It("returns an error on submission failure", func() {
+		// ensurePendingReview succeeds
+		rest.getHandler = func(path string, resp interface{}) error {
+			return jsonInto([]map[string]interface{}{
+				{"id": 99, "node_id": "PRR_99", "state": "PENDING", "user": map[string]string{"login": "me"}},
+			}, resp)
+		}
 		rest.doHandler = func(method, path string, body io.Reader, resp interface{}) error {
 			return errors.New("forbidden")
 		}
@@ -714,6 +729,16 @@ var _ = Describe("AddReviewComment", func() {
 		ctx  context.Context
 	)
 
+	// stubEnsurePendingReview sets up REST to return an existing PENDING review
+	// so AddReviewComment can proceed to the GraphQL thread mutation.
+	stubEnsurePendingReview := func() {
+		rest.getHandler = func(path string, resp interface{}) error {
+			return jsonInto([]map[string]interface{}{
+				{"id": 42, "node_id": "PRR_42", "state": "PENDING", "user": map[string]string{"login": "me"}},
+			}, resp)
+		}
+	}
+
 	BeforeEach(func() {
 		rest = &mockREST{}
 		gql = &mockGraphQL{}
@@ -721,9 +746,10 @@ var _ = Describe("AddReviewComment", func() {
 		ctx = context.Background()
 	})
 
-	It("creates a single-line comment via GraphQL", func() {
+	It("ensures a pending review and creates a single-line comment", func() {
+		stubEnsurePendingReview()
 		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
-			Expect(vars["reviewID"]).To(Equal("PRR_123"))
+			Expect(vars["reviewID"]).To(Equal("PRR_42"))
 			Expect(vars["path"]).To(Equal("main.go"))
 			Expect(vars["line"]).To(Equal(10))
 			Expect(vars["side"]).To(Equal("RIGHT"))
@@ -742,12 +768,15 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		id, err := c.AddReviewComment(ctx, "PRR_123", "main.go", 10, 0, "RIGHT", "nit: typo")
+		commentID, reviewID, reviewNodeID, err := c.AddReviewComment(ctx, 1, "main.go", 10, 0, "RIGHT", "nit: typo")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(id).To(Equal(555))
+		Expect(commentID).To(Equal(555))
+		Expect(reviewID).To(Equal(42))
+		Expect(reviewNodeID).To(Equal("PRR_42"))
 	})
 
 	It("sets startLine for multi-line comments", func() {
+		stubEnsurePendingReview()
 		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
 			Expect(vars["startLine"]).To(Equal(5))
 			Expect(vars["startSide"]).To(Equal("RIGHT"))
@@ -764,11 +793,12 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		_, err := c.AddReviewComment(ctx, "PRR_123", "main.go", 10, 5, "RIGHT", "refactor this block")
+		_, _, _, err := c.AddReviewComment(ctx, 1, "main.go", 10, 5, "RIGHT", "refactor this block")
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("returns an error when no comment node is returned", func() {
+		stubEnsurePendingReview()
 		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
 			return jsonInto(map[string]interface{}{
 				"addPullRequestReviewThread": map[string]interface{}{
@@ -781,9 +811,41 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		_, err := c.AddReviewComment(ctx, "PRR_123", "main.go", 10, 0, "RIGHT", "test")
+		_, _, _, err := c.AddReviewComment(ctx, 1, "main.go", 10, 0, "RIGHT", "test")
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("no comment returned"))
+	})
+
+	It("creates a new review when none exists", func() {
+		// FetchPendingReview: return empty list (no PENDING review)
+		rest.getHandler = func(path string, resp interface{}) error {
+			return jsonInto([]map[string]interface{}{}, resp)
+		}
+		// CreatePendingReview: return new review
+		rest.doHandler = func(method, path string, body io.Reader, resp interface{}) error {
+			return jsonInto(map[string]interface{}{
+				"id": 99, "node_id": "PRR_99",
+			}, resp)
+		}
+		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
+			Expect(vars["reviewID"]).To(Equal("PRR_99"))
+			return jsonInto(map[string]interface{}{
+				"addPullRequestReviewThread": map[string]interface{}{
+					"thread": map[string]interface{}{
+						"comments": map[string]interface{}{
+							"nodes": []map[string]interface{}{
+								{"databaseId": 777},
+							},
+						},
+					},
+				},
+			}, resp)
+		}
+
+		commentID, reviewID, _, err := c.AddReviewComment(ctx, 1, "main.go", 5, 0, "RIGHT", "hello")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(commentID).To(Equal(777))
+		Expect(reviewID).To(Equal(99))
 	})
 })
 

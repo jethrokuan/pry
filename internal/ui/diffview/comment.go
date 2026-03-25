@@ -513,27 +513,8 @@ func (m Model) handleEditorSave(msg inlineEditorSaveMsg) (Model, tea.Cmd) {
 
 	m.closeInlineComment()
 
-	// If we already have a review node ID, dispatch immediately
-	if nodeID := m.pendingReview.ReviewNodeID; nodeID != "" {
-		return m, m.addReviewCommentCmd(tempID, nodeID, msg.path, msg.line, msg.startLine, side, msg.body)
-	}
-
-	// Buffer the comment — it will be flushed when the review is created
-	m.bufferedComments = append(m.bufferedComments, bufferedComment{
-		tempID:    tempID,
-		path:      msg.path,
-		line:      msg.line,
-		startLine: msg.startLine,
-		side:      side,
-		body:      msg.body,
-	})
-
-	// Kick off review creation if not already in progress
-	if !m.reviewCreating {
-		m.reviewCreating = true
-		return m, m.createPendingReviewCmd()
-	}
-	return m, nil
+	// The service ensures a pending review exists internally — no buffering needed.
+	return m, m.addReviewCommentCmd(tempID, msg.path, msg.line, msg.startLine, side, msg.body)
 }
 
 func (m Model) openExternalEditorForComment() tea.Cmd {

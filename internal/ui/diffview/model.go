@@ -63,17 +63,13 @@ type pendingReviewMsg struct {
 	err          error
 }
 
-type reviewCreatedMsg struct {
-	reviewID     int
-	reviewNodeID string
-	err          error
-}
-
 // commentAddedMsg is sent when a background AddReviewComment call completes.
 type commentAddedMsg struct {
-	tempID  int            // The optimistic temp ID to replace
-	comment review.Comment // The real comment from the server
-	err     error
+	tempID       int            // The optimistic temp ID to replace
+	comment      review.Comment // The real comment from the server
+	reviewID     int            // Fresh review ID from the server
+	reviewNodeID string         // Fresh review node ID from the server
+	err          error
 }
 
 type commentDeletedMsg struct {
@@ -253,10 +249,6 @@ type Model struct {
 	// Optimistic comment tracking: maps temp (negative) IDs to in-flight state
 	inflight map[int]bool
 
-	// Buffered comments waiting for review creation to complete
-	reviewCreating   bool
-	bufferedComments []bufferedComment
-
 	width    int
 	height   int
 	loading  bool
@@ -279,15 +271,6 @@ type Model struct {
 	// Caches
 	mdCache  map[mdCacheKey]string // rendered markdown cache
 	treeDirty bool                 // true when file tree needs re-rendering
-}
-
-type bufferedComment struct {
-	tempID    int
-	path      string
-	line      int
-	startLine int
-	side      string
-	body      string
 }
 
 type diffLineInfo struct {
@@ -432,27 +415,23 @@ func (m Model) loadPendingReview() tea.Cmd {
 	}
 }
 
-func (m Model) createPendingReviewCmd() tea.Cmd {
-	return func() tea.Msg {
-		id, nodeID, err := m.svc.CreatePendingReview(context.Background(), m.pr.Number)
-		return reviewCreatedMsg{reviewID: id, reviewNodeID: nodeID, err: err}
-	}
-}
-
-// addReviewCommentCmd adds a comment to an existing pending review.
-// The tempID is the optimistic comment's ID, used to replace it on success or remove on failure.
-func (m Model) addReviewCommentCmd(tempID int, nodeID, path string, line, startLine int, side, body string) tea.Cmd {
+// addReviewCommentCmd ensures a pending review exists and adds a comment to it.
+// The service handles review creation internally, so no buffering is needed.
+func (m Model) addReviewCommentCmd(tempID int, path string, line, startLine int, side, body string) tea.Cmd {
 	svc := m.svc
 	currentUser := m.currentUser
+	prNumber := m.pr.Number
 
 	return func() tea.Msg {
-		forgeID, err := svc.AddReviewComment(context.Background(), nodeID, path, line, startLine, side, body)
+		forgeID, reviewID, reviewNodeID, err := svc.AddReviewComment(context.Background(), prNumber, path, line, startLine, side, body)
 		if err != nil {
-			return commentAddedMsg{tempID: tempID, err: err}
+			return commentAddedMsg{tempID: tempID, reviewID: reviewID, reviewNodeID: reviewNodeID, err: err}
 		}
 
 		return commentAddedMsg{
-			tempID: tempID,
+			tempID:       tempID,
+			reviewID:     reviewID,
+			reviewNodeID: reviewNodeID,
 			comment: review.Comment{
 				ID:        forgeID,
 				Path:      path,
@@ -465,20 +444,6 @@ func (m Model) addReviewCommentCmd(tempID int, nodeID, path string, line, startL
 			},
 		}
 	}
-}
-
-// flushBufferedComments dispatches addReviewCommentCmd for all buffered comments.
-func (m *Model) flushBufferedComments() tea.Cmd {
-	if len(m.bufferedComments) == 0 {
-		return nil
-	}
-	nodeID := m.pendingReview.ReviewNodeID
-	cmds := make([]tea.Cmd, len(m.bufferedComments))
-	for i, bc := range m.bufferedComments {
-		cmds[i] = m.addReviewCommentCmd(bc.tempID, nodeID, bc.path, bc.line, bc.startLine, bc.side, bc.body)
-	}
-	m.bufferedComments = nil
-	return tea.Batch(cmds...)
 }
 
 func (m Model) deleteCommentCmd(commentID int) tea.Cmd {
@@ -562,25 +527,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		// No existing pending review — that's fine, we'll create one lazily
 		// when the user actually takes a review action (e.g., adds a comment).
 
-	case reviewCreatedMsg:
-		m.reviewCreating = false
-		if msg.err == nil {
-			m.pendingReview.ReviewID = msg.reviewID
-			m.pendingReview.ReviewNodeID = msg.reviewNodeID
-			// Flush any comments that were waiting for the review to be created
-			return m, m.flushBufferedComments()
-		}
-		// Review creation failed — roll back all buffered optimistic comments
-		for _, bc := range m.bufferedComments {
-			m.removeCommentByID(bc.tempID)
-			delete(m.inflight, bc.tempID)
-		}
-		m.bufferedComments = nil
-		m.updateDiffContent()
-		return m, emitDangerFlash("review-err", fmt.Sprintf("Review error: %v", msg.err))
-
 	case commentAddedMsg:
 		delete(m.inflight, msg.tempID)
+		// Keep local review state in sync with the server
+		if m.pendingReview != nil && msg.reviewNodeID != "" {
+			m.pendingReview.ReviewID = msg.reviewID
+			m.pendingReview.ReviewNodeID = msg.reviewNodeID
+		}
 		if msg.err != nil {
 			// Rollback: remove the optimistic comment
 			m.removeCommentByID(msg.tempID)
