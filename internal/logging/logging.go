@@ -13,7 +13,8 @@ const logFileName = "debug.log"
 
 // Setup configures the global slog logger to write to a file.
 // When verbose is true the log level is set to Debug; otherwise it is Info.
-// The log file is created at ~/.config/pry/debug.log.
+// The log file is created at <UserConfigDir>/pry/debug.log
+// (macOS: ~/Library/Application Support/pry/debug.log, Linux: ~/.config/pry/debug.log).
 // Returns a cleanup function that should be deferred by the caller.
 func Setup(verbose bool) (cleanup func(), err error) {
 	dir, err := os.UserConfigDir()

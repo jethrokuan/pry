@@ -23,6 +23,10 @@ go build -o pry ./cmd/...
 go install github.com/jethrokuan/pry/cmd@latest
 ```
 
+## Debugging
+
+Logs are written to `<UserConfigDir>/pry/debug.log` — on macOS that's `~/Library/Application Support/pry/debug.log`, on Linux `~/.config/pry/debug.log`. Run with `-v` for debug-level logging.
+
 ## Testing
 
 Tests use **Ginkgo v2** and **Gomega**. Always use Ginkgo for new tests.
