@@ -201,6 +201,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prlist.DismissFlashMsg:
 		m.flash, flashCmd = m.flash.Update(flash.DismissMsg{ID: msg.ID})
 		return m, flashCmd
+	case diffview.FlashMsg:
+		style := flash.StyleSuccess
+		if msg.Danger {
+			style = flash.StyleDanger
+		}
+		m.flash, flashCmd = m.flash.Update(flash.ShowMsg{
+			ID:      msg.ID,
+			Text:    msg.Text,
+			Style:   style,
+			Expires: msg.Expires,
+		})
+		return m, flashCmd
+	case diffview.DismissFlashMsg:
+		m.flash, flashCmd = m.flash.Update(flash.DismissMsg{ID: msg.ID})
+		return m, flashCmd
 	default:
 		// Forward ticks/expiry to flash model; continue processing below.
 		m.flash, flashCmd = m.flash.Update(msg)

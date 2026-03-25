@@ -27,6 +27,19 @@ import (
 type SubmitReviewMsg struct{}
 type BackMsg struct{}
 
+// FlashMsg is emitted by the diffview to request the root model show a flash.
+type FlashMsg struct {
+	ID      string
+	Text    string
+	Danger  bool          // true = danger/error style
+	Expires time.Duration // 0 = manual dismiss
+}
+
+// DismissFlashMsg is emitted to request the root model dismiss a flash by ID.
+type DismissFlashMsg struct {
+	ID string
+}
+
 // PRBodyLoadedMsg carries the full PR data after async fetch.
 type PRBodyLoadedMsg struct {
 	PR  *review.PullRequest
@@ -250,7 +263,7 @@ type Model struct {
 	spinner  spinner.Model
 	showHelp bool
 
-	errors errorStore // unified error tracking for all async operations
+	loadErr error // fatal load error — blocks rendering
 
 	confirmQuit        bool // true when waiting for second quit key to confirm
 	confirmDelete      bool // true when waiting for y/n to confirm comment deletion
@@ -348,7 +361,6 @@ func New(svc review.Service, pr *review.PullRequest, opts ...Option) Model {
 		inflight:          make(map[int]bool),
 		loading: true,
 		spinner: s,
-		errors:  newErrorStore(),
 		mdCache: make(map[mdCacheKey]string),
 		treeDirty:         true,
 		nav: DiffNav{
@@ -517,7 +529,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case filesLoadedMsg:
 		m.loading = false
 		if msg.err != nil {
-			m.errors.set(errCatLoad, 0, msg.err)
+			m.loadErr = msg.err
 		} else {
 			m.files = msg.files
 			m.filter.recompute(m.files)
@@ -531,7 +543,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case commentsLoadedMsg:
 		if msg.err != nil {
-			m.errors.set(errCatLoad, 0, fmt.Errorf("comments: %w", msg.err))
+			m.loadErr = fmt.Errorf("comments: %w", msg.err)
 		} else {
 			m.setComments(msg.comments)
 			m.updateDiffContent()
@@ -539,7 +551,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case pendingReviewMsg:
 		if msg.err != nil {
-			m.errors.set(errCatReview, 0, msg.err)
+			return m, emitDangerFlash("review-err", fmt.Sprintf("Review error: %v", msg.err))
 		} else if msg.reviewID > 0 {
 			m.pendingReview.ReviewID = msg.reviewID
 			m.pendingReview.ReviewNodeID = msg.reviewNodeID
@@ -565,7 +577,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.bufferedComments = nil
 		m.updateDiffContent()
-		m.errors.set(errCatReview, 0, msg.err)
+		return m, emitDangerFlash("review-err", fmt.Sprintf("Review error: %v", msg.err))
 
 	case commentAddedMsg:
 		delete(m.inflight, msg.tempID)
@@ -597,7 +609,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case viewedFilesMsg:
 		if msg.err != nil {
-			m.errors.set(errCatViewed, 0, fmt.Errorf("viewed files: %w", msg.err))
+			return m, emitDangerFlash("viewed-err", fmt.Sprintf("Viewed error: %v", msg.err))
 		} else if msg.viewed != nil {
 			for path := range msg.viewed {
 				m.pendingReview.ViewedFiles[path] = true
@@ -611,7 +623,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case markViewedMsg:
 		if msg.err != nil {
-			m.errors.set(errCatViewed, 0, fmt.Errorf("mark viewed: %w", msg.err))
+			return m, emitDangerFlash("viewed-err", fmt.Sprintf("Mark viewed error: %v", msg.err))
 		}
 		// Tree is refreshed optimistically in markTreeItemViewed/markCurrentFileViewed,
 		// but also refresh here to pick up any server-side state corrections
@@ -885,6 +897,18 @@ func (m *Model) setFlash(msg string) tea.Cmd {
 	})
 }
 
+func emitDangerFlash(id, text string) tea.Cmd {
+	return func() tea.Msg {
+		return FlashMsg{ID: id, Text: text, Danger: true}
+	}
+}
+
+func emitDismissFlash(id string) tea.Cmd {
+	return func() tea.Msg {
+		return DismissFlashMsg{ID: id}
+	}
+}
+
 // hasUnsavedWork returns true if there are any pending (draft) comments
 // from the current user that haven't been submitted yet.
 func (m *Model) hasUnsavedWork() bool {
@@ -1121,14 +1145,11 @@ func (m Model) View() string {
 		return b.String()
 	}
 
-	if err := m.errors.get(errCatLoad); err != nil {
+	if m.loadErr != nil {
 		b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).
-			Render(fmt.Sprintf("Error: %v", err)) + "\n")
+			Render(fmt.Sprintf("Error: %v", m.loadErr)) + "\n")
 		return b.String()
 	}
-
-	// Show sync errors (review, viewed, comment sync)
-	b.WriteString(m.errors.renderSyncErrors())
 
 	// File name bar
 	if len(m.files) > 0 {
