@@ -21,7 +21,7 @@ type MockService struct {
 	FetchCommentsFn       func(ctx context.Context, number int) ([]review.Comment, error)
 	FetchPendingReviewFn  func(ctx context.Context, number int) (int, string, []review.Comment, error)
 	CreatePendingReviewFn func(ctx context.Context, prNumber int) (int, string, error)
-	AddReviewCommentFn    func(ctx context.Context, prNumber int, path string, line, startLine int, side, body string) (int, int, string, error)
+	AddReviewCommentFn    func(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, int, string, error)
 	DeleteReviewCommentFn   func(ctx context.Context, prNumber, commentID int) error
 	EditReviewCommentFn     func(ctx context.Context, prNumber, commentID int, body string) error
 	SubmitReviewFn          func(ctx context.Context, pr *review.PullRequest, review *review.PendingReview) error
@@ -105,9 +105,9 @@ func (m *MockService) CreatePendingReview(ctx context.Context, prNumber int) (in
 	return 1, "R_node1", nil
 }
 
-func (m *MockService) AddReviewComment(ctx context.Context, prNumber int, path string, line, startLine int, side, body string) (int, int, string, error) {
+func (m *MockService) AddReviewComment(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, int, string, error) {
 	if m.AddReviewCommentFn != nil {
-		return m.AddReviewCommentFn(ctx, prNumber, path, line, startLine, side, body)
+		return m.AddReviewCommentFn(ctx, prNumber, reviewNodeID, path, line, startLine, side, body)
 	}
 	return 1, 1, "R_node1", nil
 }

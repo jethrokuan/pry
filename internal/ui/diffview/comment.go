@@ -190,15 +190,25 @@ func (m *Model) setComments(comments []review.Comment) {
 	m.comments.RebuildIndex()
 }
 
-// mergePendingComments adds pending review comments to the comment list,
-// avoiding duplicates (by ID).
+// mergePendingComments merges pending review comments into the comment list.
+// If a comment with the same ID already exists (e.g. from FetchComments which
+// doesn't set IsPending), it is replaced with the pending version so that
+// the IsPending flag and other pending-specific fields are preserved.
 func (m *Model) mergePendingComments(pending []review.Comment) {
-	existing := make(map[int]bool, len(m.comments.comments))
-	for _, c := range m.comments.comments {
-		existing[c.ID] = true
-	}
+	pendingByID := make(map[int]review.Comment, len(pending))
 	for _, c := range pending {
-		if !existing[c.ID] {
+		pendingByID[c.ID] = c
+	}
+	// Replace existing entries that have a pending counterpart.
+	for i, c := range m.comments.comments {
+		if pc, ok := pendingByID[c.ID]; ok {
+			m.comments.comments[i] = pc
+			delete(pendingByID, c.ID)
+		}
+	}
+	// Append any remaining pending comments not yet in the list.
+	for _, c := range pending {
+		if _, ok := pendingByID[c.ID]; ok {
 			m.comments.comments = append(m.comments.comments, c)
 		}
 	}

@@ -295,17 +295,17 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 			gomega.Expect(m.comments.fileCommentIndex["b.go"]).To(gomega.BeTrue())
 		})
 
-		ginkgo.It("skips duplicates by ID", func() {
+		ginkgo.It("replaces existing comments with pending version (preserves IsPending)", func() {
 			m.setComments([]review.Comment{
-				{ID: 1, Path: "a.go", Line: 10, Side: "RIGHT", Body: "existing", Author: "alice"},
+				{ID: 1, Path: "a.go", Line: 10, Side: "RIGHT", Body: "from FetchComments", Author: "alice"},
 			})
 
 			m.mergePendingComments([]review.Comment{
-				{ID: 1, Path: "a.go", Line: 10, Side: "RIGHT", Body: "duplicate", Author: "alice"},
+				{ID: 1, Path: "a.go", Line: 10, Side: "RIGHT", Body: "from FetchComments", Author: "alice", IsPending: true},
 			})
 
 			gomega.Expect(m.comments.comments).To(gomega.HaveLen(1))
-			gomega.Expect(m.comments.comments[0].Body).To(gomega.Equal("existing"))
+			gomega.Expect(m.comments.comments[0].IsPending).To(gomega.BeTrue())
 		})
 
 		ginkgo.It("syncs pr.Comments after merge", func() {

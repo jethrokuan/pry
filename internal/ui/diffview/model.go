@@ -415,15 +415,17 @@ func (m Model) loadPendingReview() tea.Cmd {
 	}
 }
 
-// addReviewCommentCmd ensures a pending review exists and adds a comment to it.
-// The service handles review creation internally, so no buffering is needed.
+// addReviewCommentCmd adds a comment to the pending review. The cached
+// reviewNodeID is passed as a fast-path hint; the service falls back to
+// fetch-or-create if the hint is empty or stale.
 func (m Model) addReviewCommentCmd(tempID int, path string, line, startLine int, side, body string) tea.Cmd {
 	svc := m.svc
 	currentUser := m.currentUser
 	prNumber := m.pr.Number
+	cachedNodeID := m.pendingReview.ReviewNodeID
 
 	return func() tea.Msg {
-		forgeID, reviewID, reviewNodeID, err := svc.AddReviewComment(context.Background(), prNumber, path, line, startLine, side, body)
+		forgeID, reviewID, reviewNodeID, err := svc.AddReviewComment(context.Background(), prNumber, cachedNodeID, path, line, startLine, side, body)
 		if err != nil {
 			return commentAddedMsg{tempID: tempID, reviewID: reviewID, reviewNodeID: reviewNodeID, err: err}
 		}

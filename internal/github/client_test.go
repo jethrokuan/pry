@@ -746,14 +746,12 @@ var _ = Describe("AddReviewComment", func() {
 		ctx = context.Background()
 	})
 
-	It("ensures a pending review and creates a single-line comment", func() {
-		stubEnsurePendingReview()
+	It("uses cached reviewNodeID as fast path (no REST calls)", func() {
 		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
-			Expect(vars["reviewID"]).To(Equal("PRR_42"))
+			Expect(vars["reviewID"]).To(Equal("PRR_cached"))
 			Expect(vars["path"]).To(Equal("main.go"))
 			Expect(vars["line"]).To(Equal(10))
 			Expect(vars["side"]).To(Equal("RIGHT"))
-			Expect(vars).NotTo(HaveKey("startLine"))
 
 			return jsonInto(map[string]interface{}{
 				"addPullRequestReviewThread": map[string]interface{}{
@@ -768,15 +766,39 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		commentID, reviewID, reviewNodeID, err := c.AddReviewComment(ctx, 1, "main.go", 10, 0, "RIGHT", "nit: typo")
+		commentID, _, nodeID, err := c.AddReviewComment(ctx, 1, "PRR_cached", "main.go", 10, 0, "RIGHT", "nit: typo")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commentID).To(Equal(555))
+		Expect(nodeID).To(Equal("PRR_cached"))
+		// No REST calls should have been made (fast path)
+		Expect(rest.calls).To(BeEmpty())
+	})
+
+	It("falls back to ensurePendingReview when no hint provided", func() {
+		stubEnsurePendingReview()
+		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
+			Expect(vars["reviewID"]).To(Equal("PRR_42"))
+			return jsonInto(map[string]interface{}{
+				"addPullRequestReviewThread": map[string]interface{}{
+					"thread": map[string]interface{}{
+						"comments": map[string]interface{}{
+							"nodes": []map[string]interface{}{
+								{"databaseId": 556},
+							},
+						},
+					},
+				},
+			}, resp)
+		}
+
+		commentID, reviewID, nodeID, err := c.AddReviewComment(ctx, 1, "", "main.go", 10, 0, "RIGHT", "nit: typo")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(commentID).To(Equal(556))
 		Expect(reviewID).To(Equal(42))
-		Expect(reviewNodeID).To(Equal("PRR_42"))
+		Expect(nodeID).To(Equal("PRR_42"))
 	})
 
 	It("sets startLine for multi-line comments", func() {
-		stubEnsurePendingReview()
 		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
 			Expect(vars["startLine"]).To(Equal(5))
 			Expect(vars["startSide"]).To(Equal("RIGHT"))
@@ -793,12 +815,11 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		_, _, _, err := c.AddReviewComment(ctx, 1, "main.go", 10, 5, "RIGHT", "refactor this block")
+		_, _, _, err := c.AddReviewComment(ctx, 1, "PRR_hint", "main.go", 10, 5, "RIGHT", "refactor this block")
 		Expect(err).NotTo(HaveOccurred())
 	})
 
 	It("returns an error when no comment node is returned", func() {
-		stubEnsurePendingReview()
 		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
 			return jsonInto(map[string]interface{}{
 				"addPullRequestReviewThread": map[string]interface{}{
@@ -811,12 +832,49 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		_, _, _, err := c.AddReviewComment(ctx, 1, "main.go", 10, 0, "RIGHT", "test")
+		// With hint, fast path returns "no comment" error; slow path also fails.
+		stubEnsurePendingReview()
+		_, _, _, err := c.AddReviewComment(ctx, 1, "PRR_hint", "main.go", 10, 0, "RIGHT", "test")
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("no comment returned"))
 	})
 
-	It("creates a new review when none exists", func() {
+	It("falls back to ensurePendingReview when hint is stale", func() {
+		gqlCallCount := 0
+		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
+			gqlCallCount++
+			if gqlCallCount == 1 {
+				// First call with stale hint fails
+				return errors.New("review not found")
+			}
+			// Second call with fresh node ID succeeds
+			Expect(vars["reviewID"]).To(Equal("PRR_fresh"))
+			return jsonInto(map[string]interface{}{
+				"addPullRequestReviewThread": map[string]interface{}{
+					"thread": map[string]interface{}{
+						"comments": map[string]interface{}{
+							"nodes": []map[string]interface{}{
+								{"databaseId": 888},
+							},
+						},
+					},
+				},
+			}, resp)
+		}
+		rest.getHandler = func(path string, resp interface{}) error {
+			return jsonInto([]map[string]interface{}{
+				{"id": 77, "node_id": "PRR_fresh", "state": "PENDING", "user": map[string]string{"login": "me"}},
+			}, resp)
+		}
+
+		commentID, reviewID, nodeID, err := c.AddReviewComment(ctx, 1, "PRR_stale", "main.go", 5, 0, "RIGHT", "hello")
+		Expect(err).NotTo(HaveOccurred())
+		Expect(commentID).To(Equal(888))
+		Expect(reviewID).To(Equal(77))
+		Expect(nodeID).To(Equal("PRR_fresh"))
+	})
+
+	It("creates a new review when none exists and no hint provided", func() {
 		// FetchPendingReview: return empty list (no PENDING review)
 		rest.getHandler = func(path string, resp interface{}) error {
 			return jsonInto([]map[string]interface{}{}, resp)
@@ -842,7 +900,7 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		commentID, reviewID, _, err := c.AddReviewComment(ctx, 1, "main.go", 5, 0, "RIGHT", "hello")
+		commentID, reviewID, _, err := c.AddReviewComment(ctx, 1, "", "main.go", 5, 0, "RIGHT", "hello")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commentID).To(Equal(777))
 		Expect(reviewID).To(Equal(99))

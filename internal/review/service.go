@@ -50,9 +50,11 @@ type Service interface {
 	CreatePendingReview(ctx context.Context, prNumber int) (int, string, error)
 
 	// AddReviewComment adds a single comment to the user's pending review,
-	// creating the review if none exists. Returns the forge comment ID and
-	// the review IDs (so callers can stay in sync with server state).
-	AddReviewComment(ctx context.Context, prNumber int, path string, line, startLine int, side, body string) (int, int, string, error)
+	// creating the review if none exists. reviewNodeID is a cached hint —
+	// if non-empty, the service tries it first for speed, falling back to
+	// fetch-or-create if the hint is stale. Returns the forge comment ID
+	// and the current review IDs (so callers can stay in sync).
+	AddReviewComment(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, int, string, error)
 
 	// DeleteReviewComment deletes a pending review comment by its forge ID.
 	DeleteReviewComment(ctx context.Context, prNumber, commentID int) error

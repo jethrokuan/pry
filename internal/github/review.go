@@ -114,21 +114,32 @@ func (c *Client) CreatePendingReview(_ context.Context, prNumber int) (int, stri
 	return result.ID, result.NodeID, nil
 }
 
-// AddReviewComment ensures a pending review exists for the PR and adds a
-// comment to it using the GraphQL addPullRequestReviewThread mutation.
-// Returns the comment database ID and the review IDs (so callers stay in sync).
-func (c *Client) AddReviewComment(ctx context.Context, prNumber int, path string, line, startLine int, side, body string) (int, int, string, error) {
-	// Ensure a valid pending review exists (fetch existing or create new).
-	reviewID, reviewNodeID, err := c.ensurePendingReview(ctx, prNumber)
+// AddReviewComment adds a comment to the user's pending review. If
+// reviewNodeID is non-empty it is tried first as a fast path (single GraphQL
+// call). If the hint is empty or stale, the method falls back to
+// ensurePendingReview (fetch-or-create) before retrying.
+func (c *Client) AddReviewComment(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, int, string, error) {
+	// Fast path: try the cached review node ID directly.
+	if reviewNodeID != "" {
+		commentID, err := c.addReviewThread(reviewNodeID, path, line, startLine, side, body)
+		if err == nil {
+			return commentID, 0, reviewNodeID, nil
+		}
+		slog.Info("fast-path addReviewThread failed, falling back to ensurePendingReview",
+			"reviewNodeID", reviewNodeID, "err", err)
+	}
+
+	// Slow path: fetch or create a valid pending review.
+	reviewID, nodeID, err := c.ensurePendingReview(ctx, prNumber)
 	if err != nil {
 		return 0, 0, "", err
 	}
 
-	commentID, err := c.addReviewThread(reviewNodeID, path, line, startLine, side, body)
+	commentID, err := c.addReviewThread(nodeID, path, line, startLine, side, body)
 	if err != nil {
-		return 0, reviewID, reviewNodeID, fmt.Errorf("failed to add comment to pending review: %w", err)
+		return 0, reviewID, nodeID, fmt.Errorf("failed to add comment to pending review: %w", err)
 	}
-	return commentID, reviewID, reviewNodeID, nil
+	return commentID, reviewID, nodeID, nil
 }
 
 // ensurePendingReview returns the user's existing pending review, creating
