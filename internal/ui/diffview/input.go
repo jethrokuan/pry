@@ -403,9 +403,9 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// navigateFile moves to the next/prev file. If unviewedOnly, skip viewed files.
+// navigateFile moves to the next/prev file.
 // Returns a tea.Cmd for flash messages when wrapping occurs.
-func (m *Model) navigateFile(forward, unviewedOnly bool) tea.Cmd {
+func (m *Model) navigateFile(forward bool) tea.Cmd {
 	n := len(m.files)
 	if n == 0 {
 		return nil
@@ -413,10 +413,6 @@ func (m *Model) navigateFile(forward, unviewedOnly bool) tea.Cmd {
 	m.nav.pushJump()
 
 	if m.nav.focus == FocusFileTree {
-		// In tree view, delegate to tree navigation
-		if unviewedOnly {
-			return m.moveToUnviewedFileInTree(forward)
-		}
 		if forward {
 			return m.moveToNextFile()
 		}
@@ -426,10 +422,7 @@ func (m *Model) navigateFile(forward, unviewedOnly bool) tea.Cmd {
 	// In diff view
 	start := m.nav.fileCursor
 	idx := cyclicSearch(start, n, forward, func(i int) bool {
-		if !m.filter.isIncluded(i) {
-			return false
-		}
-		return !unviewedOnly || !m.pendingReview.ViewedFiles[m.files[i].Path]
+		return m.filter.isIncluded(i)
 	})
 	if idx < 0 {
 		return nil
@@ -444,40 +437,10 @@ func (m *Model) navigateFile(forward, unviewedOnly bool) tea.Cmd {
 
 	wrapped := (forward && idx <= start) || (!forward && idx >= start)
 	if wrapped {
-		label := "file"
-		if unviewedOnly {
-			label = "unviewed file"
-		}
 		if forward {
-			return m.setFlash(fmt.Sprintf("Wrapped to first %s", label))
+			return m.setFlash("Wrapped to first file")
 		}
-		return m.setFlash(fmt.Sprintf("Wrapped to last %s", label))
-	}
-	return nil
-}
-
-// moveToUnviewedFileInTree moves treeCursor to the next/prev unviewed file row.
-func (m *Model) moveToUnviewedFileInTree(forward bool) tea.Cmd {
-	n := len(m.nav.treeRows)
-	if n == 0 {
-		return nil
-	}
-	start := m.nav.treeCursor
-	idx := cyclicSearch(start, n, forward, func(i int) bool {
-		row := m.nav.treeRows[i]
-		return row.node.fileIdx >= 0 && !m.pendingReview.ViewedFiles[m.files[row.node.fileIdx].Path]
-	})
-	if idx < 0 {
-		return nil
-	}
-	m.nav.treeCursor = idx
-	m.onTreeCursorChanged()
-	wrapped := (forward && idx <= start) || (!forward && idx >= start)
-	if wrapped {
-		if forward {
-			return m.setFlash("Wrapped to first unviewed file")
-		}
-		return m.setFlash("Wrapped to last unviewed file")
+		return m.setFlash("Wrapped to last file")
 	}
 	return nil
 }

@@ -255,11 +255,11 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	// Dedicated navigation keys (work in both tree and diff focus)
 	case key.Matches(msg, keys.NextFile):
 		m.nav.activeCycler = CyclerFile
-		cmd := m.navigateFile(true, false)
+		cmd := m.navigateFile(true)
 		return m, cmd
 	case key.Matches(msg, keys.PrevFile):
 		m.nav.activeCycler = CyclerFile
-		cmd := m.navigateFile(false, false)
+		cmd := m.navigateFile(false)
 		return m, cmd
 	}
 
