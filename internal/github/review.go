@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 
+	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/jethrokuan/pry/internal/review"
 )
 
@@ -240,6 +242,16 @@ func (c *Client) SubmitReview(ctx context.Context, pr *review.PullRequest, rev *
 	slog.Debug("submitting review", "reviewID", rev.ReviewID, "event", rev.Event)
 	err = c.rest.Do(http.MethodPost, endpoint, bytes.NewReader(body), nil)
 	if err != nil {
+		// GitHub deletes the pending review when all its comments are removed.
+		// If we get a 404, create a fresh review and retry the submission.
+		var httpErr *api.HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			slog.Info("pending review was deleted (all comments removed?), creating a fresh one",
+				"staleReviewID", rev.ReviewID)
+			rev.ReviewID = 0
+			rev.ReviewNodeID = ""
+			return c.SubmitReview(ctx, pr, rev)
+		}
 		slog.Error("failed to submit review", "reviewID", rev.ReviewID, "event", rev.Event, "error", err)
 		return fmt.Errorf("failed to submit review: %w", err)
 	}

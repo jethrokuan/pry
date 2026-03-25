@@ -4,6 +4,7 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
+	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
 )
 
@@ -19,6 +20,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 			pendingReview: pendingReview,
 			currentUser:   "testuser",
 			inflight:      make(map[int]bool),
+			mdCache:       make(map[mdCacheKey]string),
 			comments: CommentPanel{
 				expanded:         make(map[string]bool),
 				commentIndex:     make(map[string][]review.Comment),
@@ -389,6 +391,94 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 		ginkgo.It("produces expected formats", func() {
 			gomega.Expect(commentKey("path/file.go", 42)).To(gomega.Equal("path/file.go:42"))
 			gomega.Expect(commentIndexKey("path/file.go", 42, "RIGHT")).To(gomega.Equal("path/file.go:42:RIGHT"))
+		})
+	})
+
+	ginkgo.Describe("navigateComment with pending comments", func() {
+		ginkgo.BeforeEach(func() {
+			// Set up a file with diffLines
+			m.files = []diff.DiffFile{
+				{
+					Path: "main.go",
+					Hunks: []diff.Hunk{
+						{
+							OldStart: 1, OldLines: 5, NewStart: 1, NewLines: 5,
+							Lines: []diff.DiffLine{
+								{Type: diff.LineContext, OldNum: 1, NewNum: 1, Content: " line1"},
+								{Type: diff.LineContext, OldNum: 2, NewNum: 2, Content: " line2"},
+								{Type: diff.LineAddition, OldNum: 0, NewNum: 3, Content: "+line3"},
+								{Type: diff.LineContext, OldNum: 3, NewNum: 4, Content: " line4"},
+								{Type: diff.LineContext, OldNum: 4, NewNum: 5, Content: " line5"},
+							},
+						},
+					},
+				},
+			}
+			m.nav.collapsedHunks = make(map[string]bool)
+			m.nav.buildDiffLines(m.files)
+		})
+
+		ginkgo.It("cycles to a pending comment on a different line", func() {
+			// Cursor starts at line 0
+			m.nav.cursor.LineIdx = 0
+
+			// Add a pending comment on newLine=3 (diffLine index 2)
+			m.addOptimisticComment(review.Comment{
+				Path: "main.go", Line: 3, Side: "RIGHT", Body: "pending fix",
+				Author: "testuser", IsPending: true,
+			})
+
+			m.navigateComment(true, false)
+
+			gomega.Expect(m.nav.cursor.LineIdx).To(gomega.Equal(2))
+			gomega.Expect(m.nav.cursor.Kind).To(gomega.Equal(CursorComment))
+		})
+
+		ginkgo.It("cycles backward to a pending comment", func() {
+			// Cursor at end
+			m.nav.cursor.LineIdx = 4
+
+			m.addOptimisticComment(review.Comment{
+				Path: "main.go", Line: 3, Side: "RIGHT", Body: "pending fix",
+				Author: "testuser", IsPending: true,
+			})
+
+			m.navigateComment(false, false)
+
+			gomega.Expect(m.nav.cursor.LineIdx).To(gomega.Equal(2))
+			gomega.Expect(m.nav.cursor.Kind).To(gomega.Equal(CursorComment))
+		})
+
+		ginkgo.It("finds pending comments across files", func() {
+			m.files = append(m.files, diff.DiffFile{
+				Path: "other.go",
+				Hunks: []diff.Hunk{
+					{
+						OldStart: 1, OldLines: 2, NewStart: 1, NewLines: 2,
+						Lines: []diff.DiffLine{
+							{Type: diff.LineContext, OldNum: 1, NewNum: 1, Content: " a"},
+							{Type: diff.LineAddition, OldNum: 0, NewNum: 2, Content: "+b"},
+						},
+					},
+				},
+			})
+
+			// Add pending comment on the second file
+			m.addOptimisticComment(review.Comment{
+				Path: "other.go", Line: 2, Side: "RIGHT", Body: "review this",
+				Author: "testuser", IsPending: true,
+			})
+
+			// Cursor on first file, no comments here
+			m.nav.cursor.FileIdx = 0
+			m.nav.cursor.LineIdx = 0
+			m.nav.buildDiffLines(m.files)
+
+			m.navigateComment(true, false)
+
+			// Should have jumped to the second file
+			gomega.Expect(m.nav.cursor.FileIdx).To(gomega.Equal(1))
+			gomega.Expect(m.nav.cursor.Kind).To(gomega.Equal(CursorComment))
 		})
 	})
 })
