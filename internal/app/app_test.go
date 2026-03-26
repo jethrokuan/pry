@@ -61,6 +61,12 @@ func (s *stubService) ListMentionableUsers(_ context.Context) ([]string, error) 
 func (s *stubService) UploadImage(_ context.Context, _ []byte, _ string) (string, error) {
 	return "", nil
 }
+func (s *stubService) ClosePR(_ context.Context, _ int) error               { return nil }
+func (s *stubService) ReopenPR(_ context.Context, _ int) error              { return nil }
+func (s *stubService) MergePR(_ context.Context, _ int) error               { return nil }
+func (s *stubService) MarkReadyForReview(_ context.Context, _ string) error { return nil }
+func (s *stubService) AssignPR(_ context.Context, _ int, _ string) error    { return nil }
+func (s *stubService) UnassignPR(_ context.Context, _ int, _ string) error  { return nil }
 
 // defaultFilters provides a minimal filter set so prlist.Init() doesn't panic.
 var defaultFilters = []review.PRFilter{{Name: "Default", Qualifier: "is:open"}}

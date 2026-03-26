@@ -28,8 +28,14 @@ type MockService struct {
 	FetchViewedFilesFn      func(ctx context.Context, prNodeID string) (map[string]bool, error)
 	MarkFileAsViewedFn      func(ctx context.Context, prNodeID, path string) error
 	UnmarkFileAsViewedFn    func(ctx context.Context, prNodeID, path string) error
-	ListMentionableUsersFn  func(ctx context.Context) ([]string, error)
-	UploadImageFn           func(ctx context.Context, data []byte, filename string) (string, error)
+	ListMentionableUsersFn    func(ctx context.Context) ([]string, error)
+	UploadImageFn             func(ctx context.Context, data []byte, filename string) (string, error)
+	ClosePRFn                 func(ctx context.Context, prNumber int) error
+	ReopenPRFn                func(ctx context.Context, prNumber int) error
+	MergePRFn                 func(ctx context.Context, prNumber int) error
+	MarkReadyForReviewFn      func(ctx context.Context, prNodeID string) error
+	AssignPRFn                func(ctx context.Context, prNumber int, login string) error
+	UnassignPRFn              func(ctx context.Context, prNumber int, login string) error
 }
 
 // Compile-time check that MockService implements review.Service.
@@ -166,4 +172,46 @@ func (m *MockService) UploadImage(ctx context.Context, data []byte, filename str
 		return m.UploadImageFn(ctx, data, filename)
 	}
 	return "", nil
+}
+
+func (m *MockService) ClosePR(ctx context.Context, prNumber int) error {
+	if m.ClosePRFn != nil {
+		return m.ClosePRFn(ctx, prNumber)
+	}
+	return nil
+}
+
+func (m *MockService) ReopenPR(ctx context.Context, prNumber int) error {
+	if m.ReopenPRFn != nil {
+		return m.ReopenPRFn(ctx, prNumber)
+	}
+	return nil
+}
+
+func (m *MockService) MergePR(ctx context.Context, prNumber int) error {
+	if m.MergePRFn != nil {
+		return m.MergePRFn(ctx, prNumber)
+	}
+	return nil
+}
+
+func (m *MockService) MarkReadyForReview(ctx context.Context, prNodeID string) error {
+	if m.MarkReadyForReviewFn != nil {
+		return m.MarkReadyForReviewFn(ctx, prNodeID)
+	}
+	return nil
+}
+
+func (m *MockService) AssignPR(ctx context.Context, prNumber int, login string) error {
+	if m.AssignPRFn != nil {
+		return m.AssignPRFn(ctx, prNumber, login)
+	}
+	return nil
+}
+
+func (m *MockService) UnassignPR(ctx context.Context, prNumber int, login string) error {
+	if m.UnassignPRFn != nil {
+		return m.UnassignPRFn(ctx, prNumber, login)
+	}
+	return nil
 }

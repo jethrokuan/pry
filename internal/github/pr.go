@@ -31,6 +31,11 @@ type graphqlPRNode struct {
 	ReviewDecision   string `json:"reviewDecision"`
 	MergeStateStatus string `json:"mergeStateStatus"`
 	Mergeable        string `json:"mergeable"`
+	Assignees struct {
+		Nodes []struct {
+			Login string `json:"login"`
+		} `json:"nodes"`
+	} `json:"assignees"`
 	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
@@ -217,6 +222,11 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		labels = append(labels, l.Name)
 	}
 
+	assignees := make([]string, 0, len(node.Assignees.Nodes))
+	for _, a := range node.Assignees.Nodes {
+		assignees = append(assignees, a.Login)
+	}
+
 	var pendingTeams []string
 	for _, rr := range node.ReviewRequests.Nodes {
 		r := rr.RequestedReviewer
@@ -299,6 +309,7 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		State:          node.State,
 		Draft:          node.IsDraft,
 		Labels:         labels,
+		Assignees:      assignees,
 		CreatedAt:      node.CreatedAt,
 		UpdatedAt:      node.UpdatedAt,
 		Additions:      node.Additions,
@@ -450,6 +461,7 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 				mergeStateStatus
 				mergeable
 				author { login }
+				assignees(first: 20) { nodes { login } }
 				comments { totalCount }
 				labels(first: 10) { nodes { name } }
 				commits(last: 1) {

@@ -73,6 +73,19 @@ type Service interface {
 	// UnmarkFileAsViewed unmarks a file as viewed on a PR.
 	UnmarkFileAsViewed(ctx context.Context, prNodeID, path string) error
 
+	// ClosePR closes an open pull request.
+	ClosePR(ctx context.Context, prNumber int) error
+	// ReopenPR reopens a closed pull request.
+	ReopenPR(ctx context.Context, prNumber int) error
+	// MergePR merges a pull request using the default merge method.
+	MergePR(ctx context.Context, prNumber int) error
+	// MarkReadyForReview converts a draft PR to ready for review.
+	MarkReadyForReview(ctx context.Context, prNodeID string) error
+	// AssignPR adds the given user as an assignee on a PR.
+	AssignPR(ctx context.Context, prNumber int, login string) error
+	// UnassignPR removes the given user as an assignee from a PR.
+	UnassignPR(ctx context.Context, prNumber int, login string) error
+
 	// ListMentionableUsers returns usernames that can be @mentioned in the repo.
 	ListMentionableUsers(ctx context.Context) ([]string, error)
 

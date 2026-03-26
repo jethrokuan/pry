@@ -78,6 +78,9 @@ type PullRequest struct {
 	ChecksSummary string
 	CheckRuns     []CheckRun
 
+	// Assignees
+	Assignees []string // User logins assigned to this PR
+
 	// Merge & review status
 	MergeState     string     // BLOCKED, CLEAN, DIRTY, DRAFT, HAS_HOOKS, UNKNOWN, UNSTABLE
 	Mergeable      string     // MERGEABLE, CONFLICTING, UNKNOWN

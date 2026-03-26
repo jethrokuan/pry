@@ -95,6 +95,14 @@ type KeyMap struct {
 	HalfPageUp   key.Binding
 	Quit         key.Binding
 	Help         key.Binding
+
+	// PR actions
+	Assign         key.Binding
+	Unassign       key.Binding
+	Close          key.Binding
+	Reopen         key.Binding
+	Merge          key.Binding
+	ReadyForReview key.Binding
 }
 
 var keys = KeyMap{
@@ -114,6 +122,29 @@ var keys = KeyMap{
 	HalfPageUp:   key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "half page up")),
 	Quit:         key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 	Help:         key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+
+	Assign:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "assign self")),
+	Unassign:       key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "unassign self")),
+	Close:          key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "close PR")),
+	Reopen:         key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "reopen PR")),
+	Merge:          key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "merge PR")),
+	ReadyForReview: key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "ready for review")),
+}
+
+// confirmAction tracks which destructive action is pending confirmation.
+type confirmAction int
+
+const (
+	confirmNone  confirmAction = iota
+	confirmClose
+	confirmMerge
+)
+
+// prActionMsg carries the result of an async PR action (close, merge, etc.).
+type prActionMsg struct {
+	action   string // human-readable action name for flash
+	prNumber int
+	err      error
 }
 
 // tabState holds per-tab state so each filter tab maintains its own PR list,
@@ -168,6 +199,10 @@ type Model struct {
 
 	// Help overlay
 	showHelp bool
+
+	// Confirmation prompt for destructive actions
+	confirm     confirmAction
+	currentUser string // cached login for assign/unassign
 
 	// Cached layout dimensions (recomputed on resize via recalcLayout)
 	sidebarWidth int
@@ -321,6 +356,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case UserIdentityMsg:
 		if msg.Identity != nil {
 			m.preview.SetUserIdentity(msg.Identity)
+			m.currentUser = msg.Identity.Login
 		}
 
 	case userTeamsLoadedMsg:
@@ -360,6 +396,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case prActionMsg:
+		if msg.err != nil {
+			return m, emitDangerFlash("pr-action", fmt.Sprintf("%s failed: %v", msg.action, msg.err), 5*time.Second)
+		}
+		// Invalidate cache and refresh to reflect the change.
+		if inv, ok := m.svc.(review.CacheInvalidator); ok {
+			inv.InvalidateListPRs()
+		}
+		flashCmd := emitFlash("pr-action", fmt.Sprintf("%s #%d", msg.action, msg.prNumber), 3*time.Second)
+		return m, tea.Batch(flashCmd, m.startFetch())
+
 	case spinner.TickMsg:
 		if m.tab().loading || m.hasEnrichmentPending() {
 			var cmd tea.Cmd
@@ -394,6 +441,32 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		// Help overlay: any key dismisses
 		if m.showHelp {
 			m.showHelp = false
+			return m, nil
+		}
+
+		// Confirmation prompt: y confirms, anything else cancels
+		if m.confirm != confirmNone {
+			action := m.confirm
+			m.confirm = confirmNone
+			if msg.String() == "y" || msg.String() == "Y" {
+				t := m.tab()
+				if t.hasCursor() {
+					pr := t.prs[t.cur()]
+					svc := m.svc
+					switch action {
+					case confirmClose:
+						return m, func() tea.Msg {
+							err := svc.ClosePR(context.Background(), pr.Number)
+							return prActionMsg{action: "Closed", prNumber: pr.Number, err: err}
+						}
+					case confirmMerge:
+						return m, func() tea.Msg {
+							err := svc.MergePR(context.Background(), pr.Number)
+							return prActionMsg{action: "Merged", prNumber: pr.Number, err: err}
+						}
+					}
+				}
+			}
 			return m, nil
 		}
 
@@ -484,6 +557,58 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					return m, emitFlash("copy", "Copy failed: "+err.Error(), 1500*time.Millisecond)
 				}
 				return m, emitFlash("copy", fmt.Sprintf("Copied %s", pr.URL), 1500*time.Millisecond)
+			}
+		case key.Matches(msg, keys.Assign):
+			if t.hasCursor() && m.currentUser != "" {
+				pr := t.prs[t.cur()]
+				svc := m.svc
+				login := m.currentUser
+				return m, func() tea.Msg {
+					err := svc.AssignPR(context.Background(), pr.Number, login)
+					return prActionMsg{action: "Assigned " + login + " to", prNumber: pr.Number, err: err}
+				}
+			}
+		case key.Matches(msg, keys.Unassign):
+			if t.hasCursor() && m.currentUser != "" {
+				pr := t.prs[t.cur()]
+				svc := m.svc
+				login := m.currentUser
+				return m, func() tea.Msg {
+					err := svc.UnassignPR(context.Background(), pr.Number, login)
+					return prActionMsg{action: "Unassigned " + login + " from", prNumber: pr.Number, err: err}
+				}
+			}
+		case key.Matches(msg, keys.Close):
+			if t.hasCursor() {
+				m.confirm = confirmClose
+				return m, emitFlash("confirm", "Close PR? Press y to confirm", 5*time.Second)
+			}
+		case key.Matches(msg, keys.Reopen):
+			if t.hasCursor() {
+				pr := t.prs[t.cur()]
+				svc := m.svc
+				return m, func() tea.Msg {
+					err := svc.ReopenPR(context.Background(), pr.Number)
+					return prActionMsg{action: "Reopened", prNumber: pr.Number, err: err}
+				}
+			}
+		case key.Matches(msg, keys.Merge):
+			if t.hasCursor() {
+				m.confirm = confirmMerge
+				return m, emitFlash("confirm", "Merge PR? Press y to confirm", 5*time.Second)
+			}
+		case key.Matches(msg, keys.ReadyForReview):
+			if t.hasCursor() {
+				pr := t.prs[t.cur()]
+				if !pr.Draft {
+					return m, emitFlash("pr-action", "PR is not a draft", 2*time.Second)
+				}
+				svc := m.svc
+				nodeID := pr.NodeID
+				return m, func() tea.Msg {
+					err := svc.MarkReadyForReview(context.Background(), nodeID)
+					return prActionMsg{action: "Marked ready for review", prNumber: pr.Number, err: err}
+				}
 			}
 		case key.Matches(msg, keys.Help):
 			m.showHelp = true
@@ -703,6 +828,7 @@ func helpSections() []helppopup.Section {
 		helppopup.Bind("Navigation", keys.Up, keys.Down, keys.HalfPageDown, keys.HalfPageUp, keys.Select),
 		helppopup.Bind("Tabs & Filters", keys.NextTab, keys.PrevTab, keys.EditFilter),
 		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp),
+		helppopup.Bind("PR Actions", keys.Assign, keys.Unassign, keys.Close, keys.Reopen, keys.Merge, keys.ReadyForReview),
 		helppopup.Bind("Copy", keys.CopyNumber, keys.CopyURL),
 		helppopup.Bind("Other", keys.OpenInBrowser, keys.Refresh, keys.Help, keys.Quit),
 	}

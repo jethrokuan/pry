@@ -396,6 +396,97 @@ func (c *Client) UnmarkFileAsViewed(_ context.Context, prNodeID, path string) er
 	return nil
 }
 
+// --- PR Actions ---
+
+// ClosePR closes an open pull request via REST.
+func (c *Client) ClosePR(_ context.Context, prNumber int) error {
+	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d", c.owner, c.repo, prNumber)
+	payload, err := json.Marshal(map[string]string{"state": "closed"})
+	if err != nil {
+		return fmt.Errorf("failed to marshal close payload: %w", err)
+	}
+	slog.Debug("closing PR", "number", prNumber)
+	err = c.rest.Do(http.MethodPatch, endpoint, bytes.NewReader(payload), nil)
+	if err != nil {
+		return fmt.Errorf("failed to close PR #%d: %w", prNumber, err)
+	}
+	return nil
+}
+
+// ReopenPR reopens a closed pull request via REST.
+func (c *Client) ReopenPR(_ context.Context, prNumber int) error {
+	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d", c.owner, c.repo, prNumber)
+	payload, err := json.Marshal(map[string]string{"state": "open"})
+	if err != nil {
+		return fmt.Errorf("failed to marshal reopen payload: %w", err)
+	}
+	slog.Debug("reopening PR", "number", prNumber)
+	err = c.rest.Do(http.MethodPatch, endpoint, bytes.NewReader(payload), nil)
+	if err != nil {
+		return fmt.Errorf("failed to reopen PR #%d: %w", prNumber, err)
+	}
+	return nil
+}
+
+// MergePR merges a pull request via REST using the default merge method.
+func (c *Client) MergePR(_ context.Context, prNumber int) error {
+	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge", c.owner, c.repo, prNumber)
+	slog.Debug("merging PR", "number", prNumber)
+	err := c.rest.Do(http.MethodPut, endpoint, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to merge PR #%d: %w", prNumber, err)
+	}
+	return nil
+}
+
+// MarkReadyForReview converts a draft PR to ready for review via GraphQL.
+func (c *Client) MarkReadyForReview(_ context.Context, prNodeID string) error {
+	mutation := `
+	mutation($prID: ID!) {
+		markPullRequestReadyForReview(input: {pullRequestId: $prID}) {
+			clientMutationId
+		}
+	}`
+	slog.Debug("marking PR ready for review", "prNodeID", prNodeID)
+	err := c.graphql.Do(mutation, map[string]interface{}{
+		"prID": prNodeID,
+	}, nil)
+	if err != nil {
+		return fmt.Errorf("failed to mark PR ready for review: %w", err)
+	}
+	return nil
+}
+
+// AssignPR adds a user as an assignee on a PR via REST.
+func (c *Client) AssignPR(_ context.Context, prNumber int, login string) error {
+	endpoint := fmt.Sprintf("repos/%s/%s/issues/%d/assignees", c.owner, c.repo, prNumber)
+	payload, err := json.Marshal(map[string][]string{"assignees": {login}})
+	if err != nil {
+		return fmt.Errorf("failed to marshal assign payload: %w", err)
+	}
+	slog.Debug("assigning PR", "number", prNumber, "login", login)
+	err = c.rest.Do(http.MethodPost, endpoint, bytes.NewReader(payload), nil)
+	if err != nil {
+		return fmt.Errorf("failed to assign %s to PR #%d: %w", login, prNumber, err)
+	}
+	return nil
+}
+
+// UnassignPR removes a user as an assignee from a PR via REST.
+func (c *Client) UnassignPR(_ context.Context, prNumber int, login string) error {
+	endpoint := fmt.Sprintf("repos/%s/%s/issues/%d/assignees", c.owner, c.repo, prNumber)
+	payload, err := json.Marshal(map[string][]string{"assignees": {login}})
+	if err != nil {
+		return fmt.Errorf("failed to marshal unassign payload: %w", err)
+	}
+	slog.Debug("unassigning PR", "number", prNumber, "login", login)
+	err = c.rest.Do(http.MethodDelete, endpoint, bytes.NewReader(payload), nil)
+	if err != nil {
+		return fmt.Errorf("failed to unassign %s from PR #%d: %w", login, prNumber, err)
+	}
+	return nil
+}
+
 // --- Comments ---
 
 // FetchComments gets all review comments on a PR.
