@@ -203,7 +203,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, flashCmd
 	case diffview.FlashMsg:
 		style := flash.StyleSuccess
-		if msg.Danger {
+		if msg.Spinner {
+			style = flash.StyleSpinner
+		} else if msg.Danger {
 			style = flash.StyleDanger
 		}
 		m.flash, flashCmd = m.flash.Update(flash.ShowMsg{

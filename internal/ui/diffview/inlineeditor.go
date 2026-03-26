@@ -358,7 +358,7 @@ func (e InlineEditor) View() string {
 		Padding(0, 1).
 		Width(e.width - 2)
 
-	helpText := "ctrl+s save  ctrl+e $EDITOR  esc cancel"
+	helpText := "ctrl+s save  ctrl+e $EDITOR  ctrl+v paste image  esc cancel"
 	if e.confirmDiscard {
 		helpText = "Press esc again to discard  ctrl+s save"
 	}

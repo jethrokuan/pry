@@ -32,6 +32,7 @@ type FlashMsg struct {
 	ID      string
 	Text    string
 	Danger  bool          // true = danger/error style
+	Spinner bool          // true = spinner prefix, no auto-expiry
 	Expires time.Duration // 0 = manual dismiss
 }
 
@@ -109,7 +110,6 @@ type imageUploadedMsg struct {
 	err error
 }
 
-type flashExpiredMsg struct{}
 
 // MentionableUsersMsg carries mentionable users from the app layer.
 type MentionableUsersMsg struct {
@@ -265,8 +265,6 @@ type Model struct {
 	prInfoActive   bool
 	prInfoViewport viewport.Model
 
-	// Flash message (auto-dismissing status text)
-	flashMsg string
 
 	// Caches
 	mdCache  map[mdCacheKey]string // rendered markdown cache
@@ -540,7 +538,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Rollback: remove the optimistic comment
 			m.removeCommentByID(msg.tempID)
 			m.updateDiffContent()
-			return m, m.setFlash("Comment failed: " + msg.err.Error())
+			return m, emitDangerFlash("diffview", "Comment failed: "+msg.err.Error())
 		}
 		// Replace temp comment with real one from server
 		m.replaceComment(msg.tempID, msg.comment)
@@ -549,7 +547,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case commentDeletedMsg:
 		if msg.err != nil {
 			// Re-fetch comments to restore the deleted one
-			return m, tea.Batch(m.loadComments(), m.setFlash("Delete failed: "+msg.err.Error()))
+			return m, tea.Batch(m.loadComments(), emitDangerFlash("diffview", "Delete failed: "+msg.err.Error()))
 		}
 		m.updateDiffContent()
 
@@ -558,7 +556,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Rollback: restore old body
 			m.updateCommentBody(msg.commentID, msg.oldBody)
 			m.updateDiffContent()
-			return m, m.setFlash("Edit failed: " + msg.err.Error())
+			return m, emitDangerFlash("diffview", "Edit failed: "+msg.err.Error())
 		}
 		m.updateDiffContent()
 
@@ -636,36 +634,33 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case clipboardImageMsg:
 		if msg.err != nil {
-			return m, m.setFlash("Clipboard error: " + msg.err.Error())
+			return m, emitDangerFlash("image-upload", "Clipboard error: "+msg.err.Error())
 		} else if msg.data == nil {
-			return m, m.setFlash("No image in clipboard")
+			return m, emitFlash("image-upload", "No image in clipboard")
 		} else {
-			flashCmd := m.setFlash("Uploading image...")
-			return m, tea.Batch(flashCmd, m.uploadImageCmd(msg.data))
+			return m, tea.Batch(emitSpinnerFlash("image-upload", "Uploading image..."), m.uploadImageCmd(msg.data))
 		}
 
 	case imageUploadedMsg:
 		if msg.err != nil {
-			return m, m.setFlash("Upload failed: " + msg.err.Error())
+			return m, emitDangerFlash("image-upload", "Upload failed: "+msg.err.Error())
 		} else if m.editor.IsActive() {
 			mdLink := fmt.Sprintf("![image](%s)", msg.url)
 			m.editor.InsertString(mdLink)
-			return m, m.setFlash("Image uploaded")
+			return m, emitFlash("image-upload", "Image uploaded")
 		}
 
 	case copyResultMsg:
 		if msg.err != nil {
-			return m, m.setFlash("Copy failed: " + msg.err.Error())
+			return m, emitDangerFlash("diffview", "Copy failed: "+msg.err.Error())
 		}
-		return m, m.setFlash(fmt.Sprintf("Copied %s", msg.url))
+		return m, emitFlash("diffview", fmt.Sprintf("Copied %s", msg.url))
 
 	case editorFinishedMsg:
 		if msg.err == nil && msg.content != "" {
 			m.editor.SetValue(msg.content)
 		}
 
-	case flashExpiredMsg:
-		m.flashMsg = ""
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -844,12 +839,18 @@ func (m *Model) commentRenderedLines(path string, lineNum int, side string) int 
 	return lines
 }
 
-// setFlash sets a flash message and returns a command that clears it after a delay.
-func (m *Model) setFlash(msg string) tea.Cmd {
-	m.flashMsg = msg
-	return tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg {
-		return flashExpiredMsg{}
-	})
+// emitFlash returns a command that emits a FlashMsg to the root model.
+func emitFlash(id, text string) tea.Cmd {
+	return func() tea.Msg {
+		return FlashMsg{ID: id, Text: text, Expires: 1500 * time.Millisecond}
+	}
+}
+
+// emitSpinnerFlash returns a command that emits a spinner-style FlashMsg (no auto-expiry).
+func emitSpinnerFlash(id, text string) tea.Cmd {
+	return func() tea.Msg {
+		return FlashMsg{ID: id, Text: text, Spinner: true}
+	}
 }
 
 func emitDangerFlash(id, text string) tea.Cmd {
@@ -919,7 +920,7 @@ func (m *Model) updateViewports() {
 // and copies it to the system clipboard.
 func (m *Model) copyForgeLink() tea.Cmd {
 	if len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
-		return m.setFlash("No file to copy link for")
+		return emitFlash("diffview", "No file to copy link for")
 	}
 
 	file := m.files[m.nav.cursor.FileIdx]
@@ -1212,11 +1213,6 @@ func (m Model) View() string {
 			}
 		}
 
-		// Show flash message if active
-		if m.flashMsg != "" {
-			helpParts = append(helpParts,
-				lipgloss.NewStyle().Foreground(styles.Cyan).Italic(true).Render(m.flashMsg))
-		}
 
 		b.WriteString(styles.HelpStyle.Render(strings.Join(helpParts, "  ")))
 	}

@@ -488,9 +488,12 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
 
-			m, _ = m.Update(tea.KeyPressMsg{Code: 'T'})
+			m, cmd := m.Update(tea.KeyPressMsg{Code: 'T'})
 			gomega.Expect(m.narrowPrefixActive).To(gomega.BeTrue())
-			gomega.Expect(m.flashMsg).To(gomega.ContainSubstring("[o]wner"))
+			msg := cmd()
+			fmsg, ok := msg.(FlashMsg)
+			gomega.Expect(ok).To(gomega.BeTrue())
+			gomega.Expect(fmsg.Text).To(gomega.ContainSubstring("[o]wner"))
 		})
 
 		ginkgo.It("should open regex filter with T then f", func() {
@@ -647,17 +650,6 @@ var _ = ginkgo.Describe("Input Handling", func() {
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 			gomega.Expect(m.confirmQuit).To(gomega.BeTrue())
-		})
-	})
-
-	ginkgo.Describe("Flash message clearing", func() {
-		ginkgo.It("should clear flash on any keypress", func() {
-			m := newInputTestModel()
-			m.nav.focus = FocusDiff
-			m.flashMsg = "some flash"
-
-			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.flashMsg).To(gomega.BeEmpty())
 		})
 	})
 

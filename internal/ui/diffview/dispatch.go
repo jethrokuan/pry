@@ -51,9 +51,6 @@ func (m Model) activeMode() inputMode {
 
 // handleKey dispatches a key event to the appropriate mode handler.
 func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	// Clear flash message on any keypress
-	m.flashMsg = ""
-
 	switch m.activeMode() {
 	case modeGoto, modeSearch, modeFilter:
 		return m.handleSearchBarKey(msg)
@@ -240,8 +237,7 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.NarrowPrefix):
 		m.narrowPrefixActive = true
-		m.flashMsg = "T: [o]wner [f]ilter [x]clear"
-		return m, nil
+		return m, emitFlash("diffview", "T: [o]wner [f]ilter [x]clear")
 
 	case key.Matches(msg, keys.JumpBack):
 		return m.jumpBack()
