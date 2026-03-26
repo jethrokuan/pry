@@ -555,15 +555,52 @@ func (c *Client) ReopenPR(_ context.Context, prNumber int) error {
 	return nil
 }
 
-// MergePR merges a pull request via REST using the default merge method.
+// MergePR merges a pull request using the repository's preferred merge method.
+// It queries the repo settings to determine which methods are allowed and
+// picks the first available from: squash, merge, rebase.
 func (c *Client) MergePR(_ context.Context, prNumber int) error {
+	// Detect allowed merge methods
+	method, err := c.preferredMergeMethod()
+	if err != nil {
+		slog.Warn("failed to detect merge method, trying default", "error", err)
+		method = "merge"
+	}
+
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge", c.owner, c.repo, prNumber)
-	slog.Debug("merging PR", "number", prNumber)
-	err := c.rest.Do(http.MethodPut, endpoint, nil, nil)
+	payload, err := json.Marshal(map[string]string{"merge_method": method})
+	if err != nil {
+		return fmt.Errorf("failed to marshal merge payload: %w", err)
+	}
+	slog.Debug("merging PR", "number", prNumber, "method", method)
+	err = c.rest.Do(http.MethodPut, endpoint, bytes.NewReader(payload), nil)
 	if err != nil {
 		return fmt.Errorf("failed to merge PR #%d: %w", prNumber, err)
 	}
 	return nil
+}
+
+// preferredMergeMethod returns the repo's preferred merge method by checking
+// which methods are enabled. Prefers squash > merge > rebase.
+func (c *Client) preferredMergeMethod() (string, error) {
+	var repo struct {
+		AllowSquashMerge bool `json:"allow_squash_merge"`
+		AllowMergeCommit bool `json:"allow_merge_commit"`
+		AllowRebaseMerge bool `json:"allow_rebase_merge"`
+	}
+	err := c.rest.Get(fmt.Sprintf("repos/%s/%s", c.owner, c.repo), &repo)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case repo.AllowSquashMerge:
+		return "squash", nil
+	case repo.AllowMergeCommit:
+		return "merge", nil
+	case repo.AllowRebaseMerge:
+		return "rebase", nil
+	default:
+		return "merge", nil
+	}
 }
 
 // MarkReadyForReview converts a draft PR to ready for review via GraphQL.
