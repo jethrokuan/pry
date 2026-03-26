@@ -70,13 +70,13 @@ func (m Model) editSelectedComment() (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	c := m.findCommentByID(ref.commentID)
-	if c == nil {
+	t, c := m.findThreadAndComment(ref.commentID)
+	if t == nil || c == nil {
 		return m, nil
 	}
 
 	m.nav.cursor = m.nav.cursor.AsLine()
-	m.editor.OpenForEdit(c.Path, c.Line, c.StartLine, c.Side, c.ID, c.Body, m.inlineTextareaWidth())
+	m.editor.OpenForEdit(t.Path, t.Line, t.StartLine, t.Side, c.ID, c.Body, m.inlineTextareaWidth())
 	m.updateViewports()
 
 	return m, m.editor.BlinkCmd()
@@ -178,98 +178,106 @@ func (m *Model) buildCommentPopupContent(width int) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// --- Comment mutation methods ---
-// All comment data mutations go through these methods, which automatically
-// rebuild the comment index via CommentPanel.RebuildIndex().
+// --- Thread/comment mutation methods ---
+// All data mutations go through these methods, which automatically
+// rebuild the index via CommentPanel.RebuildIndex().
 
-// setComments replaces the full comment list and rebuilds the index.
-func (m *Model) setComments(comments []review.Comment) {
-	m.comments.comments = comments
-	m.pr.Comments = comments
+// syncThreads copies the panel's threads to the PR (single source of truth).
+func (m *Model) syncThreads() {
+	m.pr.Threads = m.comments.threads
 	m.comments.RebuildIndex()
 }
 
-// mergePendingComments merges pending review comments into the comment list.
-// If a comment with the same ID already exists (e.g. from FetchComments which
-// doesn't set IsPending), it is replaced with the pending version so that
-// the IsPending flag and other pending-specific fields are preserved.
-func (m *Model) mergePendingComments(pending []review.Comment) {
-	pendingByID := make(map[int]review.Comment, len(pending))
-	for _, c := range pending {
-		pendingByID[c.ID] = c
-	}
-	// Replace existing entries that have a pending counterpart.
-	for i, c := range m.comments.comments {
-		if pc, ok := pendingByID[c.ID]; ok {
-			m.comments.comments[i] = pc
-			delete(pendingByID, c.ID)
-		}
-	}
-	// Append any remaining pending comments not yet in the list.
-	for _, c := range pending {
-		if _, ok := pendingByID[c.ID]; ok {
-			m.comments.comments = append(m.comments.comments, c)
-		}
-	}
-	m.pr.Comments = m.comments.comments
-	m.comments.RebuildIndex()
+// setThreads replaces the full thread list and rebuilds the index.
+func (m *Model) setThreads(threads []review.Thread) {
+	m.comments.threads = threads
+	m.syncThreads()
 }
 
-// addOptimisticComment appends a comment with a temp ID and rebuilds the index.
-// Returns the temp ID assigned.
-func (m *Model) addOptimisticComment(c review.Comment) int {
+// addOptimisticThread creates a new thread with one optimistic comment.
+// Returns the temp ID assigned to the comment.
+func (m *Model) addOptimisticThread(path string, line, startLine int, side string, c review.Comment) int {
 	tempID := m.pendingReview.NextTempID()
 	c.ID = tempID
-	m.comments.comments = append(m.comments.comments, c)
-	m.pr.Comments = m.comments.comments
-	m.comments.RebuildIndex()
+	t := review.Thread{
+		Path:      path,
+		Line:      line,
+		StartLine: startLine,
+		Side:      side,
+		Comments:  []review.Comment{c},
+	}
+	m.comments.threads = append(m.comments.threads, t)
+	m.syncThreads()
 	return tempID
 }
 
 // replaceComment swaps an optimistic comment (by temp ID) with a real one from the server.
 func (m *Model) replaceComment(tempID int, real review.Comment) {
-	for i, c := range m.comments.comments {
-		if c.ID == tempID {
-			m.comments.comments[i] = real
-			m.pr.Comments = m.comments.comments
-			m.comments.RebuildIndex()
-			return
+	for i := range m.comments.threads {
+		for j := range m.comments.threads[i].Comments {
+			if m.comments.threads[i].Comments[j].ID == tempID {
+				m.comments.threads[i].Comments[j] = real
+				m.syncThreads()
+				return
+			}
 		}
 	}
 }
 
-// removeCommentByID removes a comment by ID and rebuilds the index.
+// removeCommentByID removes a comment by ID. If the thread becomes empty, removes it.
 func (m *Model) removeCommentByID(id int) {
-	for i, c := range m.comments.comments {
-		if c.ID == id {
-			m.comments.comments = append(m.comments.comments[:i], m.comments.comments[i+1:]...)
-			m.pr.Comments = m.comments.comments
-			m.comments.RebuildIndex()
-			return
+	for i := range m.comments.threads {
+		for j := range m.comments.threads[i].Comments {
+			if m.comments.threads[i].Comments[j].ID == id {
+				m.comments.threads[i].Comments = append(
+					m.comments.threads[i].Comments[:j],
+					m.comments.threads[i].Comments[j+1:]...,
+				)
+				if len(m.comments.threads[i].Comments) == 0 {
+					m.comments.threads = append(m.comments.threads[:i], m.comments.threads[i+1:]...)
+				}
+				m.syncThreads()
+				return
+			}
 		}
 	}
 }
 
 // updateCommentBody updates the body of a comment by ID and rebuilds the index.
 func (m *Model) updateCommentBody(id int, body string) {
-	for i, c := range m.comments.comments {
-		if c.ID == id {
-			m.comments.comments[i].Body = body
-			m.pr.Comments = m.comments.comments
-			m.comments.RebuildIndex()
-			return
+	for i := range m.comments.threads {
+		for j := range m.comments.threads[i].Comments {
+			if m.comments.threads[i].Comments[j].ID == id {
+				m.comments.threads[i].Comments[j].Body = body
+				m.syncThreads()
+				return
+			}
 		}
 	}
 }
 
 // findCommentByID returns a pointer to the comment with the given ID, or nil.
 func (m *Model) findCommentByID(id int) *review.Comment {
-	for i := range m.comments.comments {
-		if m.comments.comments[i].ID == id {
-			return &m.comments.comments[i]
+	for i := range m.comments.threads {
+		for j := range m.comments.threads[i].Comments {
+			if m.comments.threads[i].Comments[j].ID == id {
+				return &m.comments.threads[i].Comments[j]
+			}
 		}
 	}
 	return nil
+}
+
+// findThreadAndComment returns the thread and comment for a given comment ID.
+func (m *Model) findThreadAndComment(id int) (*review.Thread, *review.Comment) {
+	for i := range m.comments.threads {
+		for j := range m.comments.threads[i].Comments {
+			if m.comments.threads[i].Comments[j].ID == id {
+				return &m.comments.threads[i], &m.comments.threads[i].Comments[j]
+			}
+		}
+	}
+	return nil, nil
 }
 
 func lineAndSide(dl diffLineInfo) (int, string) {
@@ -325,9 +333,9 @@ func (m *Model) commentKeysForFile(path string) []string {
 			keys = append(keys, ck)
 		}
 	}
-	for _, c := range m.comments.comments {
-		if c.Path == path {
-			add(commentKey(path, c.Line))
+	for _, t := range m.comments.threads {
+		if t.Path == path {
+			add(commentKey(path, t.Line))
 		}
 	}
 	return keys
@@ -507,17 +515,13 @@ func (m Model) handleEditorSave(msg inlineEditorSaveMsg) (Model, tea.Cmd) {
 		side = "RIGHT"
 	}
 
-	// Create optimistic comment
+	// Create optimistic thread with one comment
 	optimistic := review.Comment{
-		Path:      msg.path,
-		Line:      msg.line,
-		StartLine: msg.startLine,
-		Side:      side,
 		Body:      msg.body,
 		Author:    m.currentUser,
 		IsPending: true,
 	}
-	tempID := m.addOptimisticComment(optimistic)
+	tempID := m.addOptimisticThread(msg.path, msg.line, msg.startLine, side, optimistic)
 	m.inflight[tempID] = true
 
 	m.closeInlineComment()

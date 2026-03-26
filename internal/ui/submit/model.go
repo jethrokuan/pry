@@ -160,17 +160,6 @@ func (m *Model) submitReview() tea.Cmd {
 	)
 }
 
-// pendingComments returns the current user's pending comments.
-func (m Model) pendingComments() []review.Comment {
-	var result []review.Comment
-	for _, c := range m.pr.Comments {
-		if c.IsPending && c.Author == m.currentUser {
-			result = append(result, c)
-		}
-	}
-	return result
-}
-
 // View renders the submit screen.
 func (m Model) View() string {
 	if m.width == 0 {
@@ -181,15 +170,22 @@ func (m Model) View() string {
 
 	b.WriteString(styles.Title.Render("Submit Review") + "\n\n")
 
-	pending := m.pendingComments()
+	// Collect pending comments with their thread positions
+	var pendingCount int
+	var pendingLines []string
+	for _, t := range m.pr.Threads {
+		for _, c := range t.Comments {
+			if c.IsPending && c.Author == m.currentUser {
+				pendingCount++
+				summary := truncate(c.Body, m.width-25)
+				pendingLines = append(pendingLines, fmt.Sprintf("  %d. %s:%d - %s", pendingCount, t.Path, t.Line, summary))
+			}
+		}
+	}
 
-	// Comment count
-	b.WriteString(fmt.Sprintf("%d inline comments pending\n\n", len(pending)))
-
-	// Show comment summaries
-	for i, c := range pending {
-		summary := truncate(c.Body, m.width-25)
-		b.WriteString(fmt.Sprintf("  %d. %s:%d - %s\n", i+1, c.Path, c.Line, summary))
+	b.WriteString(fmt.Sprintf("%d inline comments pending\n\n", pendingCount))
+	for _, line := range pendingLines {
+		b.WriteString(line + "\n")
 	}
 	b.WriteString("\n")
 

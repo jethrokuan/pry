@@ -349,7 +349,7 @@ var _ = Describe("FetchDiffFiles", func() {
 	})
 })
 
-var _ = Describe("FetchComments", func() {
+var _ = Describe("FetchCommentsAndReview", func() {
 	var (
 		rest *mockREST
 		gql  *mockGraphQL
@@ -364,111 +364,149 @@ var _ = Describe("FetchComments", func() {
 		ctx = context.Background()
 	})
 
-	It("fetches comments from a single page", func() {
-		rest.getHandler = func(path string, resp interface{}) error {
-			return jsonInto([]apiComment{
-				{ID: 1, Path: "main.go", Line: 10, Side: "RIGHT", Body: "looks good", User: struct {
-					Login string `json:"login"`
-				}{Login: "alice"}, CreatedAt: "2024-01-01T00:00:00Z"},
-			}, resp)
+	// makeGQLResp builds a full GraphQL response for FetchCommentsAndReview.
+	type testThread struct {
+		CommentID   int
+		Path        string
+		Line        *int
+		DiffSide    string
+		Body        string
+		AuthorLogin string
+		ReviewID    int
+	}
+	makeGQLResp := func(pendingReviewID int, pendingNodeID string, threads []testThread, hasNextPage bool, endCursor string) interface{} {
+		type commentNode struct {
+			DatabaseId int    `json:"databaseId"`
+			Body       string `json:"body"`
+			Author     struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			CreatedAt         string `json:"createdAt"`
+			PullRequestReview struct {
+				DatabaseId int `json:"databaseId"`
+			} `json:"pullRequestReview"`
+		}
+		type threadNode struct {
+			Path     string `json:"path"`
+			Line     *int   `json:"line"`
+			DiffSide string `json:"diffSide"`
+			Comments struct {
+				Nodes []commentNode `json:"nodes"`
+			} `json:"comments"`
+		}
+		type reviewNode struct {
+			DatabaseId int    `json:"databaseId"`
+			Id         string `json:"id"`
 		}
 
-		comments, err := c.FetchComments(ctx, 42)
+		var reviewNodes []reviewNode
+		if pendingReviewID > 0 {
+			reviewNodes = []reviewNode{{DatabaseId: pendingReviewID, Id: pendingNodeID}}
+		}
+		var threadNodes []threadNode
+		for _, t := range threads {
+			cn := commentNode{DatabaseId: t.CommentID, Body: t.Body}
+			cn.Author.Login = t.AuthorLogin
+			cn.PullRequestReview.DatabaseId = t.ReviewID
+			tn := threadNode{Path: t.Path, Line: t.Line, DiffSide: t.DiffSide}
+			tn.Comments.Nodes = []commentNode{cn}
+			threadNodes = append(threadNodes, tn)
+		}
+		return map[string]interface{}{
+			"repository": map[string]interface{}{
+				"pullRequest": map[string]interface{}{
+					"reviews":       map[string]interface{}{"nodes": reviewNodes},
+					"reviewThreads": map[string]interface{}{"nodes": threadNodes, "pageInfo": map[string]interface{}{"hasNextPage": hasNextPage, "endCursor": endCursor}},
+				},
+			},
+		}
+	}
+
+	It("fetches threads and identifies pending ones via review ID", func() {
+		line10 := 10
+		line5 := 5
+		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
+			return jsonInto(makeGQLResp(99, "PRR_abc", []testThread{
+				{CommentID: 1, Path: "main.go", Line: &line10, DiffSide: "RIGHT", Body: "looks good", AuthorLogin: "alice", ReviewID: 50},
+				{CommentID: 2, Path: "file.go", Line: &line5, DiffSide: "LEFT", Body: "pending fix", AuthorLogin: "me", ReviewID: 99},
+			}, false, ""), resp)
+		}
+
+		threads, reviewID, nodeID, err := c.FetchCommentsAndReview(ctx, 42)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(comments).To(HaveLen(1))
-		Expect(comments[0].ID).To(Equal(1))
-		Expect(comments[0].Path).To(Equal("main.go"))
-		Expect(comments[0].Author).To(Equal("alice"))
-		Expect(comments[0].IsPending).To(BeFalse())
-	})
-
-	It("paginates when a page returns exactly 100 comments", func() {
-		callCount := 0
-		rest.getHandler = func(path string, resp interface{}) error {
-			callCount++
-			if callCount == 1 {
-				batch := make([]apiComment, 100)
-				for i := range batch {
-					batch[i] = apiComment{ID: i + 1, Path: "f.go", Body: "comment"}
-				}
-				return jsonInto(batch, resp)
-			}
-			return jsonInto([]apiComment{
-				{ID: 101, Path: "f.go", Body: "last"},
-			}, resp)
-		}
-
-		comments, err := c.FetchComments(ctx, 42)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(comments).To(HaveLen(101))
-		Expect(callCount).To(Equal(2))
-	})
-
-	It("returns an error on REST failure", func() {
-		rest.getHandler = func(path string, resp interface{}) error {
-			return errors.New("500 error")
-		}
-
-		_, err := c.FetchComments(ctx, 42)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("failed to fetch comments"))
-	})
-})
-
-var _ = Describe("FetchPendingReview", func() {
-	var (
-		rest *mockREST
-		gql  *mockGraphQL
-		c    *Client
-		ctx  context.Context
-	)
-
-	BeforeEach(func() {
-		rest = &mockREST{}
-		gql = &mockGraphQL{}
-		c = newTestClient(rest, gql)
-		ctx = context.Background()
-	})
-
-	It("returns zero values when no pending review exists", func() {
-		rest.getHandler = func(path string, resp interface{}) error {
-			return jsonInto([]apiReview{
-				{ID: 1, State: "APPROVED"},
-				{ID: 2, State: "COMMENTED"},
-			}, resp)
-		}
-
-		id, nodeID, comments, err := c.FetchPendingReview(ctx, 42)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(id).To(Equal(0))
-		Expect(nodeID).To(BeEmpty())
-		Expect(comments).To(BeNil())
-	})
-
-	It("returns the pending review with its comments", func() {
-		callCount := 0
-		rest.getHandler = func(path string, resp interface{}) error {
-			callCount++
-			if callCount == 1 {
-				// Reviews list
-				return jsonInto([]apiReview{
-					{ID: 99, NodeID: "PRR_abc", State: "PENDING"},
-				}, resp)
-			}
-			// Review comments
-			return jsonInto([]apiComment{
-				{ID: 10, Path: "file.go", Line: 5, Body: "pending comment", User: struct {
-					Login string `json:"login"`
-				}{Login: "me"}},
-			}, resp)
-		}
-
-		id, nodeID, comments, err := c.FetchPendingReview(ctx, 42)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(id).To(Equal(99))
+		Expect(threads).To(HaveLen(2))
+		Expect(reviewID).To(Equal(99))
 		Expect(nodeID).To(Equal("PRR_abc"))
-		Expect(comments).To(HaveLen(1))
-		Expect(comments[0].IsPending).To(BeTrue())
+
+		Expect(threads[0].Path).To(Equal("main.go"))
+		Expect(threads[0].Side).To(Equal("RIGHT"))
+		Expect(threads[0].Comments[0].ID).To(Equal(1))
+		Expect(threads[0].Comments[0].Author).To(Equal("alice"))
+		Expect(threads[0].Comments[0].IsPending).To(BeFalse())
+
+		Expect(threads[1].Comments[0].ID).To(Equal(2))
+		Expect(threads[1].Comments[0].IsPending).To(BeTrue())
+	})
+
+	It("returns zero review ID when no pending review exists", func() {
+		line10 := 10
+		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
+			return jsonInto(makeGQLResp(0, "", []testThread{
+				{CommentID: 1, Path: "main.go", Line: &line10, DiffSide: "RIGHT", Body: "good", AuthorLogin: "alice", ReviewID: 50},
+			}, false, ""), resp)
+		}
+
+		threads, reviewID, nodeID, err := c.FetchCommentsAndReview(ctx, 42)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(threads).To(HaveLen(1))
+		Expect(threads[0].Comments[0].IsPending).To(BeFalse())
+		Expect(reviewID).To(Equal(0))
+		Expect(nodeID).To(BeEmpty())
+	})
+
+	It("falls back to originalLine when line is null", func() {
+		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
+			return jsonInto(makeGQLResp(0, "", []testThread{
+				{CommentID: 1, Path: "old.go", Line: nil, DiffSide: "LEFT", Body: "outdated", AuthorLogin: "bob", ReviewID: 50},
+			}, false, ""), resp)
+		}
+
+		// originalLine defaults to 0 in our test (no field set), so line=0
+		threads, _, _, err := c.FetchCommentsAndReview(ctx, 42)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(threads).To(HaveLen(1))
+	})
+
+	It("returns an error on GraphQL failure", func() {
+		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
+			return errors.New("graphql error")
+		}
+
+		_, _, _, err := c.FetchCommentsAndReview(ctx, 42)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("failed to fetch comments and review"))
+	})
+
+	It("paginates review threads", func() {
+		callCount := 0
+		line1 := 1
+		line2 := 2
+		gql.handler = func(query string, vars map[string]interface{}, resp interface{}) error {
+			callCount++
+			if callCount == 1 {
+				return jsonInto(makeGQLResp(0, "", []testThread{
+					{CommentID: 1, Path: "a.go", Line: &line1, DiffSide: "RIGHT", Body: "first", AuthorLogin: "alice", ReviewID: 50},
+				}, true, "cursor1"), resp)
+			}
+			return jsonInto(makeGQLResp(0, "", []testThread{
+				{CommentID: 2, Path: "b.go", Line: &line2, DiffSide: "RIGHT", Body: "second", AuthorLogin: "bob", ReviewID: 50},
+			}, false, ""), resp)
+		}
+
+		threads, _, _, err := c.FetchCommentsAndReview(ctx, 42)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(threads).To(HaveLen(2))
+		Expect(callCount).To(Equal(2))
 	})
 })
 
@@ -875,7 +913,7 @@ var _ = Describe("AddReviewComment", func() {
 	})
 
 	It("creates a new review when none exists and no hint provided", func() {
-		// FetchPendingReview: return empty list (no PENDING review)
+		// findPendingReview: return empty list (no PENDING review)
 		rest.getHandler = func(path string, resp interface{}) error {
 			return jsonInto([]map[string]interface{}{}, resp)
 		}

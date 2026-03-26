@@ -92,21 +92,21 @@ type PullRequest struct {
 
 	// Review state (populated when user enters review)
 	PendingReview *PendingReview // nil until user starts reviewing
-	Comments      []Comment      // populated from forge
+	Threads       []Thread       // review threads populated from forge
 }
 
 // MergeEnriched replaces all fields in pr with those from enriched,
-// then restores any active review state (PendingReview, Comments)
+// then restores any active review state (PendingReview, Threads)
 // that was already set on the receiver.
 func (pr *PullRequest) MergeEnriched(enriched *PullRequest) {
 	savedReview := pr.PendingReview
-	savedComments := pr.Comments
+	savedThreads := pr.Threads
 	*pr = *enriched
 	if savedReview != nil {
 		pr.PendingReview = savedReview
 	}
-	if savedComments != nil {
-		pr.Comments = savedComments
+	if savedThreads != nil {
+		pr.Threads = savedThreads
 	}
 }
 
@@ -119,15 +119,23 @@ const (
 	ReviewEventRequestChanges ReviewEvent = "REQUEST_CHANGES"
 )
 
-// Comment represents a review comment on a PR.
-// Used for both existing (submitted/draft) comments from the forge and
-// optimistic comments not yet confirmed by the server (identified by negative IDs).
+// Thread represents a review thread anchored to a specific location in a PR diff.
+// A thread groups one or more comments (the root comment plus any replies).
+type Thread struct {
+	NodeID     string    // GraphQL node ID (empty for optimistic threads)
+	Path       string
+	Line       int
+	StartLine  int       // for multi-line (0 = single line)
+	Side       string    // RIGHT (new) or LEFT (old)
+	IsResolved bool
+	IsOutdated bool
+	Comments   []Comment // ordered chronologically; first is the root
+}
+
+// Comment represents a single review comment within a thread.
+// Optimistic comments not yet confirmed by the server have negative IDs.
 type Comment struct {
 	ID        int    // Forge ID (negative = optimistic/temp, not yet confirmed)
-	Path      string
-	Line      int
-	StartLine int    // for multi-line (0 = single line)
-	Side      string // RIGHT (new) or LEFT (old)
 	Body      string
 	Author    string
 	CreatedAt string
@@ -135,7 +143,7 @@ type Comment struct {
 }
 
 // PendingReview tracks the state of an in-progress review.
-// Comments are stored on PullRequest.Comments (the single source of truth);
+// Threads are stored on PullRequest.Threads (the single source of truth);
 // PendingReview only tracks the review envelope (ID, event, body, viewed files).
 type PendingReview struct {
 	ReviewID     int    // Forge review ID (0 if not yet created)

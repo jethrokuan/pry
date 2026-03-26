@@ -86,8 +86,8 @@ All UI code depends on `review.Service`, never on the GitHub adapter directly. T
 - **Repo info**: `RepoOwner`, `RepoName`
 - **Auth**: `CurrentUser`, `UserTeams`
 - **PR operations**: `ListPRs`, `GetPR`, `FetchDiffFiles`
-- **Comments**: `FetchExistingComments`, `AddReviewComment`, `DeleteReviewComment`, `EditReviewComment`
-- **Review lifecycle**: `FetchPendingReview`, `CreatePendingReview`, `SubmitReview`
+- **Comments & review**: `FetchCommentsAndReview`, `AddReviewComment`, `DeleteReviewComment`, `EditReviewComment`
+- **Review lifecycle**: `CreatePendingReview`, `SubmitReview`
 - **Viewed files**: `FetchViewedFiles`, `MarkFileAsViewed`, `UnmarkFileAsViewed`
 - **Misc**: `ListMentionableUsers`, `UploadImage`
 

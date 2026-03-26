@@ -24,72 +24,199 @@ type apiReview struct {
 	} `json:"user"`
 }
 
-type apiComment struct {
-	ID   int    `json:"id"`
-	Path string `json:"path"`
-	Line int    `json:"line"`
-	Side string `json:"side"`
-	Body string `json:"body"`
-	User struct {
-		Login string `json:"login"`
-	} `json:"user"`
-	CreatedAt string `json:"created_at"`
-}
+// --- Pending review helpers (internal) ---
 
-// --- Pending review API ---
-
-// FetchPendingReview finds the authenticated user's existing PENDING review, if any.
-// Returns the review ID, node ID (0/"" if none found) and any pre-existing comments on it.
-func (c *Client) FetchPendingReview(_ context.Context, prNumber int) (int, string, []review.Comment, error) {
+// findPendingReview finds the authenticated user's PENDING review via REST.
+// Returns the review ID and node ID (0/"" if none found).
+// Used internally by ensurePendingReview for add/submit operations.
+func (c *Client) findPendingReview(prNumber int) (int, string, error) {
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews?per_page=100", c.owner, c.repo, prNumber)
-	slog.Debug("fetching pending review", "endpoint", endpoint, "prNumber", prNumber)
+	slog.Debug("finding pending review", "endpoint", endpoint, "prNumber", prNumber)
 
 	var reviews []apiReview
 	err := c.rest.Get(endpoint, &reviews)
 	if err != nil {
-		slog.Error("failed to fetch reviews", "endpoint", endpoint, "error", err)
-		return 0, "", nil, fmt.Errorf("failed to fetch reviews: %w", err)
+		return 0, "", fmt.Errorf("failed to fetch reviews: %w", err)
 	}
-	slog.Debug("fetched reviews", "count", len(reviews), "prNumber", prNumber)
 
-	// Find the PENDING review (there can be at most one per user)
 	for _, r := range reviews {
 		if r.State == "PENDING" {
-			comments, err := c.fetchReviewComments(prNumber, r.ID)
-			if err != nil {
-				return r.ID, r.NodeID, nil, err
-			}
-			return r.ID, r.NodeID, comments, nil
+			return r.ID, r.NodeID, nil
 		}
 	}
-
-	return 0, "", nil, nil
+	return 0, "", nil
 }
 
-func (c *Client) fetchReviewComments(prNumber, reviewID int) ([]review.Comment, error) {
-	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews/%d/comments?per_page=100&page=%%d",
-		c.owner, c.repo, prNumber, reviewID)
+// --- FetchCommentsAndReview (GraphQL, single query) ---
 
-	batch, err := paginateREST[apiComment](c.rest, endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch review comments: %w", err)
-	}
-
-	comments := make([]review.Comment, len(batch))
-	for i, ac := range batch {
-		comments[i] = review.Comment{
-			ID:        ac.ID,
-			Path:      ac.Path,
-			Line:      ac.Line,
-			Side:      ac.Side,
-			Body:      ac.Body,
-			Author:    ac.User.Login,
-			CreatedAt: ac.CreatedAt,
-			IsPending: true,
+// FetchCommentsAndReview fetches all review threads (including pending) and
+// the user's pending review in a single GraphQL query. Threads include proper
+// positioning (line, side) for both submitted and pending comments.
+func (c *Client) FetchCommentsAndReview(_ context.Context, prNumber int) ([]review.Thread, int, string, error) {
+	query := `
+	query($owner: String!, $repo: String!, $number: Int!, $threadCursor: String) {
+		repository(owner: $owner, name: $repo) {
+			pullRequest(number: $number) {
+				reviews(first: 1, states: [PENDING]) {
+					nodes {
+						databaseId
+						id
+					}
+				}
+				reviewThreads(first: 100, after: $threadCursor) {
+					nodes {
+						path
+						line
+						originalLine
+						startLine
+						originalStartLine
+						diffSide
+						isResolved
+						isOutdated
+						comments(first: 100) {
+							nodes {
+								databaseId
+								body
+								author { login }
+								createdAt
+								pullRequestReview { databaseId }
+							}
+						}
+					}
+					pageInfo {
+						hasNextPage
+						endCursor
+					}
+				}
+			}
 		}
+	}`
+
+	type gqlComment struct {
+		DatabaseId int    `json:"databaseId"`
+		Body       string `json:"body"`
+		Author     struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		CreatedAt         string `json:"createdAt"`
+		PullRequestReview struct {
+			DatabaseId int `json:"databaseId"`
+		} `json:"pullRequestReview"`
 	}
 
-	return comments, nil
+	type gqlThread struct {
+		Path              string `json:"path"`
+		Line              *int   `json:"line"`
+		OriginalLine      int    `json:"originalLine"`
+		StartLine         *int   `json:"startLine"`
+		OriginalStartLine *int   `json:"originalStartLine"`
+		DiffSide          string `json:"diffSide"`
+		IsResolved        bool   `json:"isResolved"`
+		IsOutdated        bool   `json:"isOutdated"`
+		Comments          struct {
+			Nodes []gqlComment `json:"nodes"`
+		} `json:"comments"`
+	}
+
+	type gqlResp struct {
+		Repository struct {
+			PullRequest struct {
+				Reviews struct {
+					Nodes []struct {
+						DatabaseId int    `json:"databaseId"`
+						Id         string `json:"id"`
+					} `json:"nodes"`
+				} `json:"reviews"`
+				ReviewThreads struct {
+					Nodes    []gqlThread `json:"nodes"`
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
+				} `json:"reviewThreads"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	}
+
+	slog.Debug("fetching comments and review via GraphQL", "prNumber", prNumber)
+
+	var pendingReviewID int
+	var pendingNodeID string
+	var allThreads []gqlThread
+	var cursor *string
+	firstPage := true
+
+	for {
+		vars := map[string]interface{}{
+			"owner":        c.owner,
+			"repo":         c.repo,
+			"number":       prNumber,
+			"threadCursor": cursor,
+		}
+
+		var resp gqlResp
+		if err := c.graphql.Do(query, vars, &resp); err != nil {
+			return nil, 0, "", fmt.Errorf("failed to fetch comments and review: %w", err)
+		}
+
+		// Extract pending review from first page only
+		if firstPage {
+			if nodes := resp.Repository.PullRequest.Reviews.Nodes; len(nodes) > 0 {
+				pendingReviewID = nodes[0].DatabaseId
+				pendingNodeID = nodes[0].Id
+			}
+			firstPage = false
+		}
+
+		allThreads = append(allThreads, resp.Repository.PullRequest.ReviewThreads.Nodes...)
+
+		if !resp.Repository.PullRequest.ReviewThreads.PageInfo.HasNextPage {
+			break
+		}
+		cursor = &resp.Repository.PullRequest.ReviewThreads.PageInfo.EndCursor
+	}
+
+	// Convert to domain threads
+	var threads []review.Thread
+	for _, gt := range allThreads {
+		line := gt.OriginalLine
+		if gt.Line != nil {
+			line = *gt.Line
+		}
+		var startLine int
+		if gt.StartLine != nil {
+			startLine = *gt.StartLine
+		} else if gt.OriginalStartLine != nil {
+			startLine = *gt.OriginalStartLine
+		}
+
+		t := review.Thread{
+			Path:       gt.Path,
+			Line:       line,
+			StartLine:  startLine,
+			Side:       gt.DiffSide,
+			IsResolved: gt.IsResolved,
+			IsOutdated: gt.IsOutdated,
+		}
+		for _, gc := range gt.Comments.Nodes {
+			t.Comments = append(t.Comments, review.Comment{
+				ID:        gc.DatabaseId,
+				Body:      gc.Body,
+				Author:    gc.Author.Login,
+				CreatedAt: gc.CreatedAt,
+				IsPending: pendingReviewID != 0 && gc.PullRequestReview.DatabaseId == pendingReviewID,
+			})
+		}
+		threads = append(threads, t)
+	}
+
+	slog.Debug("fetched comments and review",
+		"prNumber", prNumber,
+		"threads", len(threads),
+		"pendingReviewID", pendingReviewID,
+	)
+
+	return threads, pendingReviewID, pendingNodeID, nil
 }
 
 // CreatePendingReview creates a new PENDING review on GitHub (no event = pending).
@@ -146,7 +273,7 @@ func (c *Client) AddReviewComment(ctx context.Context, prNumber int, reviewNodeI
 // one if none exists. This is the single source of truth for obtaining a
 // valid review to attach comments to.
 func (c *Client) ensurePendingReview(ctx context.Context, prNumber int) (int, string, error) {
-	id, nodeID, _, err := c.FetchPendingReview(ctx, prNumber)
+	id, nodeID, err := c.findPendingReview(prNumber)
 	if err != nil {
 		return 0, "", fmt.Errorf("ensure pending review: fetch failed: %w", err)
 	}
@@ -487,34 +614,3 @@ func (c *Client) UnassignPR(_ context.Context, prNumber int, login string) error
 	return nil
 }
 
-// --- Comments ---
-
-// FetchComments gets all review comments on a PR.
-// Paginates automatically to retrieve all comments.
-func (c *Client) FetchComments(_ context.Context, prNumber int) ([]review.Comment, error) {
-	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/comments?per_page=100&page=%%d",
-		c.owner, c.repo, prNumber)
-	slog.Debug("fetching comments", "prNumber", prNumber)
-
-	batch, err := paginateREST[apiComment](c.rest, endpoint)
-	if err != nil {
-		slog.Error("failed to fetch comments", "prNumber", prNumber, "error", err)
-		return nil, fmt.Errorf("failed to fetch comments: %w", err)
-	}
-	slog.Debug("fetched comments", "prNumber", prNumber, "count", len(batch))
-
-	comments := make([]review.Comment, len(batch))
-	for i, ac := range batch {
-		comments[i] = review.Comment{
-			ID:        ac.ID,
-			Path:      ac.Path,
-			Line:      ac.Line,
-			Side:      ac.Side,
-			Body:      ac.Body,
-			Author:    ac.User.Login,
-			CreatedAt: ac.CreatedAt,
-		}
-	}
-
-	return comments, nil
-}

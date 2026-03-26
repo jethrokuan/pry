@@ -300,10 +300,10 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Update the shared PR in-place so diffview sees the change.
 			// Preserve review state that the new PR data doesn't carry.
 			pendingReview := m.selectedPR.PendingReview
-			comments := m.selectedPR.Comments
+			threads := m.selectedPR.Threads
 			*m.selectedPR = *msg.pr
 			m.selectedPR.PendingReview = pendingReview
-			m.selectedPR.Comments = comments
+			m.selectedPR.Threads = threads
 		}
 		// Forward to diffview as PRBodyLoadedMsg
 		var dvCmd tea.Cmd

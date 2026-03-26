@@ -23,12 +23,12 @@ func newTestModel(svc *reviewtest.MockService) Model {
 	return New(svc, pr, testUser)
 }
 
-func newTestModelWithComments(svc *reviewtest.MockService, comments []review.Comment) Model {
+func newTestModelWithThreads(svc *reviewtest.MockService, threads []review.Thread) Model {
 	pr := &review.PullRequest{
 		Number:        42,
 		Title:         "Test PR",
 		PendingReview: review.NewPendingReview(),
-		Comments:      comments,
+		Threads:       threads,
 	}
 	return New(svc, pr, testUser)
 }
@@ -199,29 +199,6 @@ var _ = ginkgo.Describe("Submit Model", func() {
 		})
 	})
 
-	ginkgo.Describe("pendingComments", func() {
-		ginkgo.It("filters comments by IsPending and current user", func() {
-			svc := &reviewtest.MockService{}
-			comments := []review.Comment{
-				{ID: 1, Path: "file.go", Line: 10, Body: "my pending", Author: testUser, IsPending: true},
-				{ID: 2, Path: "file.go", Line: 20, Body: "other pending", Author: "other", IsPending: true},
-				{ID: 3, Path: "file.go", Line: 30, Body: "my submitted", Author: testUser, IsPending: false},
-			}
-			m := sized(newTestModelWithComments(svc, comments))
-			pending := m.pendingComments()
-			gomega.Expect(pending).To(gomega.HaveLen(1))
-			gomega.Expect(pending[0].ID).To(gomega.Equal(1))
-			gomega.Expect(pending[0].Body).To(gomega.Equal("my pending"))
-		})
-
-		ginkgo.It("returns empty when no pending comments", func() {
-			svc := &reviewtest.MockService{}
-			m := sized(newTestModel(svc))
-			pending := m.pendingComments()
-			gomega.Expect(pending).To(gomega.BeEmpty())
-		})
-	})
-
 	ginkgo.Describe("View", func() {
 		ginkgo.It("returns empty string when width is 0", func() {
 			svc := &reviewtest.MockService{}
@@ -231,22 +208,30 @@ var _ = ginkgo.Describe("Submit Model", func() {
 
 		ginkgo.It("shows comment count", func() {
 			svc := &reviewtest.MockService{}
-			comments := []review.Comment{
-				{ID: 1, Path: "file.go", Line: 10, Body: "fix this", Author: testUser, IsPending: true},
-				{ID: 2, Path: "main.go", Line: 20, Body: "and this", Author: testUser, IsPending: true},
+			threads := []review.Thread{
+				{Path: "file.go", Line: 10, Side: "RIGHT", Comments: []review.Comment{
+					{ID: 1, Body: "fix this", Author: testUser, IsPending: true},
+				}},
+				{Path: "main.go", Line: 20, Side: "RIGHT", Comments: []review.Comment{
+					{ID: 2, Body: "and this", Author: testUser, IsPending: true},
+				}},
 			}
-			m := sized(newTestModelWithComments(svc, comments))
+			m := sized(newTestModelWithThreads(svc, threads))
 			view := m.View()
 			gomega.Expect(view).To(gomega.ContainSubstring("2 inline comments pending"))
 		})
 
 		ginkgo.It("does not count other users pending comments", func() {
 			svc := &reviewtest.MockService{}
-			comments := []review.Comment{
-				{ID: 1, Path: "file.go", Line: 10, Body: "mine", Author: testUser, IsPending: true},
-				{ID: 2, Path: "file.go", Line: 20, Body: "theirs", Author: "other", IsPending: true},
+			threads := []review.Thread{
+				{Path: "file.go", Line: 10, Side: "RIGHT", Comments: []review.Comment{
+					{ID: 1, Body: "mine", Author: testUser, IsPending: true},
+				}},
+				{Path: "file.go", Line: 20, Side: "RIGHT", Comments: []review.Comment{
+					{ID: 2, Body: "theirs", Author: "other", IsPending: true},
+				}},
 			}
-			m := sized(newTestModelWithComments(svc, comments))
+			m := sized(newTestModelWithThreads(svc, threads))
 			view := m.View()
 			gomega.Expect(view).To(gomega.ContainSubstring("1 inline comments pending"))
 		})

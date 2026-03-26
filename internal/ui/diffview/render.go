@@ -654,27 +654,33 @@ func (m *Model) buildPRInfoContent(width int) string {
 	}
 
 	// Review comments section
-	if len(m.comments.comments) > 0 {
+	if len(m.comments.threads) > 0 {
+		totalComments := 0
+		for _, t := range m.comments.threads {
+			totalComments += len(t.Comments)
+		}
 		b.WriteString("\n\n" + separator + "\n")
 		commentHeader := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
-		b.WriteString(commentHeader.Render(fmt.Sprintf("Review Comments (%d)", len(m.comments.comments))) + "\n\n")
+		b.WriteString(commentHeader.Render(fmt.Sprintf("Review Comments (%d)", totalComments)) + "\n\n")
 
 		bodyStyle := lipgloss.NewStyle().Width(width)
 		innerSep := sepStyle.Render(strings.Repeat("─", width/2))
 
-		for _, c := range m.comments.comments {
-			icon := "💬"
-			if c.IsPending {
-				icon = "📝"
+		for _, t := range m.comments.threads {
+			for _, c := range t.Comments {
+				icon := "💬"
+				if c.IsPending {
+					icon = "📝"
+				}
+				b.WriteString(icon + " " + authorStyle.Render("@"+c.Author))
+				if t.Path != "" {
+					b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", t.Path, t.Line)))
+				}
+				b.WriteString("\n")
+				rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
+				b.WriteString(bodyStyle.Render(rendered) + "\n")
+				b.WriteString(innerSep + "\n\n")
 			}
-			b.WriteString(icon + " " + authorStyle.Render("@"+c.Author))
-			if c.Path != "" {
-				b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", c.Path, c.Line)))
-			}
-			b.WriteString("\n")
-			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
-			b.WriteString(bodyStyle.Render(rendered) + "\n")
-			b.WriteString(innerSep + "\n\n")
 		}
 	}
 

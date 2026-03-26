@@ -114,14 +114,16 @@ var _ = Describe("PullRequest", func() {
 			Expect(pr.PendingReview.Body).To(Equal("my review"))
 		})
 
-		It("preserves existing Comments", func() {
-			comments := []review.Comment{
-				{ID: 1, Path: "a.go", Line: 10, Body: "existing comment"},
+		It("preserves existing Threads", func() {
+			threads := []review.Thread{
+				{Path: "a.go", Line: 10, Side: "RIGHT", Comments: []review.Comment{
+					{ID: 1, Body: "existing comment"},
+				}},
 			}
 
 			pr := &review.PullRequest{
-				Number:   1,
-				Comments: comments,
+				Number:  1,
+				Threads: threads,
 			}
 			enriched := &review.PullRequest{
 				Number: 1,
@@ -131,8 +133,8 @@ var _ = Describe("PullRequest", func() {
 			pr.MergeEnriched(enriched)
 
 			Expect(pr.Title).To(Equal("updated"))
-			Expect(pr.Comments).To(HaveLen(1))
-			Expect(pr.Comments[0].Body).To(Equal("existing comment"))
+			Expect(pr.Threads).To(HaveLen(1))
+			Expect(pr.Threads[0].Comments[0].Body).To(Equal("existing comment"))
 		})
 
 		It("does not preserve nil PendingReview", func() {
@@ -151,23 +153,25 @@ var _ = Describe("PullRequest", func() {
 			Expect(pr.PendingReview).To(BeIdenticalTo(enrichedReview))
 		})
 
-		It("does not preserve nil Comments", func() {
+		It("does not preserve nil Threads", func() {
 			pr := &review.PullRequest{
-				Number:   1,
-				Comments: nil,
+				Number:  1,
+				Threads: nil,
 			}
-			enrichedComments := []review.Comment{
-				{ID: 5, Body: "from enriched"},
+			enrichedThreads := []review.Thread{
+				{Path: "a.go", Line: 1, Side: "RIGHT", Comments: []review.Comment{
+					{ID: 5, Body: "from enriched"},
+				}},
 			}
 			enriched := &review.PullRequest{
-				Number:   1,
-				Comments: enrichedComments,
+				Number:  1,
+				Threads: enrichedThreads,
 			}
 
 			pr.MergeEnriched(enriched)
 
-			Expect(pr.Comments).To(HaveLen(1))
-			Expect(pr.Comments[0].Body).To(Equal("from enriched"))
+			Expect(pr.Threads).To(HaveLen(1))
+			Expect(pr.Threads[0].Comments[0].Body).To(Equal("from enriched"))
 		})
 	})
 })

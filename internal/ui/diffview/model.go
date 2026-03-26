@@ -42,15 +42,10 @@ type filesLoadedMsg struct {
 	err   error
 }
 
-type commentsLoadedMsg struct {
-	comments []review.Comment
-	err      error
-}
-
-type pendingReviewMsg struct {
+type commentsAndReviewMsg struct {
+	threads      []review.Thread
 	reviewID     int
 	reviewNodeID string
-	comments     []review.Comment
 	err          error
 }
 
@@ -81,10 +76,12 @@ type viewedFilesMsg struct {
 }
 
 type refreshDoneMsg struct {
-	files    []diff.DiffFile
-	comments []review.Comment
-	viewed   map[string]bool
-	err      error
+	files        []diff.DiffFile
+	threads      []review.Thread
+	reviewID     int
+	reviewNodeID string
+	viewed       map[string]bool
+	err          error
 }
 
 type checkoutMsg struct {
@@ -378,8 +375,7 @@ func (m Model) PendingReview() *review.PendingReview {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.loadFiles(),
-		m.loadComments(),
-		m.loadPendingReview(),
+		m.loadCommentsAndReview(),
 		m.loadViewedFiles(),
 		m.spinner.Tick,
 	)
@@ -403,21 +399,14 @@ func (m Model) loadFiles() tea.Cmd {
 	}
 }
 
-func (m Model) loadComments() tea.Cmd {
+func (m Model) loadCommentsAndReview() tea.Cmd {
 	return func() tea.Msg {
-		comments, err := m.svc.FetchComments(context.Background(), m.pr.Number)
-		return commentsLoadedMsg{comments: comments, err: err}
+		threads, reviewID, nodeID, err := m.svc.FetchCommentsAndReview(context.Background(), m.pr.Number)
+		return commentsAndReviewMsg{threads: threads, reviewID: reviewID, reviewNodeID: nodeID, err: err}
 	}
 }
 
-func (m Model) loadPendingReview() tea.Cmd {
-	return func() tea.Msg {
-		reviewID, nodeID, comments, err := m.svc.FetchPendingReview(context.Background(), m.pr.Number)
-		return pendingReviewMsg{reviewID: reviewID, reviewNodeID: nodeID, comments: comments, err: err}
-	}
-}
-
-// refreshCmd fetches diff files, comments, and viewed files in parallel,
+// refreshCmd fetches diff files, comments+review, and viewed files,
 // returning a single refreshDoneMsg when all complete.
 func (m Model) refreshCmd() tea.Cmd {
 	svc := m.svc
@@ -435,13 +424,15 @@ func (m Model) refreshCmd() tea.Cmd {
 		}
 		result.files = files
 
-		// Fetch comments
-		comments, err := svc.FetchComments(ctx, prNumber)
+		// Fetch threads and pending review atomically
+		threads, reviewID, nodeID, err := svc.FetchCommentsAndReview(ctx, prNumber)
 		if err != nil {
 			result.err = fmt.Errorf("comments: %w", err)
 			return result
 		}
-		result.comments = comments
+		result.threads = threads
+		result.reviewID = reviewID
+		result.reviewNodeID = nodeID
 
 		// Fetch viewed files
 		if prNodeID != "" {
@@ -478,10 +469,6 @@ func (m Model) addReviewCommentCmd(tempID int, path string, line, startLine int,
 			reviewNodeID: reviewNodeID,
 			comment: review.Comment{
 				ID:        forgeID,
-				Path:      path,
-				Line:      line,
-				StartLine: startLine,
-				Side:      side,
 				Body:      body,
 				Author:    currentUser,
 				IsPending: true,
@@ -550,26 +537,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.updateDiffContent()
 		}
 
-	case commentsLoadedMsg:
+	case commentsAndReviewMsg:
 		if msg.err != nil {
 			m.loadErr = fmt.Errorf("comments: %w", msg.err)
 		} else {
-			m.setComments(msg.comments)
+			m.setThreads(msg.threads)
+			if msg.reviewID > 0 {
+				m.pendingReview.ReviewID = msg.reviewID
+				m.pendingReview.ReviewNodeID = msg.reviewNodeID
+			}
 			m.updateDiffContent()
 		}
-
-	case pendingReviewMsg:
-		if msg.err != nil {
-			return m, flash.ShowMsg{ID: "review-err", Text: fmt.Sprintf("Review error: %v", msg.err), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
-		} else if msg.reviewID > 0 {
-			m.pendingReview.ReviewID = msg.reviewID
-			m.pendingReview.ReviewNodeID = msg.reviewNodeID
-			// Merge pending review comments into the comment list
-			m.mergePendingComments(msg.comments)
-			m.updateDiffContent()
-		}
-		// No existing pending review — that's fine, we'll create one lazily
-		// when the user actually takes a review action (e.g., adds a comment).
 
 	case commentAddedMsg:
 		delete(m.inflight, msg.tempID)
@@ -591,7 +569,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case commentDeletedMsg:
 		if msg.err != nil {
 			// Re-fetch comments to restore the deleted one
-			return m, tea.Batch(m.loadComments(), flash.ShowMsg{ID: "diffview", Text: "Delete failed: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd())
+			return m, tea.Batch(m.loadCommentsAndReview(), flash.ShowMsg{ID: "diffview", Text: "Delete failed: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd())
 		}
 		m.updateDiffContent()
 
@@ -630,8 +608,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.nav.rebuildTreeRows()
 		m.nav.buildDiffLines(m.files)
 		m.treeDirty = true
-		// Update comments (preserves local pending comments via setComments)
-		m.setComments(msg.comments)
+		// Update threads and pending review state atomically
+		m.setThreads(msg.threads)
+		if msg.reviewID > 0 {
+			m.pendingReview.ReviewID = msg.reviewID
+			m.pendingReview.ReviewNodeID = msg.reviewNodeID
+		}
 		// Update viewed files
 		if msg.viewed != nil {
 			for path := range msg.viewed {
@@ -686,10 +668,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Err == nil && msg.PR != nil {
 			// Preserve review state when updating PR metadata
 			pendingReview := m.pendingReview
-			comments := m.pr.Comments
+			threads := m.pr.Threads
 			*m.pr = *msg.PR
 			m.pendingReview = pendingReview
-			m.pr.Comments = comments
+			m.pr.Threads = threads
 			if m.prInfoActive {
 				m.openPRInfoPopup()
 			}
@@ -899,9 +881,11 @@ func (m *Model) commentRenderedLines(path string, lineNum int, side string) int 
 // hasUnsavedWork returns true if there are any pending (draft) comments
 // from the current user that haven't been submitted yet.
 func (m *Model) hasUnsavedWork() bool {
-	for _, c := range m.comments.comments {
-		if c.IsPending && c.Author == m.currentUser {
-			return true
+	for _, t := range m.comments.threads {
+		for _, c := range t.Comments {
+			if c.IsPending && c.Author == m.currentUser {
+				return true
+			}
 		}
 	}
 	return false
@@ -910,9 +894,11 @@ func (m *Model) hasUnsavedWork() bool {
 // pendingCommentCount returns the number of pending (draft) comments from the current user.
 func (m *Model) pendingCommentCount() int {
 	n := 0
-	for _, c := range m.comments.comments {
-		if c.IsPending && c.Author == m.currentUser {
-			n++
+	for _, t := range m.comments.threads {
+		for _, c := range t.Comments {
+			if c.IsPending && c.Author == m.currentUser {
+				n++
+			}
 		}
 	}
 	return n
@@ -1191,8 +1177,8 @@ func (m Model) View() string {
 		refs := m.commentRefsAtCursor()
 		var helpParts []string
 		helpParts = append(helpParts, "j/k select comment")
-		helpParts = append(helpParts, "enter view all")
-		helpParts = append(helpParts, "r reply")
+		helpParts = append(helpParts, "enter reply")
+		helpParts = append(helpParts, "o view all")
 		if m.nav.cursor.CommentIdx < len(refs) && refs[m.nav.cursor.CommentIdx].editable {
 			helpParts = append(helpParts, "e edit")
 			helpParts = append(helpParts, "d delete")

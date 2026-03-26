@@ -2,6 +2,7 @@ package diffview
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -234,8 +235,8 @@ func (m Model) toggleAllFolds() Model {
 
 	// Toggle all comments
 	allCommentKeys := make(map[string]bool)
-	for _, c := range m.comments.comments {
-		allCommentKeys[commentKey(c.Path, c.Line)] = true
+	for _, t := range m.comments.threads {
+		allCommentKeys[commentKey(t.Path, t.Line)] = true
 	}
 	for ck := range allCommentKeys {
 		m.comments.expanded[ck] = !anyExpanded
@@ -375,11 +376,11 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, cmd
 	case key.Matches(msg, keys.NextComment):
 		m.nav.activeCycler = CyclerComment
-		cmd := m.navigateComment(true, false)
+		cmd := m.navigateComment(true)
 		return m, cmd
 	case key.Matches(msg, keys.PrevComment):
 		m.nav.activeCycler = CyclerComment
-		cmd := m.navigateComment(false, false)
+		cmd := m.navigateComment(false)
 		return m, cmd
 
 	// Search
@@ -449,84 +450,175 @@ func (m *Model) navigateFile(forward bool) tea.Cmd {
 	return nil
 }
 
-// navigateComment moves to the next/prev comment. If crossFile, jump to next file with comments.
-// When landing on a comment, expands the comment block and selects the first comment.
-func (m *Model) navigateComment(forward, crossFile bool) tea.Cmd {
-	m.nav.pushJump()
-	if crossFile {
-		return m.navigateCommentToFile(forward)
-	}
-	// Within current file: find next diff line that has comments
-	if len(m.nav.diffLines) == 0 {
-		return m.navigateCommentToFile(forward)
-	}
-	n := len(m.nav.diffLines)
-	start := m.nav.cursor.LineIdx
-	path := m.files[m.nav.cursor.FileIdx].Path
-	idx := cyclicSearch(start, n, forward, func(i int) bool {
-		return m.comments.LineHasComments(path, m.nav.diffLines[i])
-	})
-	if idx >= 0 {
-		m.nav.cursor.LineIdx = idx
-		m.expandAndSelectComment(idx)
-		m.syncViewportToCursorWithComments()
-		wrapped := (forward && idx <= start) || (!forward && idx >= start)
-		if wrapped {
-			if forward {
-				return flash.ShowMsg{ID: "diffview", Text: "Wrapped to first comment", Expires: 1500 * time.Millisecond}.Cmd()
-			}
-			return flash.ShowMsg{ID: "diffview", Text: "Wrapped to last comment", Expires: 1500 * time.Millisecond}.Cmd()
-		}
-		return nil
-	}
-	// No more comments in current file — try cross-file
-	return m.navigateCommentToFile(forward)
+// threadPosition identifies a thread's location in the diff view for navigation.
+type threadPosition struct {
+	fileIdx int
+	line    int
+	side    string
 }
 
-// navigateCommentToFile jumps to the next/prev file that has comments,
-// positions the cursor on the first/last commented line, and expands+selects it.
-// Skips files where comments exist but don't map to any visible diff line.
-func (m *Model) navigateCommentToFile(forward bool) tea.Cmd {
-	nFiles := len(m.files)
-	if nFiles == 0 {
-		return nil
+// buildThreadPositions returns all thread positions sorted by file index and line,
+// mapping each thread to the diff line where it would render.
+func (m *Model) buildThreadPositions() []threadPosition {
+	// Build a file-path-to-index map
+	fileIdxByPath := make(map[string]int, len(m.files))
+	for i, f := range m.files {
+		fileIdxByPath[f.Path] = i
 	}
-	start := m.nav.cursor.FileIdx
-	oldIdx := m.nav.cursor.FileIdx
-	idx := cyclicSearch(start, nFiles, forward, func(i int) bool {
-		if !m.filter.isIncluded(i) {
-			return false
+
+	var positions []threadPosition
+	seen := make(map[threadPosition]bool)
+	for _, t := range m.comments.threads {
+		fi, ok := fileIdxByPath[t.Path]
+		if !ok {
+			continue
 		}
-		if !m.comments.FileHasComments(m.files[i].Path) {
-			return false
+		pos := threadPosition{fileIdx: fi, line: t.Line, side: t.Side}
+		if !seen[pos] {
+			seen[pos] = true
+			positions = append(positions, pos)
 		}
-		// Temporarily switch to this file to check if comments map to diff lines
-		m.nav.cursor.FileIdx = i
-		m.nav.buildDiffLines(m.files)
-		if m.findCommentedDiffLine(m.files[i].Path, forward) < 0 {
-			// Comments exist but none map to visible diff lines; restore and skip
-			m.nav.cursor.FileIdx = oldIdx
-			m.nav.buildDiffLines(m.files)
-			return false
+	}
+
+	// Sort by file index, then line number
+	sort.Slice(positions, func(i, j int) bool {
+		if positions[i].fileIdx != positions[j].fileIdx {
+			return positions[i].fileIdx < positions[j].fileIdx
 		}
-		return true
+		return positions[i].line < positions[j].line
 	})
-	if idx < 0 {
+	return positions
+}
+
+// diffLineForThread finds the diff line index that matches a thread position
+// in the current file's diff lines. Returns -1 if not found.
+func (m *Model) diffLineForThread(pos threadPosition) int {
+	for i, dl := range m.nav.diffLines {
+		if pos.side == "RIGHT" && dl.newLine == pos.line {
+			return i
+		}
+		if pos.side == "LEFT" && dl.oldLine == pos.line {
+			return i
+		}
+		// Empty side: match either
+		if pos.side == "" && (dl.newLine == pos.line || dl.oldLine == pos.line) {
+			return i
+		}
+	}
+	return -1
+}
+
+// expandHunkForThread finds the collapsed hunk containing the thread's line
+// and expands it. Returns true if a hunk was expanded.
+func (m *Model) expandHunkForThread(pos threadPosition) bool {
+	if pos.fileIdx >= len(m.files) {
+		return false
+	}
+	file := m.files[pos.fileIdx]
+	for hi, hunk := range file.Hunks {
+		hk := hunkKey(file.Path, hi)
+		if !m.nav.collapsedHunks[hk] {
+			continue
+		}
+		inRange := false
+		if pos.side == "RIGHT" || pos.side == "" {
+			inRange = pos.line >= hunk.NewStart && pos.line < hunk.NewStart+hunk.NewLines
+		}
+		if !inRange && (pos.side == "LEFT" || pos.side == "") {
+			inRange = pos.line >= hunk.OldStart && pos.line < hunk.OldStart+hunk.OldLines
+		}
+		if inRange {
+			delete(m.nav.collapsedHunks, hk)
+			return true
+		}
+	}
+	return false
+}
+
+// navigateComment moves to the next/prev thread across all files.
+// When landing on a thread, expands the comment block and selects the first comment.
+func (m *Model) navigateComment(forward bool) tea.Cmd {
+	m.nav.pushJump()
+
+	positions := m.buildThreadPositions()
+	if len(positions) == 0 {
 		return flash.ShowMsg{ID: "diffview", Text: "No comments found", Expires: 1500 * time.Millisecond}.Cmd()
 	}
-	// m.nav.cursor.FileIdx and diffLines are already set to the found file by the match function
-	m.nav.cursor.LineIdx = m.findCommentedDiffLine(m.files[idx].Path, forward)
-	m.expandAndSelectComment(m.nav.cursor.LineIdx)
-	m.nav.diffViewport.GotoTop()
-	m.updateDiffContent()
-	m.autoFollowFile(oldIdx, m.nav.cursor.FileIdx)
-	m.syncViewportToCursorWithComments()
-	wrapped := (forward && idx <= start) || (!forward && idx >= start)
-	if wrapped {
-		if forward {
-			return flash.ShowMsg{ID: "diffview", Text: "Wrapped to first commented file", Expires: 1500 * time.Millisecond}.Cmd()
+
+	// Find current position in the sorted list
+	curFileIdx := m.nav.cursor.FileIdx
+	curLine := 0
+	if m.nav.cursor.LineIdx < len(m.nav.diffLines) {
+		dl := m.nav.diffLines[m.nav.cursor.LineIdx]
+		if dl.newLine > 0 {
+			curLine = dl.newLine
+		} else {
+			curLine = dl.oldLine
 		}
-		return flash.ShowMsg{ID: "diffview", Text: "Wrapped to last commented file", Expires: 1500 * time.Millisecond}.Cmd()
+	}
+
+	// Find the next/prev thread position
+	var target *threadPosition
+	wrapped := false
+
+	if forward {
+		for i := range positions {
+			if positions[i].fileIdx > curFileIdx || (positions[i].fileIdx == curFileIdx && positions[i].line > curLine) {
+				target = &positions[i]
+				break
+			}
+		}
+		if target == nil {
+			target = &positions[0]
+			wrapped = true
+		}
+	} else {
+		for i := len(positions) - 1; i >= 0; i-- {
+			if positions[i].fileIdx < curFileIdx || (positions[i].fileIdx == curFileIdx && positions[i].line < curLine) {
+				target = &positions[i]
+				break
+			}
+		}
+		if target == nil {
+			target = &positions[len(positions)-1]
+			wrapped = true
+		}
+	}
+
+	// Switch to the target file if needed
+	if target.fileIdx != m.nav.cursor.FileIdx {
+		oldIdx := m.nav.cursor.FileIdx
+		m.nav.cursor.FileIdx = target.fileIdx
+		m.nav.buildDiffLines(m.files)
+		m.nav.diffViewport.GotoTop()
+		m.autoFollowFile(oldIdx, target.fileIdx)
+	}
+
+	// Find the diff line for this thread, expanding collapsed hunks if needed
+	diffIdx := m.diffLineForThread(*target)
+	if diffIdx < 0 {
+		// Thread's line not visible — try expanding the collapsed hunk that contains it
+		if m.expandHunkForThread(*target) {
+			m.nav.buildDiffLines(m.files)
+			diffIdx = m.diffLineForThread(*target)
+		}
+		if diffIdx < 0 {
+			m.updateDiffContent()
+			return flash.ShowMsg{ID: "diffview", Text: "Comment not visible in diff", Expires: 1500 * time.Millisecond}.Cmd()
+		}
+	}
+
+	m.nav.cursor.LineIdx = diffIdx
+	m.expandAndSelectComment(diffIdx)
+	m.updateDiffContent()
+	m.syncViewportToCursorWithComments()
+
+	if wrapped {
+		dir := "first"
+		if !forward {
+			dir = "last"
+		}
+		return flash.ShowMsg{ID: "diffview", Text: "Wrapped to " + dir + " comment", Expires: 1500 * time.Millisecond}.Cmd()
 	}
 	return nil
 }
@@ -545,25 +637,6 @@ func (m *Model) expandAndSelectComment(lineIdx int) {
 		m.comments.expanded[commentKey(path, dl.oldLine)] = true
 	}
 	m.nav.cursor = CursorTarget{Kind: CursorComment, FileIdx: m.nav.cursor.FileIdx, LineIdx: lineIdx, CommentIdx: 0}
-}
-
-// findCommentedDiffLine returns the index of the first (forward=true) or last (forward=false)
-// diff line that has comments for the given path. Returns -1 if none found.
-func (m *Model) findCommentedDiffLine(path string, forward bool) int {
-	if forward {
-		for j := 0; j < len(m.nav.diffLines); j++ {
-			if m.comments.LineHasComments(path, m.nav.diffLines[j]) {
-				return j
-			}
-		}
-	} else {
-		for j := len(m.nav.diffLines) - 1; j >= 0; j-- {
-			if m.comments.LineHasComments(path, m.nav.diffLines[j]) {
-				return j
-			}
-		}
-	}
-	return -1
 }
 
 // navigateHunk moves to the first line of the next/prev hunk.
