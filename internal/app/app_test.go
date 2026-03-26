@@ -58,9 +58,6 @@ func (s *stubService) UnmarkFileAsViewed(_ context.Context, _, _ string) error {
 func (s *stubService) ListMentionableUsers(_ context.Context) ([]review.MentionableUser, error) {
 	return nil, nil
 }
-func (s *stubService) UploadImage(_ context.Context, _ []byte, _ string) (string, error) {
-	return "", nil
-}
 func (s *stubService) ClosePR(_ context.Context, _ int) error               { return nil }
 func (s *stubService) ReopenPR(_ context.Context, _ int) error              { return nil }
 func (s *stubService) MergePR(_ context.Context, _ int) error               { return nil }

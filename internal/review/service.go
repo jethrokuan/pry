@@ -95,6 +95,4 @@ type Service interface {
 	// ListMentionableUsers returns users that can be @mentioned in the repo.
 	ListMentionableUsers(ctx context.Context) ([]MentionableUser, error)
 
-	// UploadImage uploads an image and returns a URL suitable for embedding in markdown.
-	UploadImage(ctx context.Context, data []byte, filename string) (string, error)
 }

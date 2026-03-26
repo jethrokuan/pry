@@ -33,7 +33,6 @@ type MockService struct {
 	MarkFileAsViewedFn     func(ctx context.Context, prNodeID, path string) error
 	UnmarkFileAsViewedFn   func(ctx context.Context, prNodeID, path string) error
 	ListMentionableUsersFn    func(ctx context.Context) ([]review.MentionableUser, error)
-	UploadImageFn             func(ctx context.Context, data []byte, filename string) (string, error)
 	ClosePRFn                 func(ctx context.Context, prNumber int) error
 	ReopenPRFn                func(ctx context.Context, prNumber int) error
 	MergePRFn                 func(ctx context.Context, prNumber int) error
@@ -155,13 +154,6 @@ func (m *MockService) ListMentionableUsers(ctx context.Context) ([]review.Mentio
 		return m.ListMentionableUsersFn(ctx)
 	}
 	return nil, nil
-}
-
-func (m *MockService) UploadImage(ctx context.Context, data []byte, filename string) (string, error) {
-	if m.UploadImageFn != nil {
-		return m.UploadImageFn(ctx, data, filename)
-	}
-	return "", nil
 }
 
 func (m *MockService) ClosePR(ctx context.Context, prNumber int) error {

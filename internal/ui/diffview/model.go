@@ -88,16 +88,6 @@ type editorFinishedMsg struct {
 	err     error
 }
 
-type clipboardImageMsg struct {
-	data []byte
-	err  error
-}
-
-type imageUploadedMsg struct {
-	url string
-	err error
-}
-
 
 // MentionableUsersMsg carries mentionable users from the app layer.
 type MentionableUsersMsg struct {
@@ -211,12 +201,10 @@ var inlineKeys = struct {
 	Save       key.Binding
 	Cancel     key.Binding
 	OpenEditor key.Binding
-	PasteImage key.Binding
 }{
 	Save:       key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "save")),
 	Cancel:     key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "cancel")),
 	OpenEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "open $EDITOR")),
-	PasteImage: key.NewBinding(key.WithKeys("ctrl+v"), key.WithHelp("ctrl+v", "paste image")),
 }
 
 // --- Model ---
@@ -618,24 +606,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case MentionableUsersMsg:
 		if len(msg.Users) > 0 {
 			m.editor.SetMentionUsers(msg.Users)
-		}
-
-	case clipboardImageMsg:
-		if msg.err != nil {
-			return m, flash.ShowMsg{ID: "image-upload", Text: "Clipboard error: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
-		} else if msg.data == nil {
-			return m, flash.ShowMsg{ID: "image-upload", Text: "No image in clipboard", Expires: 1500 * time.Millisecond}.Cmd()
-		} else {
-			return m, tea.Batch(flash.ShowMsg{ID: "image-upload", Text: "Uploading image...", Style: flash.StyleSpinner}.Cmd(), m.uploadImageCmd(msg.data))
-		}
-
-	case imageUploadedMsg:
-		if msg.err != nil {
-			return m, flash.ShowMsg{ID: "image-upload", Text: "Upload failed: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
-		} else if m.editor.IsActive() {
-			mdLink := fmt.Sprintf("![image](%s)", msg.url)
-			m.editor.InsertString(mdLink)
-			return m, flash.ShowMsg{ID: "image-upload", Text: "Image uploaded", Expires: 1500 * time.Millisecond}.Cmd()
 		}
 
 	case copyResultMsg:

@@ -32,9 +32,6 @@ type inlineEditorCancelMsg struct{}
 // inlineEditorOpenEditorMsg is emitted when the user wants to open $EDITOR.
 type inlineEditorOpenEditorMsg struct{}
 
-// inlineEditorPasteImageMsg is emitted when the user wants to paste an image.
-type inlineEditorPasteImageMsg struct{}
-
 // --- InlineEditor ---
 
 // InlineEditor manages the inline comment textarea with @mention autocomplete.
@@ -197,8 +194,6 @@ func (e InlineEditor) HandleKey(msg tea.KeyPressMsg) (InlineEditor, tea.Cmd, any
 	case key.Matches(msg, inlineKeys.OpenEditor):
 		return e, nil, inlineEditorOpenEditorMsg{}
 
-	case key.Matches(msg, inlineKeys.PasteImage):
-		return e, nil, inlineEditorPasteImageMsg{}
 	}
 
 	// Any other key resets the discard confirmation
@@ -358,7 +353,7 @@ func (e InlineEditor) View() string {
 		Padding(0, 1).
 		Width(e.width - 2)
 
-	helpText := "ctrl+s save  ctrl+e $EDITOR  ctrl+v paste image  esc cancel"
+	helpText := "ctrl+s save  ctrl+e $EDITOR  esc cancel"
 	if e.confirmDiscard {
 		helpText = "Press esc again to discard  ctrl+s save"
 	}

@@ -11,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jethrokuan/pry/internal/clipboard"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
@@ -583,20 +582,6 @@ func (m *Model) startComment(mode commentMode) tea.Cmd {
 	return m.openInlineComment(path, line, 0, side, mode, dl.content)
 }
 
-// --- Image paste support ---
-
-func checkClipboardImageCmd() tea.Msg {
-	data, err := clipboard.ReadImage()
-	return clipboardImageMsg{data: data, err: err}
-}
-
-func (m Model) uploadImageCmd(data []byte) tea.Cmd {
-	svc := m.svc
-	return func() tea.Msg {
-		url, err := svc.UploadImage(context.Background(), data, "image.png")
-		return imageUploadedMsg{url: url, err: err}
-	}
-}
 
 func (m Model) openInEditor() tea.Cmd {
 	if len(m.files) == 0 {

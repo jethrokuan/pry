@@ -900,8 +900,6 @@ func (m Model) handleInlineEditorKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, nil
 	case inlineEditorOpenEditorMsg:
 		return m, m.openExternalEditorForComment()
-	case inlineEditorPasteImageMsg:
-		return m, checkClipboardImageCmd
 	}
 
 	return m, cmd

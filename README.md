@@ -130,8 +130,9 @@ When a comment is selected:
 |-----|--------|
 | `ctrl+s` | Save comment |
 | `ctrl+e` | Open in `$EDITOR` |
-| `ctrl+v` | Paste image from clipboard |
 | `esc` | Cancel |
+
+> **Note:** Image attachments are not supported. GitHub's image upload endpoint requires browser session cookies and does not accept API tokens.
 
 ### Submit Review
 
