@@ -67,7 +67,9 @@ type graphqlPRNode struct {
 				StatusCheckRollup struct {
 					State    string `json:"state"`
 					Contexts struct {
-						Nodes []graphqlCheckContext `json:"nodes"`
+						TotalCount int                   `json:"totalCount"`
+						Nodes      []graphqlCheckContext  `json:"nodes"`
+						PageInfo   graphqlPageInfo        `json:"pageInfo"`
 					} `json:"contexts"`
 				} `json:"statusCheckRollup"`
 			} `json:"commit"`
@@ -90,6 +92,12 @@ type graphqlCheckContext struct {
 	State     string     `json:"state"`
 	TargetURL string     `json:"targetUrl"`
 	CreatedAt *time.Time `json:"createdAt"`
+}
+
+// graphqlPageInfo holds cursor-based pagination state from GraphQL connections.
+type graphqlPageInfo struct {
+	HasNextPage bool   `json:"hasNextPage"`
+	EndCursor   string `json:"endCursor"`
 }
 
 // graphqlReviewer handles the union type (User | Team) in requestedReviewer.
@@ -280,6 +288,7 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 	// Extract CI status from the last commit's status check rollup
 	var checksPass *bool
 	var checkRuns []review.CheckRun
+	var checksTotal int
 	if len(node.Commits.Nodes) > 0 {
 		rollup := node.Commits.Nodes[len(node.Commits.Nodes)-1].Commit.StatusCheckRollup
 		switch rollup.State {
@@ -293,6 +302,7 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 			// Leave as nil (pending)
 		}
 
+		checksTotal = rollup.Contexts.TotalCount
 		for _, ctx := range rollup.Contexts.Nodes {
 			cr := graphqlContextToCheckRun(ctx)
 			checkRuns = append(checkRuns, cr)
@@ -322,6 +332,7 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		HeadSHA:        node.HeadRefOid,
 		ChecksPass:     checksPass,
 		CheckRuns:      checkRuns,
+		ChecksTotal:    checksTotal,
 		MergeState:     node.MergeStateStatus,
 		Mergeable:      node.Mergeable,
 		ReviewDecision: node.ReviewDecision,
@@ -471,6 +482,8 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 							statusCheckRollup {
 								state
 								contexts(first: 100) {
+									totalCount
+									pageInfo { hasNextPage endCursor }
 									nodes {
 										__typename
 										... on CheckRun {
@@ -522,7 +535,22 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 		return nil, fmt.Errorf("failed to fetch PR #%d: %w", number, err)
 	}
 
-	pr := nodeToPR(resp.Repository.PullRequest, "")
+	// Paginate remaining check contexts if there are more than the first page.
+	node := resp.Repository.PullRequest
+	if len(node.Commits.Nodes) > 0 {
+		rollup := node.Commits.Nodes[len(node.Commits.Nodes)-1].Commit.StatusCheckRollup
+		if rollup.Contexts.PageInfo.HasNextPage {
+			extra, err := c.fetchRemainingCheckContexts(number, rollup.Contexts.PageInfo.EndCursor)
+			if err != nil {
+				slog.Warn("failed to paginate check contexts", "number", number, "error", err)
+			} else {
+				rollup.Contexts.Nodes = append(rollup.Contexts.Nodes, extra...)
+				node.Commits.Nodes[len(node.Commits.Nodes)-1].Commit.StatusCheckRollup = rollup
+			}
+		}
+	}
+
+	pr := nodeToPR(node, "")
 
 	// Best-effort: detect which files have merge conflicts using local git.
 	if pr.Mergeable == "CONFLICTING" {
@@ -538,4 +566,97 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 	c.cache.Set(key, pr, c.prTTL)
 	slog.Debug("GetPR: cached result", "number", number)
 	return &pr, nil
+}
+
+// fetchRemainingCheckContexts paginates through all remaining check contexts
+// for a PR's last commit, starting after the given cursor.
+func (c *Client) fetchRemainingCheckContexts(number int, after string) ([]graphqlCheckContext, error) {
+	const pageSize = 100
+	var all []graphqlCheckContext
+	cursor := after
+
+	for {
+		var resp struct {
+			Repository struct {
+				PullRequest struct {
+					Commits struct {
+						Nodes []struct {
+							Commit struct {
+								StatusCheckRollup struct {
+									Contexts struct {
+										Nodes    []graphqlCheckContext `json:"nodes"`
+										PageInfo graphqlPageInfo       `json:"pageInfo"`
+									} `json:"contexts"`
+								} `json:"statusCheckRollup"`
+							} `json:"commit"`
+						} `json:"nodes"`
+					} `json:"commits"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		}
+
+		query := `query($owner: String!, $repo: String!, $number: Int!, $after: String!) {
+			repository(owner: $owner, name: $repo) {
+				pullRequest(number: $number) {
+					commits(last: 1) {
+						nodes {
+							commit {
+								statusCheckRollup {
+									contexts(first: 100, after: $after) {
+										pageInfo { hasNextPage endCursor }
+										nodes {
+											__typename
+											... on CheckRun {
+												name
+												status
+												conclusion
+												startedAt
+												completedAt
+												detailsUrl
+											}
+											... on StatusContext {
+												context
+												state
+												targetUrl
+												createdAt
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}`
+
+		err := c.graphql.Do(query, map[string]interface{}{
+			"owner":  c.owner,
+			"repo":   c.repo,
+			"number": number,
+			"after":  cursor,
+		}, &resp)
+		if err != nil {
+			return all, fmt.Errorf("paginating check contexts: %w", err)
+		}
+
+		nodes := resp.Repository.PullRequest.Commits.Nodes
+		if len(nodes) == 0 {
+			break
+		}
+		contexts := nodes[len(nodes)-1].Commit.StatusCheckRollup.Contexts
+		all = append(all, contexts.Nodes...)
+		slog.Debug("paginated check contexts",
+			"number", number,
+			"fetched", len(contexts.Nodes),
+			"total", len(all),
+		)
+
+		if !contexts.PageInfo.HasNextPage {
+			break
+		}
+		cursor = contexts.PageInfo.EndCursor
+	}
+
+	return all, nil
 }

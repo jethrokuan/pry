@@ -77,6 +77,7 @@ type PullRequest struct {
 	ChecksPass    *bool
 	ChecksSummary string
 	CheckRuns     []CheckRun
+	ChecksTotal   int // Total number of checks (from API totalCount); 0 means unknown
 
 	// Assignees
 	Assignees []string // User logins assigned to this PR

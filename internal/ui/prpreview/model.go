@@ -385,9 +385,14 @@ func renderCheckRunsDetail(b *strings.Builder, pr *review.PullRequest) {
 	}
 
 	allPassed := len(failed) == 0 && len(running) == 0
+	total := len(passed) + len(skipped) + len(other)
+	// Use ChecksTotal from the API when available (handles pagination).
+	apiTotal := pr.ChecksTotal
+	if apiTotal < total {
+		apiTotal = total
+	}
 	if allPassed {
-		total := len(passed) + len(skipped) + len(other)
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("  ✓ %d/%d checks passed", total, total)) + "\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("  ✓ %d/%d checks passed", total, apiTotal)) + "\n")
 		return
 	}
 
@@ -454,7 +459,11 @@ func renderCleanStatus(b *strings.Builder, pr *review.PullRequest) {
 	var parts []string
 	if len(pr.CheckRuns) > 0 {
 		total := len(pr.CheckRuns)
-		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("✓ %d/%d checks passed", total, total)))
+		apiTotal := pr.ChecksTotal
+		if apiTotal < total {
+			apiTotal = total
+		}
+		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("✓ %d/%d checks passed", total, apiTotal)))
 	} else if pr.ChecksPass != nil && *pr.ChecksPass {
 		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Checks passing"))
 	}
