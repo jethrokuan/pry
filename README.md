@@ -11,6 +11,12 @@ GitHub's `gh` CLI can list and merge PRs, but reviewing with inline line comment
 ## Install
 
 ```bash
+brew install jethrokuan/tap/pry
+```
+
+Or with Go:
+
+```bash
 go install github.com/jethrokuan/pry/cmd@latest
 ```
 

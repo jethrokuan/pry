@@ -21,6 +21,7 @@ brews:
   - repository:
       owner: jethrokuan
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/jethrokuan/pry
     description: Terminal UI for reviewing GitHub pull requests
     license: MIT
