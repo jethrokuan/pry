@@ -17,6 +17,8 @@ import (
 
 	"github.com/jethrokuan/pry/internal/clipboard"
 	"github.com/jethrokuan/pry/internal/diff"
+	"github.com/jethrokuan/pry/internal/git"
+	"github.com/jethrokuan/pry/internal/jj"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/flash"
 	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
@@ -75,6 +77,11 @@ type commentEditedMsg struct {
 
 type viewedFilesMsg struct {
 	viewed map[string]bool
+	err    error
+}
+
+type checkoutMsg struct {
+	branch string
 	err    error
 }
 
@@ -156,6 +163,7 @@ type KeyMap struct {
 	JumpForward   key.Binding
 	CopyLink      key.Binding
 	Suggest       key.Binding
+	Checkout      key.Binding
 }
 
 var keys = KeyMap{
@@ -194,6 +202,7 @@ var keys = KeyMap{
 	JumpForward:   key.NewBinding(key.WithKeys("ctrl+i"), key.WithHelp("ctrl+i", "jump forward")),
 	CopyLink:      key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy link")),
 	Suggest:       key.NewBinding(key.WithKeys("shift+enter"), key.WithHelp("S-enter", "suggest")),
+	Checkout:      key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "checkout PR")),
 }
 
 // Inline comment key bindings (when textarea is active)
@@ -236,6 +245,8 @@ type Model struct {
 	confirmQuit        bool // true when waiting for second quit key to confirm
 	confirmDelete      bool // true when waiting for y/n to confirm comment deletion
 	narrowPrefixActive bool // true when waiting for second key after 'T'
+
+	useJJ bool // true when repo is managed by Jujutsu
 
 	// PR info popup
 	prInfoActive   bool
@@ -297,6 +308,13 @@ func WithMentionableUsers(users []review.MentionableUser) Option {
 func WithCurrentUser(login string) Option {
 	return func(m *Model) {
 		m.currentUser = login
+	}
+}
+
+// WithJujutsu enables Jujutsu-based checkout instead of gh pr checkout.
+func WithJujutsu() Option {
+	return func(m *Model) {
+		m.useJJ = true
 	}
 }
 
@@ -549,6 +567,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.treeDirty = false
 			}
 		}
+
+	case checkoutMsg:
+		if msg.err != nil {
+			return m, flash.ShowMsg{ID: "checkout", Text: fmt.Sprintf("Checkout failed: %v", msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
+		}
+		return m, flash.ShowMsg{ID: "checkout", Text: fmt.Sprintf("Checked out branch %s", msg.branch), Style: flash.StyleSuccess, Expires: 3 * time.Second}.Cmd()
 
 	case markViewedMsg:
 		if msg.err != nil {
@@ -938,6 +962,23 @@ func openBrowser(url string) tea.Cmd {
 	}
 }
 
+// checkoutPR checks out the PR branch locally, using jj or gh depending on
+// whether the repo is Jujutsu-managed.
+func (m Model) checkoutPR() tea.Cmd {
+	prNumber := m.pr.Number
+	branch := m.pr.Branch
+	useJJ := m.useJJ
+	return func() tea.Msg {
+		var err error
+		if useJJ {
+			err = jj.Checkout(branch)
+		} else {
+			err = git.CheckoutPR(prNumber)
+		}
+		return checkoutMsg{branch: branch, err: err}
+	}
+}
+
 func (m *Model) updateDiffContent() {
 	if len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
 		m.nav.diffViewport.SetContent("No files to display")
@@ -1246,7 +1287,7 @@ func helpSections() []helppopup.Section {
 		),
 		helppopup.Bind("Other",
 			keys.ToggleTree, keys.Info, keys.OpenInBrowser, keys.CopyLink,
-			keys.Editor, keys.Help, keys.Back, keys.Quit,
+			keys.Checkout, keys.Editor, keys.Help, keys.Back, keys.Quit,
 		),
 	}
 }

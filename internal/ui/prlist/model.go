@@ -17,6 +17,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/clipboard"
+	"github.com/jethrokuan/pry/internal/git"
+	"github.com/jethrokuan/pry/internal/jj"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/flash"
 	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
@@ -91,6 +93,7 @@ type KeyMap struct {
 	Reopen         key.Binding
 	Merge          key.Binding
 	ReadyForReview key.Binding
+	Checkout       key.Binding
 }
 
 var keys = KeyMap{
@@ -117,6 +120,7 @@ var keys = KeyMap{
 	Reopen:         key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "reopen PR")),
 	Merge:          key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "merge PR")),
 	ReadyForReview: key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "ready for review")),
+	Checkout:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "checkout PR")),
 }
 
 // confirmAction tracks which destructive action is pending confirmation.
@@ -133,6 +137,11 @@ type prActionMsg struct {
 	action   string // human-readable action name for flash
 	prNumber int
 	err      error
+}
+
+type checkoutMsg struct {
+	branch string
+	err    error
 }
 
 // tabState holds per-tab state so each filter tab maintains its own PR list,
@@ -191,6 +200,7 @@ type Model struct {
 	// Confirmation prompt for destructive actions
 	confirm     confirmAction
 	currentUser string // cached login for assign/unassign
+	useJJ       bool   // true when repo is Jujutsu-managed
 
 	// Cached layout dimensions (recomputed on resize via recalcLayout)
 	sidebarWidth int
@@ -201,6 +211,11 @@ type Model struct {
 // tab returns a pointer to the currently active tab state.
 func (m *Model) tab() *tabState {
 	return &m.tabs[m.filterIdx]
+}
+
+// SetJujutsu enables Jujutsu-based checkout instead of gh pr checkout.
+func (m *Model) SetJujutsu(v bool) {
+	m.useJJ = v
 }
 
 // UserIdentityMsg carries the resolved user identity from the app layer.
@@ -394,6 +409,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		flashCmd := flash.ShowMsg{ID: "pr-action", Text: fmt.Sprintf("%s #%d", msg.action, msg.prNumber), Expires: 3 * time.Second}.Cmd()
 		return m, tea.Batch(flashCmd, m.startFetch())
+
+	case checkoutMsg:
+		if msg.err != nil {
+			return m, flash.ShowMsg{ID: "checkout", Text: fmt.Sprintf("Checkout failed: %v", msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
+		}
+		return m, flash.ShowMsg{ID: "checkout", Text: fmt.Sprintf("Checked out branch %s", msg.branch), Style: flash.StyleSuccess, Expires: 3 * time.Second}.Cmd()
 
 	case spinner.TickMsg:
 		if m.tab().loading || m.hasEnrichmentPending() {
@@ -597,6 +618,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					err := svc.MarkReadyForReview(context.Background(), nodeID)
 					return prActionMsg{action: "Marked ready for review", prNumber: pr.Number, err: err}
 				}
+			}
+		case key.Matches(msg, keys.Checkout):
+			if t.hasCursor() {
+				pr := t.prs[t.cur()]
+				branch := pr.Branch
+				useJJ := m.useJJ
+				return m, tea.Batch(
+					flash.ShowMsg{ID: "checkout", Text: "Checking out " + branch + "…", Style: flash.StyleSpinner}.Cmd(),
+					func() tea.Msg {
+						var err error
+						if useJJ {
+							err = jj.Checkout(branch)
+						} else {
+							err = git.CheckoutPR(pr.Number)
+						}
+						return checkoutMsg{branch: branch, err: err}
+					},
+				)
 			}
 		case key.Matches(msg, keys.Help):
 			m.showHelp = true
@@ -816,7 +855,7 @@ func helpSections() []helppopup.Section {
 		helppopup.Bind("Navigation", keys.Up, keys.Down, keys.HalfPageDown, keys.HalfPageUp, keys.Select),
 		helppopup.Bind("Tabs & Filters", keys.NextTab, keys.PrevTab, keys.EditFilter),
 		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp),
-		helppopup.Bind("PR Actions", keys.Assign, keys.Unassign, keys.Close, keys.Reopen, keys.Merge, keys.ReadyForReview),
+		helppopup.Bind("PR Actions", keys.Assign, keys.Unassign, keys.Close, keys.Reopen, keys.Merge, keys.ReadyForReview, keys.Checkout),
 		helppopup.Bind("Copy", keys.CopyNumber, keys.CopyURL),
 		helppopup.Bind("Other", keys.OpenInBrowser, keys.Refresh, keys.Help, keys.Quit),
 	}

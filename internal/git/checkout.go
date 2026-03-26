@@ -19,3 +19,13 @@ func GetRepoInfo() (owner, repo string, err error) {
 	}
 	return parts[0], parts[1], nil
 }
+
+// CheckoutPR checks out a PR branch locally using `gh pr checkout`.
+func CheckoutPR(prNumber int) error {
+	cmd := exec.Command("gh", "pr", "checkout", fmt.Sprintf("%d", prNumber))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}

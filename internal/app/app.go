@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/config"
+	"github.com/jethrokuan/pry/internal/jj"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/flash"
 	"github.com/jethrokuan/pry/internal/ui/diffview"
@@ -46,18 +47,23 @@ type Model struct {
 
 	// State
 	selectedPR *review.PullRequest
-	initialPR  int // PR number passed via CLI argument (0 = none)
+	initialPR  int  // PR number passed via CLI argument (0 = none)
+	useJJ      bool // true when repo is Jujutsu-managed
 }
 
 // New creates the application model.
 func New(svc review.Service, cfg config.Config, filters []review.PRFilter) Model {
+	useJJ := jj.IsRepo()
+	pl := prlist.New(svc, filters)
+	pl.SetJujutsu(useJJ)
 	return Model{
 		svc:     svc,
 		cfg:     cfg,
 		filters: filters,
 		screen:  ScreenPRList,
-		prList:  prlist.New(svc, filters),
+		prList:  pl,
 		flash:   flash.New(),
+		useJJ:   useJJ,
 	}
 }
 
@@ -65,12 +71,16 @@ func New(svc review.Service, cfg config.Config, filters []review.PRFilter) Model
 func NewWithPR(svc review.Service, cfg config.Config, prNumber int, filters []review.PRFilter) Model {
 	pr := &review.PullRequest{Number: prNumber}
 	pr.StartReview()
+	useJJ := jj.IsRepo()
+	pl := prlist.New(svc, filters)
+	pl.SetJujutsu(useJJ)
 	m := Model{
 		svc:        svc,
 		cfg:        cfg,
+		useJJ:      useJJ,
 		filters:    filters,
 		screen:     ScreenDiffView,
-		prList:     prlist.New(svc, filters),
+		prList:     pl,
 		flash:      flash.New(),
 		selectedPR: pr,
 		initialPR:  prNumber,
@@ -91,6 +101,9 @@ func (m Model) diffviewOpts() []diffview.Option {
 	}
 	if m.cfg.FileTree.OwnerFilter != nil && !*m.cfg.FileTree.OwnerFilter {
 		opts = append(opts, diffview.WithOwnerFilterDisabled())
+	}
+	if m.useJJ {
+		opts = append(opts, diffview.WithJujutsu())
 	}
 	return opts
 }

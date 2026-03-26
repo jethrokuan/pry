@@ -228,6 +228,12 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key.Matches(msg, keys.CopyLink):
 		return m, m.copyForgeLink()
 
+	case key.Matches(msg, keys.Checkout):
+		return m, tea.Batch(
+			flash.ShowMsg{ID: "checkout", Text: "Checking out " + m.pr.Branch + "…", Style: flash.StyleSpinner}.Cmd(),
+			m.checkoutPR(),
+		)
+
 	case key.Matches(msg, keys.OpenInBrowser):
 		url := m.pr.URL + "/changes"
 		return m, openBrowser(url)
