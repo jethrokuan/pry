@@ -90,6 +90,7 @@ PR List → Diff View → Submit Review
 | `c` / `C` | Next/previous comment |
 | `t` | Toggle file tree |
 | `enter` | New comment / open comments |
+| `shift+enter` | New suggestion |
 | `space` | Start visual selection |
 | `r` | Reply to comment |
 | `tab` | Toggle fold (comments/hunks) |
@@ -128,7 +129,6 @@ When a comment is selected:
 | Key | Action |
 |-----|--------|
 | `ctrl+s` | Save comment |
-| `ctrl+t` | Toggle comment / suggestion mode |
 | `ctrl+e` | Open in `$EDITOR` |
 | `ctrl+v` | Paste image from clipboard |
 | `esc` | Cancel |
@@ -144,7 +144,7 @@ When a comment is selected:
 
 ## Code Suggestions
 
-Press `enter` on a diff line to open the comment editor, then `ctrl+t` to switch to suggestion mode. For multi-line suggestions, use `space` to start a visual selection first. The editor opens pre-filled with the selected code. Edit the code to what it should be — on submission it gets wrapped in a GitHub suggestion block:
+Press `shift+enter` on a diff line to open the comment editor in suggestion mode, pre-filled with the original code. For multi-line suggestions, use `space` to start a visual selection first. Edit the code to what it should be — on submission it gets wrapped in a GitHub suggestion block:
 
 ````markdown
 ```suggestion

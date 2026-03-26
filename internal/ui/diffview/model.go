@@ -177,6 +177,7 @@ type KeyMap struct {
 	JumpBack      key.Binding
 	JumpForward   key.Binding
 	CopyLink      key.Binding
+	Suggest       key.Binding
 }
 
 var keys = KeyMap{
@@ -214,19 +215,18 @@ var keys = KeyMap{
 	JumpBack:      key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "jump back")),
 	JumpForward:   key.NewBinding(key.WithKeys("ctrl+i"), key.WithHelp("ctrl+i", "jump forward")),
 	CopyLink:      key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy link")),
+	Suggest:       key.NewBinding(key.WithKeys("shift+enter"), key.WithHelp("S-enter", "suggest")),
 }
 
 // Inline comment key bindings (when textarea is active)
 var inlineKeys = struct {
 	Save       key.Binding
 	Cancel     key.Binding
-	ToggleMode key.Binding
 	OpenEditor key.Binding
 	PasteImage key.Binding
 }{
 	Save:       key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "save")),
 	Cancel:     key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "cancel")),
-	ToggleMode: key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("ctrl+t", "toggle mode")),
 	OpenEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "open $EDITOR")),
 	PasteImage: key.NewBinding(key.WithKeys("ctrl+v"), key.WithHelp("ctrl+v", "paste image")),
 }

@@ -556,7 +556,7 @@ func (m Model) openExternalEditorForComment() tea.Cmd {
 	})
 }
 
-func (m *Model) startComment() tea.Cmd {
+func (m *Model) startComment(mode commentMode) tea.Cmd {
 	if len(m.nav.diffLines) == 0 || m.nav.cursor.LineIdx >= len(m.nav.diffLines) {
 		return nil
 	}
@@ -571,10 +571,16 @@ func (m *Model) startComment() tea.Cmd {
 		}
 		startLine, _ := lineAndSide(m.nav.diffLines[s.LineIdx])
 		endLine, endSide := lineAndSide(m.nav.diffLines[e.LineIdx])
+		// Collect code content from selected lines for suggestion mode.
+		var lines []string
+		for i := s.LineIdx; i <= e.LineIdx; i++ {
+			lines = append(lines, m.nav.diffLines[i].content)
+		}
+		suggestion := strings.Join(lines, "\n")
 		m.nav.visualMode = false
-		return m.openInlineComment(path, endLine, startLine, endSide, commentModeComment, "")
+		return m.openInlineComment(path, endLine, startLine, endSide, mode, suggestion)
 	}
-	return m.openInlineComment(path, line, 0, side, commentModeComment, "")
+	return m.openInlineComment(path, line, 0, side, mode, dl.content)
 }
 
 // --- Image paste support ---

@@ -356,7 +356,10 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			}
 		}
 		// No comments on this line — create a new comment
-		return m, m.startComment()
+		return m, m.startComment(commentModeComment)
+
+	case key.Matches(msg, keys.Suggest):
+		return m, m.startComment(commentModeSuggestion)
 
 	// Dedicated navigation keys
 	case key.Matches(msg, keys.NextHunk):

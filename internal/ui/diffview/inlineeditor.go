@@ -194,17 +194,6 @@ func (e InlineEditor) HandleKey(msg tea.KeyPressMsg) (InlineEditor, tea.Cmd, any
 		e.Close()
 		return e, nil, saveMsg
 
-	case key.Matches(msg, inlineKeys.ToggleMode):
-		if e.mode == commentModeComment {
-			e.mode = commentModeSuggestion
-			if e.suggestion != "" && e.ta.Value() == "" {
-				e.ta.SetValue(e.suggestion)
-			}
-		} else {
-			e.mode = commentModeComment
-		}
-		return e, nil, nil
-
 	case key.Matches(msg, inlineKeys.OpenEditor):
 		return e, nil, inlineEditorOpenEditorMsg{}
 
@@ -369,7 +358,7 @@ func (e InlineEditor) View() string {
 		Padding(0, 1).
 		Width(e.width - 2)
 
-	helpText := "ctrl+s save  ctrl+e $EDITOR  ctrl+t toggle mode  esc cancel"
+	helpText := "ctrl+s save  ctrl+e $EDITOR  esc cancel"
 	if e.confirmDiscard {
 		helpText = "Press esc again to discard  ctrl+s save"
 	}
