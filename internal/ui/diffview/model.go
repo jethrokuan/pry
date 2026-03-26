@@ -111,9 +111,9 @@ type imageUploadedMsg struct {
 
 type flashExpiredMsg struct{}
 
-// MentionableUsersMsg carries mentionable usernames from the app layer.
+// MentionableUsersMsg carries mentionable users from the app layer.
 type MentionableUsersMsg struct {
-	Users []string
+	Users []review.MentionableUser
 }
 
 // UserIdentityMsg carries the resolved user identity from the app layer.
@@ -310,8 +310,8 @@ func WithUserIdentity(id *review.UserIdentity) Option {
 	}
 }
 
-// WithMentionableUsers seeds the @-mention autocomplete with pre-loaded usernames.
-func WithMentionableUsers(users []string) Option {
+// WithMentionableUsers seeds the @-mention autocomplete with pre-loaded users.
+func WithMentionableUsers(users []review.MentionableUser) Option {
 	return func(m *Model) {
 		if len(users) > 0 {
 			m.editor.SetMentionUsers(users)

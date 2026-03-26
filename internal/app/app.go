@@ -34,7 +34,7 @@ type Model struct {
 	width            int
 	height           int
 	userIdentity     *review.UserIdentity
-	mentionableUsers []string
+	mentionableUsers []review.MentionableUser
 
 	// Screen models
 	prList   prlist.Model
@@ -103,7 +103,7 @@ type userIdentityMsg struct {
 
 // mentionableUsersMsg carries the result of the async mentionable users fetch.
 type mentionableUsersMsg struct {
-	users []string
+	users []review.MentionableUser
 	err   error
 }
 

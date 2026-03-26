@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
+
+	"github.com/jethrokuan/pry/internal/review"
 )
 
 // mentionTrigger extracts the @prefix being typed at the cursor position.
@@ -56,15 +58,16 @@ func mentionTrigger(ta textarea.Model) (string, int) {
 	return prefix, atIdx
 }
 
-// filterMentionUsers returns users matching the prefix (case-insensitive).
-func filterMentionUsers(users []string, prefix string) []string {
+// filterMentionUsers returns users matching the prefix by login or name (case-insensitive).
+func filterMentionUsers(users []review.MentionableUser, prefix string) []review.MentionableUser {
 	if len(users) == 0 {
 		return nil
 	}
 	prefix = strings.ToLower(prefix)
-	var matches []string
+	var matches []review.MentionableUser
 	for _, u := range users {
-		if strings.HasPrefix(strings.ToLower(u), prefix) {
+		if strings.HasPrefix(strings.ToLower(u.Login), prefix) ||
+			(u.Name != "" && strings.HasPrefix(strings.ToLower(u.Name), prefix)) {
 			matches = append(matches, u)
 		}
 	}

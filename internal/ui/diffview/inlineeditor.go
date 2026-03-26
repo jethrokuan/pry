@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
@@ -53,9 +54,9 @@ type InlineEditor struct {
 	// @ mention autocomplete
 	mentionActive  bool
 	mentionPrefix  string
-	mentionAll     []string // all mentionable usernames
-	mentionMatches []string // filtered matches for current prefix
-	mentionCursor  int      // selected index in mentionMatches
+	mentionAll     []review.MentionableUser // all mentionable users
+	mentionMatches []review.MentionableUser // filtered matches for current prefix
+	mentionCursor  int                      // selected index in mentionMatches
 }
 
 // IsActive returns true if the inline editor is open.
@@ -120,8 +121,8 @@ func (e *InlineEditor) Close() {
 	e.mentionActive = false
 }
 
-// SetMentionUsers sets the list of mentionable usernames for autocomplete.
-func (e *InlineEditor) SetMentionUsers(users []string) {
+// SetMentionUsers sets the list of mentionable users for autocomplete.
+func (e *InlineEditor) SetMentionUsers(users []review.MentionableUser) {
 	e.mentionAll = users
 }
 
@@ -283,7 +284,7 @@ func (e *InlineEditor) completeMention() {
 		return
 	}
 
-	username := e.mentionMatches[e.mentionCursor]
+	login := e.mentionMatches[e.mentionCursor].Login
 	_, atIdx := mentionTrigger(e.ta)
 	if atIdx < 0 {
 		return
@@ -302,9 +303,9 @@ func (e *InlineEditor) completeMention() {
 	}
 	cursorOffset += col
 
-	// Replace @prefix with @username + space
-	newValue := value[:atIdx] + "@" + username + " " + value[cursorOffset:]
-	newCursorPos := atIdx + 1 + len(username) + 1
+	// Replace @prefix with @login + space
+	newValue := value[:atIdx] + "@" + login + " " + value[cursorOffset:]
+	newCursorPos := atIdx + 1 + len(login) + 1
 
 	e.ta.SetValue(newValue)
 	e.setCursorToOffset(newCursorPos)
@@ -398,7 +399,10 @@ func (e InlineEditor) renderMentionDropdown() string {
 
 	var rows []string
 	for i, u := range matches {
-		label := fmt.Sprintf("@%s", u)
+		label := "@" + u.Login
+		if u.Name != "" {
+			label = fmt.Sprintf("%s — @%s", u.Name, u.Login)
+		}
 		if i == e.mentionCursor {
 			rows = append(rows, selected.Render(label))
 		} else {

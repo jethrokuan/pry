@@ -55,7 +55,7 @@ func (s *stubService) FetchViewedFiles(_ context.Context, _ string) (map[string]
 }
 func (s *stubService) MarkFileAsViewed(_ context.Context, _, _ string) error   { return nil }
 func (s *stubService) UnmarkFileAsViewed(_ context.Context, _, _ string) error { return nil }
-func (s *stubService) ListMentionableUsers(_ context.Context) ([]string, error) {
+func (s *stubService) ListMentionableUsers(_ context.Context) ([]review.MentionableUser, error) {
 	return nil, nil
 }
 func (s *stubService) UploadImage(_ context.Context, _ []byte, _ string) (string, error) {

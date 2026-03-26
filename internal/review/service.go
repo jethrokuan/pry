@@ -12,6 +12,12 @@ type UserIdentity struct {
 	Teams []string // e.g. ["@org/team1", "@org/team2"]
 }
 
+// MentionableUser represents a user that can be @mentioned in the repo.
+type MentionableUser struct {
+	Login string // GitHub username (e.g. "octocat")
+	Name  string // Display name (e.g. "The Octocat"), may be empty
+}
+
 // CacheInvalidator is implemented by services that support cache invalidation.
 type CacheInvalidator interface {
 	// InvalidateListPRs clears all cached PR list and detail results.
@@ -86,8 +92,8 @@ type Service interface {
 	// UnassignPR removes the given user as an assignee from a PR.
 	UnassignPR(ctx context.Context, prNumber int, login string) error
 
-	// ListMentionableUsers returns usernames that can be @mentioned in the repo.
-	ListMentionableUsers(ctx context.Context) ([]string, error)
+	// ListMentionableUsers returns users that can be @mentioned in the repo.
+	ListMentionableUsers(ctx context.Context) ([]MentionableUser, error)
 
 	// UploadImage uploads an image and returns a URL suitable for embedding in markdown.
 	UploadImage(ctx context.Context, data []byte, filename string) (string, error)
