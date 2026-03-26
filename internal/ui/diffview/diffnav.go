@@ -38,8 +38,8 @@ type DiffNav struct {
 
 	// Visual selection
 	visualMode  bool
-	visualStart int
-	visualEnd   int
+	visualStart CursorTarget
+	visualEnd   CursorTarget
 
 	// Diff line mapping
 	diffLines []diffLineInfo

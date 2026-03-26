@@ -287,8 +287,8 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 		for _, line := range hunk.Lines {
 			isCurrent := m.nav.focus == FocusDiff && lineIdx == m.nav.cursor.LineIdx
 			isVisualSelected := m.nav.visualMode && m.nav.focus == FocusDiff &&
-				lineIdx >= min(m.nav.visualStart, m.nav.visualEnd) &&
-				lineIdx <= max(m.nav.visualStart, m.nav.visualEnd)
+				lineIdx >= min(m.nav.visualStart.LineIdx, m.nav.visualEnd.LineIdx) &&
+				lineIdx <= max(m.nav.visualStart.LineIdx, m.nav.visualEnd.LineIdx)
 
 			highlighted := isCurrent || isVisualSelected
 

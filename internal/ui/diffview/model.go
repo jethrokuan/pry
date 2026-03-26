@@ -194,7 +194,7 @@ var keys = KeyMap{
 	DeleteComment: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete comment")),
 	EditComment:   key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit comment")),
 	Reply:         key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reply")),
-	SelectLine:    key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "select")),
+	SelectLine:    key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "select")),
 	Submit:        key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "submit review")),
 	ToggleComment: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle fold")),
 	FoldComment:   key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("S-tab", "toggle all folds")),
@@ -934,8 +934,8 @@ func (m *Model) copyForgeLink() tea.Cmd {
 	if m.nav.cursor.LineIdx < len(m.nav.diffLines) {
 		if m.nav.visualMode {
 			// Selection active — compute line range
-			startIdx := min(m.nav.visualStart, m.nav.visualEnd)
-			endIdx := max(m.nav.visualStart, m.nav.visualEnd)
+			startIdx := min(m.nav.visualStart.LineIdx, m.nav.visualEnd.LineIdx)
+			endIdx := max(m.nav.visualStart.LineIdx, m.nav.visualEnd.LineIdx)
 			startLine := m.resolveLineNumber(startIdx)
 			endLine := m.resolveLineNumber(endIdx)
 			if startLine > 0 && endLine > 0 {

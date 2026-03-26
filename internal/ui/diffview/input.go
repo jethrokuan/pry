@@ -306,7 +306,7 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if m.nav.cursor.LineIdx > 0 {
 			m.nav.cursor.LineIdx--
 			if m.nav.visualMode {
-				m.nav.visualEnd = m.nav.cursor.LineIdx
+				m.nav.visualEnd = m.nav.cursor
 			}
 			m.syncViewportToCursor()
 		}
@@ -314,7 +314,7 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if m.nav.cursor.LineIdx < len(m.nav.diffLines)-1 {
 			m.nav.cursor.LineIdx++
 			if m.nav.visualMode {
-				m.nav.visualEnd = m.nav.cursor.LineIdx
+				m.nav.visualEnd = m.nav.cursor
 			}
 			m.syncViewportToCursor()
 		}
@@ -324,7 +324,7 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.nav.cursor.LineIdx = 0
 		}
 		if m.nav.visualMode {
-			m.nav.visualEnd = m.nav.cursor.LineIdx
+			m.nav.visualEnd = m.nav.cursor
 		}
 		m.syncViewportToCursor()
 	case key.Matches(msg, keys.PageDown):
@@ -333,7 +333,7 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.nav.cursor.LineIdx = len(m.nav.diffLines) - 1
 		}
 		if m.nav.visualMode {
-			m.nav.visualEnd = m.nav.cursor.LineIdx
+			m.nav.visualEnd = m.nav.cursor
 		}
 		m.syncViewportToCursor()
 

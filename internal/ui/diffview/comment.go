@@ -565,9 +565,12 @@ func (m *Model) startComment() tea.Cmd {
 	line, side := lineAndSide(dl)
 
 	if m.nav.visualMode {
-		s, e := min(m.nav.visualStart, m.nav.visualEnd), max(m.nav.visualStart, m.nav.visualEnd)
-		startLine, _ := lineAndSide(m.nav.diffLines[s])
-		endLine, endSide := lineAndSide(m.nav.diffLines[e])
+		s, e := m.nav.visualStart, m.nav.visualEnd
+		if s.LineIdx > e.LineIdx {
+			s, e = e, s
+		}
+		startLine, _ := lineAndSide(m.nav.diffLines[s.LineIdx])
+		endLine, endSide := lineAndSide(m.nav.diffLines[e.LineIdx])
 		m.nav.visualMode = false
 		return m.openInlineComment(path, endLine, startLine, endSide, commentModeComment, "")
 	}

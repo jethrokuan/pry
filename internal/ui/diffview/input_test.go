@@ -327,13 +327,13 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m.nav.focus = FocusDiff
 			m.nav.cursor.LineIdx = 1
 			m.nav.visualMode = true
-			m.nav.visualStart = 1
-			m.nav.visualEnd = 1
+			m.nav.visualStart = CursorTarget{Kind: CursorLine, LineIdx: 1}
+			m.nav.visualEnd = CursorTarget{Kind: CursorLine, LineIdx: 1}
 
 			// Move down in visual mode — should extend selection
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-			gomega.Expect(m.nav.visualEnd).To(gomega.Equal(2))
-			gomega.Expect(m.nav.visualStart).To(gomega.Equal(1))
+			gomega.Expect(m.nav.visualEnd.LineIdx).To(gomega.Equal(2))
+			gomega.Expect(m.nav.visualStart.LineIdx).To(gomega.Equal(1))
 		})
 
 		ginkgo.It("should extend visual selection when moving up", func() {
@@ -341,20 +341,20 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m.nav.focus = FocusDiff
 			m.nav.cursor.LineIdx = 3
 			m.nav.visualMode = true
-			m.nav.visualStart = 3
-			m.nav.visualEnd = 3
+			m.nav.visualStart = CursorTarget{Kind: CursorLine, LineIdx: 3}
+			m.nav.visualEnd = CursorTarget{Kind: CursorLine, LineIdx: 3}
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
-			gomega.Expect(m.nav.visualEnd).To(gomega.Equal(2))
-			gomega.Expect(m.nav.visualStart).To(gomega.Equal(3))
+			gomega.Expect(m.nav.visualEnd.LineIdx).To(gomega.Equal(2))
+			gomega.Expect(m.nav.visualStart.LineIdx).To(gomega.Equal(3))
 		})
 
 		ginkgo.It("should exit visual mode on esc", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
 			m.nav.visualMode = true
-			m.nav.visualStart = 1
-			m.nav.visualEnd = 3
+			m.nav.visualStart = CursorTarget{Kind: CursorLine, LineIdx: 1}
+			m.nav.visualEnd = CursorTarget{Kind: CursorLine, LineIdx: 3}
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 			gomega.Expect(m.nav.visualMode).To(gomega.BeFalse())

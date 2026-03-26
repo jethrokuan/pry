@@ -197,10 +197,10 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if m.nav.focus == FocusDiff {
 			if !m.nav.visualMode {
 				m.nav.visualMode = true
-				m.nav.visualStart = m.nav.cursor.LineIdx
-				m.nav.visualEnd = m.nav.cursor.LineIdx
+				m.nav.visualStart = m.nav.cursor
+				m.nav.visualEnd = m.nav.cursor
 			} else {
-				m.nav.visualEnd = m.nav.cursor.LineIdx
+				m.nav.visualEnd = m.nav.cursor
 			}
 			m.updateDiffContent()
 		}
