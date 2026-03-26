@@ -1,6 +1,8 @@
 package diffview
 
 import (
+	"time"
+
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 )
@@ -237,7 +239,7 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.NarrowPrefix):
 		m.narrowPrefixActive = true
-		return m, emitFlash("diffview", "T: [o]wner [f]ilter [x]clear")
+		return m, FlashMsg{ID: "diffview", Text: "T: [o]wner [f]ilter [x]clear", Expires: 1500 * time.Millisecond}.Cmd()
 
 	case key.Matches(msg, keys.JumpBack):
 		return m.jumpBack()
