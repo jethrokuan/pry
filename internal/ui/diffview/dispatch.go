@@ -125,14 +125,14 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 		m.updateDiffContent()
 		return m, nil, true
 	case key.Matches(msg, keys.Enter):
-		m.openCommentPopup()
-		return m, nil, true
+		m.nav.cursor = m.nav.cursor.AsLine()
+		return m, m.startComment(commentModeComment), true
 	}
 
 	switch {
-	case key.Matches(msg, keys.Reply):
-		m.nav.cursor = m.nav.cursor.AsLine()
-		return m, m.startComment(commentModeComment), true
+	case key.Matches(msg, keys.ViewComment):
+		m.openCommentPopup()
+		return m, nil, true
 	case key.Matches(msg, keys.EditComment):
 		newM, cmd := m.editSelectedComment()
 		return newM, cmd, true
@@ -257,6 +257,16 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Submit):
 		return m, func() tea.Msg { return SubmitReviewMsg{} }
+
+	case key.Matches(msg, keys.Refresh):
+		if m.refreshing {
+			return m, nil
+		}
+		m.refreshing = true
+		return m, tea.Batch(
+			flash.ShowMsg{ID: "refresh", Text: "Refreshing…", Style: flash.StyleSpinner}.Cmd(),
+			m.refreshCmd(),
+		)
 
 	// Dedicated navigation keys (work in both tree and diff focus)
 	case key.Matches(msg, keys.NextFile):

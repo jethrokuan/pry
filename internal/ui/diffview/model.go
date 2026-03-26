@@ -80,6 +80,13 @@ type viewedFilesMsg struct {
 	err    error
 }
 
+type refreshDoneMsg struct {
+	files    []diff.DiffFile
+	comments []review.Comment
+	viewed   map[string]bool
+	err      error
+}
+
 type checkoutMsg struct {
 	branch string
 	err    error
@@ -141,7 +148,7 @@ type KeyMap struct {
 	// DeleteComment and EditComment are only active in comment-select mode
 	DeleteComment key.Binding
 	EditComment   key.Binding
-	Reply         key.Binding
+	ViewComment   key.Binding
 	SelectLine    key.Binding
 	Submit        key.Binding
 	ToggleComment key.Binding
@@ -164,6 +171,7 @@ type KeyMap struct {
 	CopyLink      key.Binding
 	Suggest       key.Binding
 	Checkout      key.Binding
+	Refresh       key.Binding
 }
 
 var keys = KeyMap{
@@ -180,7 +188,7 @@ var keys = KeyMap{
 	PrevComment:   key.NewBinding(key.WithKeys("C"), key.WithHelp("C", "prev comment")),
 	DeleteComment: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete comment")),
 	EditComment:   key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit comment")),
-	Reply:         key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reply")),
+	ViewComment:   key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "view comment")),
 	SelectLine:    key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "select")),
 	Submit:        key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "submit review")),
 	ToggleComment: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle fold")),
@@ -203,6 +211,7 @@ var keys = KeyMap{
 	CopyLink:      key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy link")),
 	Suggest:       key.NewBinding(key.WithKeys("shift+enter"), key.WithHelp("S-enter", "suggest")),
 	Checkout:      key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "checkout PR")),
+	Refresh:       key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 }
 
 // Inline comment key bindings (when textarea is active)
@@ -236,9 +245,10 @@ type Model struct {
 
 	width    int
 	height   int
-	loading  bool
-	spinner  spinner.Model
-	showHelp bool
+	loading    bool
+	refreshing bool // true while background refresh is in progress
+	spinner    spinner.Model
+	showHelp   bool
 
 	loadErr error // fatal load error — blocks rendering
 
@@ -407,6 +417,46 @@ func (m Model) loadPendingReview() tea.Cmd {
 	}
 }
 
+// refreshCmd fetches diff files, comments, and viewed files in parallel,
+// returning a single refreshDoneMsg when all complete.
+func (m Model) refreshCmd() tea.Cmd {
+	svc := m.svc
+	prNumber := m.pr.Number
+	prNodeID := m.pr.NodeID
+	return func() tea.Msg {
+		ctx := context.Background()
+		var result refreshDoneMsg
+
+		// Fetch files
+		files, err := svc.FetchDiffFiles(ctx, prNumber)
+		if err != nil {
+			result.err = fmt.Errorf("diff: %w", err)
+			return result
+		}
+		result.files = files
+
+		// Fetch comments
+		comments, err := svc.FetchComments(ctx, prNumber)
+		if err != nil {
+			result.err = fmt.Errorf("comments: %w", err)
+			return result
+		}
+		result.comments = comments
+
+		// Fetch viewed files
+		if prNodeID != "" {
+			viewed, err := svc.FetchViewedFiles(ctx, prNodeID)
+			if err != nil {
+				result.err = fmt.Errorf("viewed: %w", err)
+				return result
+			}
+			result.viewed = viewed
+		}
+
+		return result
+	}
+}
+
 // addReviewCommentCmd adds a comment to the pending review. The cached
 // reviewNodeID is passed as a fast-path hint; the service falls back to
 // fetch-or-create if the hint is empty or stale.
@@ -567,6 +617,30 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.treeDirty = false
 			}
 		}
+
+	case refreshDoneMsg:
+		m.refreshing = false
+		if msg.err != nil {
+			return m, flash.ShowMsg{ID: "refresh", Text: "Refresh failed: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
+		}
+		// Update diff files
+		m.files = msg.files
+		m.filter.recompute(m.files)
+		m.nav.cachedTree = buildTree(m.files, m.filter.includedFiles)
+		m.nav.rebuildTreeRows()
+		m.nav.buildDiffLines(m.files)
+		m.treeDirty = true
+		// Update comments (preserves local pending comments via setComments)
+		m.setComments(msg.comments)
+		// Update viewed files
+		if msg.viewed != nil {
+			for path := range msg.viewed {
+				m.pendingReview.ViewedFiles[path] = true
+			}
+		}
+		m.updateViewports()
+		m.updateDiffContent()
+		return m, flash.ShowMsg{ID: "refresh", Text: "Refreshed", Style: flash.StyleSuccess, Expires: 2 * time.Second}.Cmd()
 
 	case checkoutMsg:
 		if msg.err != nil {
@@ -1283,10 +1357,10 @@ func helpSections() []helppopup.Section {
 			keys.ToggleComment, keys.FoldComment, keys.Submit,
 		),
 		helppopup.Bind("Comment Selection",
-			keys.Reply, keys.EditComment, keys.DeleteComment,
+			keys.ViewComment, keys.EditComment, keys.DeleteComment,
 		),
 		helppopup.Bind("Other",
-			keys.ToggleTree, keys.Info, keys.OpenInBrowser, keys.CopyLink,
+			keys.ToggleTree, keys.Info, keys.Refresh, keys.OpenInBrowser, keys.CopyLink,
 			keys.Checkout, keys.Editor, keys.Help, keys.Back, keys.Quit,
 		),
 	}
