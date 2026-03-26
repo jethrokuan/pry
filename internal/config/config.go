@@ -132,6 +132,7 @@ func load(path *string) Config {
 func DefaultFilters() []FilterConfig {
 	return []FilterConfig{
 		{Name: "My PRs", Qualifier: "author:@me"},
+		{Name: "Assigned to Me", Qualifier: "assignee:@me"},
 		{Name: "Needs My Review", Qualifier: "review-requested:@me draft:false"},
 		{Name: "Reviewed, Not Approved", Qualifier: "reviewed-by:@me -review:approved"},
 	}

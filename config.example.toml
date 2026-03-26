@@ -38,6 +38,7 @@
 #
 # Default filters (used when none are configured):
 #   "My PRs"                    author:@me
+#   "Assigned to Me"            assignee:@me
 #   "Needs My Review"           review-requested:@me draft:false
 #   "Reviewed, Not Approved"    reviewed-by:@me -review:approved
 #
