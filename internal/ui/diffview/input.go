@@ -7,6 +7,8 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/jethrokuan/pry/internal/ui/components/flash"
 )
 
 // --- Tree key handling ---
@@ -274,7 +276,7 @@ func (m *Model) moveToNextFile() tea.Cmd {
 			m.nav.treeCursor = idx
 			m.onTreeCursorChanged()
 			if idx <= start {
-				return FlashMsg{ID: "diffview", Text: "Wrapped to first file", Expires: 1500 * time.Millisecond}.Cmd()
+				return flash.ShowMsg{ID: "diffview", Text: "Wrapped to first file", Expires: 1500 * time.Millisecond}.Cmd()
 			}
 			return nil
 		}
@@ -293,7 +295,7 @@ func (m *Model) moveToPrevFile() tea.Cmd {
 			m.nav.treeCursor = idx
 			m.onTreeCursorChanged()
 			if idx >= start {
-				return FlashMsg{ID: "diffview", Text: "Wrapped to last file", Expires: 1500 * time.Millisecond}.Cmd()
+				return flash.ShowMsg{ID: "diffview", Text: "Wrapped to last file", Expires: 1500 * time.Millisecond}.Cmd()
 			}
 			return nil
 		}
@@ -440,9 +442,9 @@ func (m *Model) navigateFile(forward bool) tea.Cmd {
 	wrapped := (forward && idx <= start) || (!forward && idx >= start)
 	if wrapped {
 		if forward {
-			return FlashMsg{ID: "diffview", Text: "Wrapped to first file", Expires: 1500 * time.Millisecond}.Cmd()
+			return flash.ShowMsg{ID: "diffview", Text: "Wrapped to first file", Expires: 1500 * time.Millisecond}.Cmd()
 		}
-		return FlashMsg{ID: "diffview", Text: "Wrapped to last file", Expires: 1500 * time.Millisecond}.Cmd()
+		return flash.ShowMsg{ID: "diffview", Text: "Wrapped to last file", Expires: 1500 * time.Millisecond}.Cmd()
 	}
 	return nil
 }
@@ -471,9 +473,9 @@ func (m *Model) navigateComment(forward, crossFile bool) tea.Cmd {
 		wrapped := (forward && idx <= start) || (!forward && idx >= start)
 		if wrapped {
 			if forward {
-				return FlashMsg{ID: "diffview", Text: "Wrapped to first comment", Expires: 1500 * time.Millisecond}.Cmd()
+				return flash.ShowMsg{ID: "diffview", Text: "Wrapped to first comment", Expires: 1500 * time.Millisecond}.Cmd()
 			}
-			return FlashMsg{ID: "diffview", Text: "Wrapped to last comment", Expires: 1500 * time.Millisecond}.Cmd()
+			return flash.ShowMsg{ID: "diffview", Text: "Wrapped to last comment", Expires: 1500 * time.Millisecond}.Cmd()
 		}
 		return nil
 	}
@@ -510,7 +512,7 @@ func (m *Model) navigateCommentToFile(forward bool) tea.Cmd {
 		return true
 	})
 	if idx < 0 {
-		return FlashMsg{ID: "diffview", Text: "No comments found", Expires: 1500 * time.Millisecond}.Cmd()
+		return flash.ShowMsg{ID: "diffview", Text: "No comments found", Expires: 1500 * time.Millisecond}.Cmd()
 	}
 	// m.nav.cursor.FileIdx and diffLines are already set to the found file by the match function
 	m.nav.cursor.LineIdx = m.findCommentedDiffLine(m.files[idx].Path, forward)
@@ -522,9 +524,9 @@ func (m *Model) navigateCommentToFile(forward bool) tea.Cmd {
 	wrapped := (forward && idx <= start) || (!forward && idx >= start)
 	if wrapped {
 		if forward {
-			return FlashMsg{ID: "diffview", Text: "Wrapped to first commented file", Expires: 1500 * time.Millisecond}.Cmd()
+			return flash.ShowMsg{ID: "diffview", Text: "Wrapped to first commented file", Expires: 1500 * time.Millisecond}.Cmd()
 		}
-		return FlashMsg{ID: "diffview", Text: "Wrapped to last commented file", Expires: 1500 * time.Millisecond}.Cmd()
+		return flash.ShowMsg{ID: "diffview", Text: "Wrapped to last commented file", Expires: 1500 * time.Millisecond}.Cmd()
 	}
 	return nil
 }
@@ -646,9 +648,9 @@ func (m *Model) navigateHunkCrossFile(forward bool) tea.Cmd {
 	wrapped := (forward && nextIdx <= oldIdx) || (!forward && nextIdx >= oldIdx)
 	if wrapped {
 		if forward {
-			return FlashMsg{ID: "diffview", Text: "Wrapped to first file", Expires: 1500 * time.Millisecond}.Cmd()
+			return flash.ShowMsg{ID: "diffview", Text: "Wrapped to first file", Expires: 1500 * time.Millisecond}.Cmd()
 		}
-		return FlashMsg{ID: "diffview", Text: "Wrapped to last file", Expires: 1500 * time.Millisecond}.Cmd()
+		return flash.ShowMsg{ID: "diffview", Text: "Wrapped to last file", Expires: 1500 * time.Millisecond}.Cmd()
 	}
 	return nil
 }
@@ -713,7 +715,7 @@ func (m *Model) jumpToNextSearchMatch() tea.Cmd {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.cursor.LineIdx = i
 			m.syncViewportToCursor()
-			return FlashMsg{ID: "diffview", Text: "Wrapped to first match", Expires: 1500 * time.Millisecond}.Cmd()
+			return flash.ShowMsg{ID: "diffview", Text: "Wrapped to first match", Expires: 1500 * time.Millisecond}.Cmd()
 		}
 	}
 	return nil
@@ -734,7 +736,7 @@ func (m *Model) jumpToPrevSearchMatch() tea.Cmd {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.cursor.LineIdx = i
 			m.syncViewportToCursor()
-			return FlashMsg{ID: "diffview", Text: "Wrapped to last match", Expires: 1500 * time.Millisecond}.Cmd()
+			return flash.ShowMsg{ID: "diffview", Text: "Wrapped to last match", Expires: 1500 * time.Millisecond}.Cmd()
 		}
 	}
 	return nil
@@ -779,7 +781,7 @@ func (m Model) handleNarrowPrefixKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 func (m Model) toggleOwnerFilter() (Model, tea.Cmd) {
 	label := m.filter.toggleOwner()
 	m.applyFilters()
-	cmd := FlashMsg{ID: "diffview", Text: fmt.Sprintf("Owner filter: %s", label), Expires: 1500 * time.Millisecond}.Cmd()
+	cmd := flash.ShowMsg{ID: "diffview", Text: fmt.Sprintf("Owner filter: %s", label), Expires: 1500 * time.Millisecond}.Cmd()
 	return m, cmd
 }
 
@@ -793,7 +795,7 @@ func (m Model) jumpBack() (Model, tea.Cmd) {
 	}
 	pos, ok := m.nav.jumpBack()
 	if !ok {
-		return m, FlashMsg{ID: "diffview", Text: "Already at oldest position", Expires: 1500 * time.Millisecond}.Cmd()
+		return m, flash.ShowMsg{ID: "diffview", Text: "Already at oldest position", Expires: 1500 * time.Millisecond}.Cmd()
 	}
 	m.applyJumpPos(pos)
 	return m, nil
@@ -803,7 +805,7 @@ func (m Model) jumpBack() (Model, tea.Cmd) {
 func (m Model) jumpForward() (Model, tea.Cmd) {
 	pos, ok := m.nav.jumpForward()
 	if !ok {
-		return m, FlashMsg{ID: "diffview", Text: "Already at newest position", Expires: 1500 * time.Millisecond}.Cmd()
+		return m, flash.ShowMsg{ID: "diffview", Text: "Already at newest position", Expires: 1500 * time.Millisecond}.Cmd()
 	}
 	m.applyJumpPos(pos)
 	return m, nil
@@ -839,7 +841,7 @@ func (m Model) clearAllFilters() (Model, tea.Cmd) {
 	}
 	m.filter.clearAll()
 	m.applyFilters()
-	cmd := FlashMsg{ID: "diffview", Text: "Filters cleared", Expires: 1500 * time.Millisecond}.Cmd()
+	cmd := flash.ShowMsg{ID: "diffview", Text: "Filters cleared", Expires: 1500 * time.Millisecond}.Cmd()
 	return m, cmd
 }
 

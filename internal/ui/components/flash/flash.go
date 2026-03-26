@@ -39,9 +39,19 @@ type ShowMsg struct {
 	Expires time.Duration // 0 = no auto-expiry (must be dismissed manually)
 }
 
+// Cmd returns a tea.Cmd that emits this ShowMsg.
+func (s ShowMsg) Cmd() tea.Cmd {
+	return func() tea.Msg { return s }
+}
+
 // DismissMsg removes the flash with the given ID.
 type DismissMsg struct {
 	ID string
+}
+
+// Cmd returns a tea.Cmd that emits this DismissMsg.
+func (d DismissMsg) Cmd() tea.Cmd {
+	return func() tea.Msg { return d }
 }
 
 // expiredMsg is internal — auto-fires when a timed flash expires.

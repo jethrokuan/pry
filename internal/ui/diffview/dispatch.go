@@ -5,6 +5,8 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/jethrokuan/pry/internal/ui/components/flash"
 )
 
 // inputMode represents the current input mode of the diffview.
@@ -239,7 +241,7 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.NarrowPrefix):
 		m.narrowPrefixActive = true
-		return m, FlashMsg{ID: "diffview", Text: "T: [o]wner [f]ilter [x]clear", Expires: 1500 * time.Millisecond}.Cmd()
+		return m, flash.ShowMsg{ID: "diffview", Text: "T: [o]wner [f]ilter [x]clear", Expires: 1500 * time.Millisecond}.Cmd()
 
 	case key.Matches(msg, keys.JumpBack):
 		return m.jumpBack()

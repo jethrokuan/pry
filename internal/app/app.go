@@ -181,47 +181,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		slog.Debug("msg", "type", fmt.Sprintf("%T", msg))
 	}
 
-	// Flash messages from any screen — translate to flash component messages.
+	// Flash messages from any screen — forward to flash component.
 	var flashCmd tea.Cmd
-	switch msg := msg.(type) {
-	case prlist.FlashMsg:
-		style := flash.StyleSuccess
-		if msg.Spinner {
-			style = flash.StyleSpinner
-		} else if msg.Danger {
-			style = flash.StyleDanger
-		}
-		m.flash, flashCmd = m.flash.Update(flash.ShowMsg{
-			ID:      msg.ID,
-			Text:    msg.Text,
-			Style:   style,
-			Expires: msg.Expires,
-		})
-		return m, flashCmd
-	case prlist.DismissFlashMsg:
-		m.flash, flashCmd = m.flash.Update(flash.DismissMsg{ID: msg.ID})
-		return m, flashCmd
-	case diffview.FlashMsg:
-		style := flash.StyleSuccess
-		if msg.Spinner {
-			style = flash.StyleSpinner
-		} else if msg.Danger {
-			style = flash.StyleDanger
-		}
-		m.flash, flashCmd = m.flash.Update(flash.ShowMsg{
-			ID:      msg.ID,
-			Text:    msg.Text,
-			Style:   style,
-			Expires: msg.Expires,
-		})
-		return m, flashCmd
-	case diffview.DismissFlashMsg:
-		m.flash, flashCmd = m.flash.Update(flash.DismissMsg{ID: msg.ID})
-		return m, flashCmd
-	default:
-		// Forward ticks/expiry to flash model; continue processing below.
-		m.flash, flashCmd = m.flash.Update(msg)
-	}
+	m.flash, flashCmd = m.flash.Update(msg)
 
 	// Global messages
 	switch msg := msg.(type) {

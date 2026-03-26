@@ -16,9 +16,10 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/clipboard"
-	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/components/flash"
+	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
@@ -27,29 +28,6 @@ import (
 type SubmitReviewMsg struct{}
 type BackMsg struct{}
 
-// FlashMsg is emitted by the diffview to request the root model show a flash.
-type FlashMsg struct {
-	ID      string
-	Text    string
-	Danger  bool          // true = danger/error style
-	Spinner bool          // true = spinner prefix, no auto-expiry
-	Expires time.Duration // 0 = manual dismiss
-}
-
-// Cmd returns a tea.Cmd that emits this FlashMsg.
-func (f FlashMsg) Cmd() tea.Cmd {
-	return func() tea.Msg { return f }
-}
-
-// DismissFlashMsg is emitted to request the root model dismiss a flash by ID.
-type DismissFlashMsg struct {
-	ID string
-}
-
-// Cmd returns a tea.Cmd that emits this DismissFlashMsg.
-func (d DismissFlashMsg) Cmd() tea.Cmd {
-	return func() tea.Msg { return d }
-}
 
 // PRBodyLoadedMsg carries the full PR data after async fetch.
 type PRBodyLoadedMsg struct {
@@ -526,7 +504,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case pendingReviewMsg:
 		if msg.err != nil {
-			return m, FlashMsg{ID: "review-err", Text: fmt.Sprintf("Review error: %v", msg.err), Danger: true, Expires: 3 * time.Second}.Cmd()
+			return m, flash.ShowMsg{ID: "review-err", Text: fmt.Sprintf("Review error: %v", msg.err), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
 		} else if msg.reviewID > 0 {
 			m.pendingReview.ReviewID = msg.reviewID
 			m.pendingReview.ReviewNodeID = msg.reviewNodeID
@@ -548,7 +526,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Rollback: remove the optimistic comment
 			m.removeCommentByID(msg.tempID)
 			m.updateDiffContent()
-			return m, FlashMsg{ID: "diffview", Text: "Comment failed: " + msg.err.Error(), Danger: true, Expires: 3 * time.Second}.Cmd()
+			return m, flash.ShowMsg{ID: "diffview", Text: "Comment failed: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
 		}
 		// Replace temp comment with real one from server
 		m.replaceComment(msg.tempID, msg.comment)
@@ -557,7 +535,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case commentDeletedMsg:
 		if msg.err != nil {
 			// Re-fetch comments to restore the deleted one
-			return m, tea.Batch(m.loadComments(), FlashMsg{ID: "diffview", Text: "Delete failed: " + msg.err.Error(), Danger: true, Expires: 3 * time.Second}.Cmd())
+			return m, tea.Batch(m.loadComments(), flash.ShowMsg{ID: "diffview", Text: "Delete failed: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd())
 		}
 		m.updateDiffContent()
 
@@ -566,13 +544,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Rollback: restore old body
 			m.updateCommentBody(msg.commentID, msg.oldBody)
 			m.updateDiffContent()
-			return m, FlashMsg{ID: "diffview", Text: "Edit failed: " + msg.err.Error(), Danger: true, Expires: 3 * time.Second}.Cmd()
+			return m, flash.ShowMsg{ID: "diffview", Text: "Edit failed: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
 		}
 		m.updateDiffContent()
 
 	case viewedFilesMsg:
 		if msg.err != nil {
-			return m, FlashMsg{ID: "viewed-err", Text: fmt.Sprintf("Viewed error: %v", msg.err), Danger: true, Expires: 3 * time.Second}.Cmd()
+			return m, flash.ShowMsg{ID: "viewed-err", Text: fmt.Sprintf("Viewed error: %v", msg.err), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
 		} else if msg.viewed != nil {
 			for path := range msg.viewed {
 				m.pendingReview.ViewedFiles[path] = true
@@ -586,7 +564,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case markViewedMsg:
 		if msg.err != nil {
-			return m, FlashMsg{ID: "viewed-err", Text: fmt.Sprintf("Mark viewed error: %v", msg.err), Danger: true, Expires: 3 * time.Second}.Cmd()
+			return m, flash.ShowMsg{ID: "viewed-err", Text: fmt.Sprintf("Mark viewed error: %v", msg.err), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
 		}
 		// Tree is refreshed optimistically in markTreeItemViewed/markCurrentFileViewed,
 		// but also refresh here to pick up any server-side state corrections
@@ -644,27 +622,27 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case clipboardImageMsg:
 		if msg.err != nil {
-			return m, FlashMsg{ID: "image-upload", Text: "Clipboard error: " + msg.err.Error(), Danger: true, Expires: 3 * time.Second}.Cmd()
+			return m, flash.ShowMsg{ID: "image-upload", Text: "Clipboard error: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
 		} else if msg.data == nil {
-			return m, FlashMsg{ID: "image-upload", Text: "No image in clipboard", Expires: 1500 * time.Millisecond}.Cmd()
+			return m, flash.ShowMsg{ID: "image-upload", Text: "No image in clipboard", Expires: 1500 * time.Millisecond}.Cmd()
 		} else {
-			return m, tea.Batch(FlashMsg{ID: "image-upload", Text: "Uploading image...", Spinner: true}.Cmd(), m.uploadImageCmd(msg.data))
+			return m, tea.Batch(flash.ShowMsg{ID: "image-upload", Text: "Uploading image...", Style: flash.StyleSpinner}.Cmd(), m.uploadImageCmd(msg.data))
 		}
 
 	case imageUploadedMsg:
 		if msg.err != nil {
-			return m, FlashMsg{ID: "image-upload", Text: "Upload failed: " + msg.err.Error(), Danger: true, Expires: 3 * time.Second}.Cmd()
+			return m, flash.ShowMsg{ID: "image-upload", Text: "Upload failed: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
 		} else if m.editor.IsActive() {
 			mdLink := fmt.Sprintf("![image](%s)", msg.url)
 			m.editor.InsertString(mdLink)
-			return m, FlashMsg{ID: "image-upload", Text: "Image uploaded", Expires: 1500 * time.Millisecond}.Cmd()
+			return m, flash.ShowMsg{ID: "image-upload", Text: "Image uploaded", Expires: 1500 * time.Millisecond}.Cmd()
 		}
 
 	case copyResultMsg:
 		if msg.err != nil {
-			return m, FlashMsg{ID: "diffview", Text: "Copy failed: " + msg.err.Error(), Danger: true, Expires: 3 * time.Second}.Cmd()
+			return m, flash.ShowMsg{ID: "diffview", Text: "Copy failed: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
 		}
-		return m, FlashMsg{ID: "diffview", Text: fmt.Sprintf("Copied %s", msg.url), Expires: 1500 * time.Millisecond}.Cmd()
+		return m, flash.ShowMsg{ID: "diffview", Text: fmt.Sprintf("Copied %s", msg.url), Expires: 1500 * time.Millisecond}.Cmd()
 
 	case editorFinishedMsg:
 		if msg.err == nil && msg.content != "" {
@@ -905,7 +883,7 @@ func (m *Model) updateViewports() {
 // and copies it to the system clipboard.
 func (m *Model) copyForgeLink() tea.Cmd {
 	if len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
-		return FlashMsg{ID: "diffview", Text: "No file to copy link for", Expires: 1500 * time.Millisecond}.Cmd()
+		return flash.ShowMsg{ID: "diffview", Text: "No file to copy link for", Expires: 1500 * time.Millisecond}.Cmd()
 	}
 
 	file := m.files[m.nav.cursor.FileIdx]

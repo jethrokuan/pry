@@ -17,8 +17,9 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/clipboard"
-	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/components/flash"
+	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/ui/components/scrollbar"
 	"github.com/jethrokuan/pry/internal/ui/components/tabbar"
 	"github.com/jethrokuan/pry/internal/ui/prpreview"
@@ -43,19 +44,6 @@ type userTeamsLoadedMsg struct {
 	teams []string
 }
 
-// FlashMsg is emitted by the PR list to request the root model show a flash.
-type FlashMsg struct {
-	ID      string
-	Text    string
-	Spinner bool          // true = animated spinner style
-	Danger  bool          // true = danger/error style
-	Expires time.Duration // 0 = manual dismiss
-}
-
-// DismissFlashMsg is emitted to request the root model dismiss a flash by ID.
-type DismissFlashMsg struct {
-	ID string
-}
 
 // enrichState tracks per-PR background enrichment status.
 type enrichState int
@@ -331,9 +319,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		t := &m.tabs[msg.tabIdx]
 		t.loading = false
 		t.fetched = true
-		dismissCmd := func() tea.Msg { return DismissFlashMsg{ID: "pr-refresh"} }
+		dismissCmd := flash.DismissMsg{ID: "pr-refresh"}.Cmd()
 		if msg.err != nil {
-			errFlash := emitDangerFlash("fetch-error", fmt.Sprintf("Fetch failed: %v", msg.err), 5*time.Second)
+			errFlash := flash.ShowMsg{ID: "fetch-error", Text: fmt.Sprintf("Fetch failed: %v", msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
 			return m, tea.Batch(dismissCmd, errFlash)
 		}
 		t.prs = msg.prs
@@ -398,13 +386,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case prActionMsg:
 		if msg.err != nil {
-			return m, emitDangerFlash("pr-action", fmt.Sprintf("%s failed: %v", msg.action, msg.err), 5*time.Second)
+			return m, flash.ShowMsg{ID: "pr-action", Text: fmt.Sprintf("%s failed: %v", msg.action, msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
 		}
 		// Invalidate cache and refresh to reflect the change.
 		if inv, ok := m.svc.(review.CacheInvalidator); ok {
 			inv.InvalidateListPRs()
 		}
-		flashCmd := emitFlash("pr-action", fmt.Sprintf("%s #%d", msg.action, msg.prNumber), 3*time.Second)
+		flashCmd := flash.ShowMsg{ID: "pr-action", Text: fmt.Sprintf("%s #%d", msg.action, msg.prNumber), Expires: 3 * time.Second}.Cmd()
 		return m, tea.Batch(flashCmd, m.startFetch())
 
 	case spinner.TickMsg:
@@ -546,17 +534,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				pr := t.prs[t.cur()]
 				text := fmt.Sprintf("%d", pr.Number)
 				if err := clipboard.WriteText(text); err != nil {
-					return m, emitFlash("copy", "Copy failed: "+err.Error(), 1500*time.Millisecond)
+					return m, flash.ShowMsg{ID: "copy", Text: "Copy failed: " + err.Error(), Expires: 1500 * time.Millisecond}.Cmd()
 				}
-				return m, emitFlash("copy", fmt.Sprintf("Copied #%d", pr.Number), 1500*time.Millisecond)
+				return m, flash.ShowMsg{ID: "copy", Text: fmt.Sprintf("Copied #%d", pr.Number), Expires: 1500 * time.Millisecond}.Cmd()
 			}
 		case key.Matches(msg, keys.CopyURL):
 			if t.hasCursor() {
 				pr := t.prs[t.cur()]
 				if err := clipboard.WriteText(pr.URL); err != nil {
-					return m, emitFlash("copy", "Copy failed: "+err.Error(), 1500*time.Millisecond)
+					return m, flash.ShowMsg{ID: "copy", Text: "Copy failed: " + err.Error(), Expires: 1500 * time.Millisecond}.Cmd()
 				}
-				return m, emitFlash("copy", fmt.Sprintf("Copied %s", pr.URL), 1500*time.Millisecond)
+				return m, flash.ShowMsg{ID: "copy", Text: fmt.Sprintf("Copied %s", pr.URL), Expires: 1500 * time.Millisecond}.Cmd()
 			}
 		case key.Matches(msg, keys.Assign):
 			if t.hasCursor() && m.currentUser != "" {
@@ -581,7 +569,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.Close):
 			if t.hasCursor() {
 				m.confirm = confirmClose
-				return m, emitFlash("confirm", "Close PR? Press y to confirm", 5*time.Second)
+				return m, flash.ShowMsg{ID: "confirm", Text: "Close PR? Press y to confirm", Expires: 5 * time.Second}.Cmd()
 			}
 		case key.Matches(msg, keys.Reopen):
 			if t.hasCursor() {
@@ -595,13 +583,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.Merge):
 			if t.hasCursor() {
 				m.confirm = confirmMerge
-				return m, emitFlash("confirm", "Merge PR? Press y to confirm", 5*time.Second)
+				return m, flash.ShowMsg{ID: "confirm", Text: "Merge PR? Press y to confirm", Expires: 5 * time.Second}.Cmd()
 			}
 		case key.Matches(msg, keys.ReadyForReview):
 			if t.hasCursor() {
 				pr := t.prs[t.cur()]
 				if !pr.Draft {
-					return m, emitFlash("pr-action", "PR is not a draft", 2*time.Second)
+					return m, flash.ShowMsg{ID: "pr-action", Text: "PR is not a draft", Expires: 2 * time.Second}.Cmd()
 				}
 				svc := m.svc
 				nodeID := pr.NodeID
@@ -841,9 +829,7 @@ func (m *Model) startFetch() tea.Cmd {
 	t := m.tab()
 	cmds := []tea.Cmd{m.fetchPRs(), m.spinner.Tick}
 	if len(t.prs) > 0 {
-		cmds = append(cmds, func() tea.Msg {
-			return FlashMsg{ID: "pr-refresh", Text: "Refreshing…", Spinner: true}
-		})
+		cmds = append(cmds, flash.ShowMsg{ID: "pr-refresh", Text: "Refreshing…", Style: flash.StyleSpinner}.Cmd())
 	} else {
 		t.loading = true
 	}
@@ -864,19 +850,6 @@ func (m *Model) switchTab() tea.Cmd {
 	return m.startFetch()
 }
 
-// emitFlash returns a command that emits a timed flash message to the root model.
-func emitFlash(id, text string, expires time.Duration) tea.Cmd {
-	return func() tea.Msg {
-		return FlashMsg{ID: id, Text: text, Expires: expires}
-	}
-}
-
-// emitDangerFlash returns a command that emits a danger-styled flash message.
-func emitDangerFlash(id, text string, expires time.Duration) tea.Cmd {
-	return func() tea.Msg {
-		return FlashMsg{ID: id, Text: text, Danger: true, Expires: expires}
-	}
-}
 
 // visibleRange computes the start and end indices of visible PR rows given
 // the available height in terminal lines. Each PR row is 4 lines tall.

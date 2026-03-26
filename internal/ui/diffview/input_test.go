@@ -7,6 +7,7 @@ import (
 
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/components/flash"
 )
 
 // testFiles returns a small set of DiffFiles for testing navigation and input handling.
@@ -491,7 +492,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m, cmd := m.Update(tea.KeyPressMsg{Code: 'T'})
 			gomega.Expect(m.narrowPrefixActive).To(gomega.BeTrue())
 			msg := cmd()
-			fmsg, ok := msg.(FlashMsg)
+			fmsg, ok := msg.(flash.ShowMsg)
 			gomega.Expect(ok).To(gomega.BeTrue())
 			gomega.Expect(fmsg.Text).To(gomega.ContainSubstring("[o]wner"))
 		})
