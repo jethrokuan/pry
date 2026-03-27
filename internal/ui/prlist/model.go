@@ -18,6 +18,7 @@ import (
 
 	"github.com/jethrokuan/pry/internal/clipboard"
 	"github.com/jethrokuan/pry/internal/git"
+	"github.com/jethrokuan/pry/internal/ui/icons"
 	"github.com/jethrokuan/pry/internal/jj"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/flash"
@@ -967,13 +968,13 @@ func (m Model) renderTable(width, height int) string {
 			muted.Render(" ") +
 			s(styles.Danger).Render(fmt.Sprintf("-%s", formatNum(pr.Deletions))) +
 			dot +
-			s(lipgloss.BrightCyan).Render(iconFiles) + muted.Render(fmt.Sprintf(" %d", pr.Files))
+			s(lipgloss.BrightCyan).Render(icons.Files) + muted.Render(fmt.Sprintf(" %d", pr.Files))
 		if pr.CommentCount > 0 {
 			statsContent += dot +
-				s(lipgloss.BrightBlue).Render(iconCommentSingle) + muted.Render(fmt.Sprintf(" %d", pr.CommentCount))
+				s(lipgloss.BrightBlue).Render(icons.Comment) + muted.Render(fmt.Sprintf(" %d", pr.CommentCount))
 		}
 		statsContent += dot +
-			s(lipgloss.BrightMagenta).Render(iconUpdated) + muted.Render(" "+shortTimeAgo(pr.UpdatedAt))
+			s(lipgloss.BrightMagenta).Render(icons.Updated) + muted.Render(" "+shortTimeAgo(pr.UpdatedAt))
 		if t.enrichMap[pr.Number] == enrichPending {
 			statsContent += dot + muted.Render(m.spinner.View())
 		}
@@ -1015,35 +1016,19 @@ func openBrowser(url string) tea.Cmd {
 	}
 }
 
-// Nerd Font icons — exact codepoints from gh-dash constants.go.
-var (
-	iconOpen   = "\uf407" // nf-oct-git_pull_request
-	iconDraft  = "\uebdb" // nf-cod-git_pull_request_draft
-	iconMerged = "\uf4c9" // nf-oct-git_merge
-	iconClosed = "\uf4dc" // nf-oct-git_pull_request_closed
-
-	iconApproved         = "\U000f012c" // nf-md-check_circle
-	iconChangesRequested = "\ueb43"     // nf-cod-request_changes
-	iconWaiting          = "\ue641"     // nf-seti-clock
-	iconCommentSingle    = "\uf27b"     // nf-fa-commenting
-
-	iconFiles   = "\uf440" // nf-oct-diff
-	iconUpdated = "\uf472" // nf-oct-history
-	iconCreated = "\uf455" // nf-oct-calendar
-)
 
 // renderStateIcon returns the icon and color for a PR's state.
 func renderStateIcon(pr review.PullRequest) (string, color.Color) {
 	if pr.Draft {
-		return iconDraft, lipgloss.BrightBlack
+		return icons.Draft, lipgloss.BrightBlack
 	}
 	switch pr.State {
 	case "MERGED":
-		return iconMerged, lipgloss.Magenta
+		return icons.Merged, lipgloss.Magenta
 	case "CLOSED":
-		return iconClosed, lipgloss.Red
+		return icons.Closed, lipgloss.Red
 	default:
-		return iconOpen, lipgloss.Green
+		return icons.Open, lipgloss.Green
 	}
 }
 
@@ -1051,15 +1036,15 @@ func renderStateIcon(pr review.PullRequest) (string, color.Color) {
 func mergeStateIcon(pr review.PullRequest) (string, color.Color) {
 	switch pr.MergeState {
 	case "CLEAN", "HAS_HOOKS":
-		return iconApproved, lipgloss.Green
+		return icons.Approved, lipgloss.Green
 	case "BLOCKED", "DRAFT":
-		return iconChangesRequested, lipgloss.Red
+		return icons.ChangesRequested, lipgloss.Red
 	case "UNSTABLE":
-		return iconWaiting, lipgloss.BrightYellow
+		return icons.Waiting, lipgloss.BrightYellow
 	case "DIRTY":
-		return iconChangesRequested, lipgloss.Red
+		return icons.ChangesRequested, lipgloss.Red
 	default:
-		return iconWaiting, lipgloss.BrightBlack
+		return icons.Waiting, lipgloss.BrightBlack
 	}
 }
 

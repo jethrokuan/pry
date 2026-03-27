@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/diff"
+	"github.com/jethrokuan/pry/internal/ui/icons"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
@@ -207,6 +208,18 @@ func countViewedDescendants(node *treeNode, viewedFiles map[string]bool, files [
 	return viewed, len(indices)
 }
 
+// countDescendantThreads returns the total thread count for all files under a node.
+func countDescendantThreads(node *treeNode, files []diff.DiffFile, cp *CommentPanel) int {
+	indices := collectFileIndices(node)
+	count := 0
+	for _, idx := range indices {
+		if idx < len(files) {
+			count += cp.ThreadCountForFile(files[idx].Path)
+		}
+	}
+	return count
+}
+
 func (m Model) renderFileTree() string {
 	var b strings.Builder
 
@@ -268,6 +281,7 @@ func (m Model) renderFileTree() string {
 
 			nameStr := row.node.name
 			changes := fmt.Sprintf("+%d/-%d", file.Additions, file.Deletions)
+			threadCount := m.comments.ThreadCountForFile(file.Path)
 
 			var line string
 			if isCursorRow || isActiveFile {
@@ -291,6 +305,12 @@ func (m Model) renderFileTree() string {
 				statusStr := statusBg.Render(file.Status.String())
 				changesStr := subtitleBg.Render(changes)
 
+				commentStr := ""
+				if threadCount > 0 {
+					commentStr = " " + lipgloss.NewStyle().Foreground(styles.Secondary).Background(bg).
+						Render(fmt.Sprintf(icons.Comment+" %d", threadCount))
+				}
+
 				var nameRendered string
 				if isViewed {
 					nameRendered = lipgloss.NewStyle().Foreground(styles.Success).Background(bg).Render(nameStr)
@@ -298,7 +318,7 @@ func (m Model) renderFileTree() string {
 					nameRendered = plain.Render(nameStr)
 				}
 
-				line = plain.Render(cursor+row.prefix+connector) + statusStr + plain.Render(" ") + nameRendered + plain.Render(" ") + changesStr
+				line = plain.Render(cursor+row.prefix+connector) + statusStr + commentStr + plain.Render(" ") + nameRendered + plain.Render(" ") + changesStr
 
 				// Pad to full width
 				visWidth := lipgloss.Width(line)
@@ -308,11 +328,16 @@ func (m Model) renderFileTree() string {
 				}
 			} else {
 				status := statusStyle.Render(file.Status.String())
+				commentInfo := ""
+				if threadCount > 0 {
+					commentInfo = " " + lipgloss.NewStyle().Foreground(styles.Secondary).
+						Render(fmt.Sprintf(icons.Comment+" %d", threadCount))
+				}
 				if isViewed {
 					viewedStyle := lipgloss.NewStyle().Foreground(styles.Success)
-					line = fmt.Sprintf("%s%s%s%s %s %s", cursor, row.prefix, connector, status, viewedStyle.Render(nameStr), styles.Subtitle.Render(changes))
+					line = fmt.Sprintf("%s%s%s%s%s %s %s", cursor, row.prefix, connector, status, commentInfo, viewedStyle.Render(nameStr), styles.Subtitle.Render(changes))
 				} else {
-					line = fmt.Sprintf("%s%s%s%s %s %s", cursor, row.prefix, connector, status, nameStr, styles.Subtitle.Render(changes))
+					line = fmt.Sprintf("%s%s%s%s%s %s %s", cursor, row.prefix, connector, status, commentInfo, nameStr, styles.Subtitle.Render(changes))
 				}
 			}
 
@@ -330,8 +355,9 @@ func (m Model) renderFileTree() string {
 				indicator = "▶ "
 			}
 
-			// Show viewed count for directory
+			// Show viewed count and comment count for directory
 			viewedDesc, totalDesc := countViewedDescendants(row.node, m.pendingReview.ViewedFiles, m.files)
+			dirThreadCount := countDescendantThreads(row.node, m.files, &m.comments)
 
 			dirStyle := lipgloss.NewStyle().Bold(true)
 			if totalDesc > 0 && viewedDesc == totalDesc {
@@ -354,7 +380,13 @@ func (m Model) renderFileTree() string {
 						Render(fmt.Sprintf(" (%d/%d viewed)", viewedDesc, totalDesc))
 				}
 
-				line = plain.Render(cursor+row.prefix+connector+indicator) + dirStyleBg.Render(row.node.name) + plain.Render("/") + viewedInfoStr
+				commentInfoStr := ""
+				if dirThreadCount > 0 {
+					commentInfoStr = lipgloss.NewStyle().Foreground(styles.Secondary).Background(bg).
+						Render(fmt.Sprintf(icons.Comment+" %d", dirThreadCount)) + plain.Render(" ")
+				}
+
+				line = plain.Render(cursor+row.prefix+connector+indicator) + commentInfoStr + dirStyleBg.Render(row.node.name) + plain.Render("/") + viewedInfoStr
 
 				// Pad to full width
 				visWidth := lipgloss.Width(line)
@@ -369,7 +401,13 @@ func (m Model) renderFileTree() string {
 						Render(fmt.Sprintf(" (%d/%d viewed)", viewedDesc, totalDesc))
 				}
 
-				line = fmt.Sprintf("%s%s%s%s%s/%s", cursor, row.prefix, connector, indicator, dirStyle.Render(row.node.name), viewedInfo)
+				commentInfo := ""
+				if dirThreadCount > 0 {
+					commentInfo = lipgloss.NewStyle().Foreground(styles.Secondary).
+						Render(fmt.Sprintf(icons.Comment+" %d", dirThreadCount)) + " "
+				}
+
+				line = fmt.Sprintf("%s%s%s%s%s%s/%s", cursor, row.prefix, connector, indicator, commentInfo, dirStyle.Render(row.node.name), viewedInfo)
 			}
 
 			b.WriteString(line + "\n")

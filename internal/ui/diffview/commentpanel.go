@@ -80,6 +80,17 @@ func (cp *CommentPanel) FileHasComments(path string) bool {
 	return cp.fileThreadIndex[path]
 }
 
+// ThreadCountForFile returns the number of threads on the given file path.
+func (cp *CommentPanel) ThreadCountForFile(path string) int {
+	count := 0
+	for _, t := range cp.threads {
+		if t.Path == path {
+			count++
+		}
+	}
+	return count
+}
+
 func commentIndexKey(path string, line int, side string) string {
 	return fmt.Sprintf("%s:%d:%s", path, line, side)
 }
