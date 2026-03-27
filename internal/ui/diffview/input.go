@@ -374,6 +374,14 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.nav.activeCycler = CyclerHunk
 		cmd := m.navigateHunk(false)
 		return m, cmd
+	case key.Matches(msg, keys.NextThread):
+		m.nav.activeCycler = CyclerThread
+		cmd := m.navigateThread(true)
+		return m, cmd
+	case key.Matches(msg, keys.PrevThread):
+		m.nav.activeCycler = CyclerThread
+		cmd := m.navigateThread(false)
+		return m, cmd
 	case key.Matches(msg, keys.NextComment):
 		m.nav.activeCycler = CyclerComment
 		cmd := m.navigateComment(true)
@@ -535,14 +543,14 @@ func (m *Model) expandHunkForThread(pos threadPosition) bool {
 	return false
 }
 
-// navigateComment moves to the next/prev thread across all files.
+// navigateThread moves to the next/prev thread across all files.
 // When landing on a thread, expands the comment block and selects the first comment.
-func (m *Model) navigateComment(forward bool) tea.Cmd {
+func (m *Model) navigateThread(forward bool) tea.Cmd {
 	m.nav.pushJump()
 
 	positions := m.buildThreadPositions()
 	if len(positions) == 0 {
-		return flash.ShowMsg{ID: "diffview", Text: "No comments found", Expires: 1500 * time.Millisecond}.Cmd()
+		return flash.ShowMsg{ID: "diffview", Text: "No threads found", Expires: 1500 * time.Millisecond}.Cmd()
 	}
 
 	// Find current position in the sorted list
@@ -604,12 +612,12 @@ func (m *Model) navigateComment(forward bool) tea.Cmd {
 		}
 		if diffIdx < 0 {
 			m.updateDiffContent()
-			return flash.ShowMsg{ID: "diffview", Text: "Comment not visible in diff", Expires: 1500 * time.Millisecond}.Cmd()
+			return flash.ShowMsg{ID: "diffview", Text: "Thread not visible in diff", Expires: 1500 * time.Millisecond}.Cmd()
 		}
 	}
 
 	m.nav.cursor.LineIdx = diffIdx
-	m.expandAndSelectComment(diffIdx)
+	m.expandAndSelectComment(diffIdx, -1)
 	m.updateDiffContent()
 	m.syncViewportToCursorWithComments()
 
@@ -618,13 +626,14 @@ func (m *Model) navigateComment(forward bool) tea.Cmd {
 		if !forward {
 			dir = "last"
 		}
-		return flash.ShowMsg{ID: "diffview", Text: "Wrapped to " + dir + " comment", Expires: 1500 * time.Millisecond}.Cmd()
+		return flash.ShowMsg{ID: "diffview", Text: "Wrapped to " + dir + " thread", Expires: 1500 * time.Millisecond}.Cmd()
 	}
 	return nil
 }
 
 // expandAndSelectComment expands the comment block at the given line index and enters comment select mode.
-func (m *Model) expandAndSelectComment(lineIdx int) {
+// commentIdx selects which comment to highlight; -1 means the last comment.
+func (m *Model) expandAndSelectComment(lineIdx int, commentIdx int) {
 	if lineIdx < 0 || lineIdx >= len(m.nav.diffLines) || len(m.files) == 0 {
 		return
 	}
@@ -636,7 +645,173 @@ func (m *Model) expandAndSelectComment(lineIdx int) {
 	if dl.oldLine > 0 {
 		m.comments.expanded[commentKey(path, dl.oldLine)] = true
 	}
-	m.nav.cursor = CursorTarget{Kind: CursorComment, FileIdx: m.nav.cursor.FileIdx, LineIdx: lineIdx, CommentIdx: 0}
+	if commentIdx < 0 {
+		refs := m.commentRefsAtLine(lineIdx)
+		if len(refs) > 0 {
+			commentIdx = len(refs) - 1
+		} else {
+			commentIdx = 0
+		}
+	}
+	m.nav.cursor = CursorTarget{Kind: CursorComment, FileIdx: m.nav.cursor.FileIdx, LineIdx: lineIdx, CommentIdx: commentIdx}
+}
+
+// commentPosition identifies a single comment's location across all files for flat navigation.
+type commentPosition struct {
+	fileIdx     int
+	line        int
+	side        string
+	diffLineIdx int // index into diffLines (for the current file)
+	commentIdx  int // index into commentRefs at that diff line
+}
+
+// buildCommentPositions returns all individual comment positions across all files,
+// sorted by file index, line, then comment index within the thread.
+func (m *Model) buildCommentPositions() []commentPosition {
+	fileIdxByPath := make(map[string]int, len(m.files))
+	for i, f := range m.files {
+		fileIdxByPath[f.Path] = i
+	}
+
+	var positions []commentPosition
+	for _, t := range m.comments.threads {
+		fi, ok := fileIdxByPath[t.Path]
+		if !ok {
+			continue
+		}
+		for ci := range t.Comments {
+			positions = append(positions, commentPosition{
+				fileIdx:    fi,
+				line:       t.Line,
+				side:       t.Side,
+				commentIdx: ci,
+			})
+		}
+	}
+
+	// Deduplicate: multiple threads at same location are already separate,
+	// but we need stable sort by file, line, comment index.
+	sort.Slice(positions, func(i, j int) bool {
+		if positions[i].fileIdx != positions[j].fileIdx {
+			return positions[i].fileIdx < positions[j].fileIdx
+		}
+		if positions[i].line != positions[j].line {
+			return positions[i].line < positions[j].line
+		}
+		return positions[i].commentIdx < positions[j].commentIdx
+	})
+
+	return positions
+}
+
+// navigateComment moves to the next/prev individual comment across all files.
+// Unlike navigateThread which jumps between threads, this walks through every
+// comment including within multi-comment threads.
+func (m *Model) navigateComment(forward bool) tea.Cmd {
+	m.nav.pushJump()
+
+	positions := m.buildCommentPositions()
+	if len(positions) == 0 {
+		return flash.ShowMsg{ID: "diffview", Text: "No comments found", Expires: 1500 * time.Millisecond}.Cmd()
+	}
+
+	// Build thread positions to map comment positions to commentRef indices.
+	// Comments in a thread at a given line are indexed sequentially in commentRefsAtLine.
+	// We need to compute the commentRef index for each position.
+	type locKey struct {
+		fileIdx int
+		line    int
+		side    string
+	}
+	refIdxCounter := make(map[locKey]int)
+	for i := range positions {
+		lk := locKey{positions[i].fileIdx, positions[i].line, positions[i].side}
+		positions[i].commentIdx = refIdxCounter[lk]
+		refIdxCounter[lk]++
+	}
+
+	// Find current position
+	curFileIdx := m.nav.cursor.FileIdx
+	curLine := 0
+	if m.nav.cursor.LineIdx < len(m.nav.diffLines) {
+		dl := m.nav.diffLines[m.nav.cursor.LineIdx]
+		if dl.newLine > 0 {
+			curLine = dl.newLine
+		} else {
+			curLine = dl.oldLine
+		}
+	}
+	curCommentIdx := 0
+	if m.nav.cursor.IsComment() {
+		curCommentIdx = m.nav.cursor.CommentIdx
+	}
+
+	// Find where we are in the flat list
+	curIdx := -1
+	for i, p := range positions {
+		if p.fileIdx == curFileIdx && p.line == curLine && p.commentIdx == curCommentIdx {
+			curIdx = i
+			break
+		}
+	}
+
+	var targetIdx int
+	wrapped := false
+
+	if forward {
+		if curIdx >= 0 && curIdx < len(positions)-1 {
+			targetIdx = curIdx + 1
+		} else {
+			targetIdx = 0
+			wrapped = curIdx >= 0
+		}
+	} else {
+		if curIdx > 0 {
+			targetIdx = curIdx - 1
+		} else {
+			targetIdx = len(positions) - 1
+			wrapped = curIdx >= 0 || curIdx == 0
+		}
+	}
+
+	target := positions[targetIdx]
+
+	// Switch file if needed
+	if target.fileIdx != m.nav.cursor.FileIdx {
+		oldIdx := m.nav.cursor.FileIdx
+		m.nav.cursor.FileIdx = target.fileIdx
+		m.nav.buildDiffLines(m.files)
+		m.nav.diffViewport.GotoTop()
+		m.autoFollowFile(oldIdx, target.fileIdx)
+	}
+
+	// Find the diff line for this comment
+	tp := threadPosition{fileIdx: target.fileIdx, line: target.line, side: target.side}
+	diffIdx := m.diffLineForThread(tp)
+	if diffIdx < 0 {
+		if m.expandHunkForThread(tp) {
+			m.nav.buildDiffLines(m.files)
+			diffIdx = m.diffLineForThread(tp)
+		}
+		if diffIdx < 0 {
+			m.updateDiffContent()
+			return flash.ShowMsg{ID: "diffview", Text: "Comment not visible in diff", Expires: 1500 * time.Millisecond}.Cmd()
+		}
+	}
+
+	m.nav.cursor.LineIdx = diffIdx
+	m.expandAndSelectComment(diffIdx, target.commentIdx)
+	m.updateDiffContent()
+	m.syncViewportToCursorWithComments()
+
+	if wrapped {
+		dir := "first"
+		if !forward {
+			dir = "last"
+		}
+		return flash.ShowMsg{ID: "diffview", Text: "Wrapped to " + dir + " comment", Expires: 1500 * time.Millisecond}.Cmd()
+	}
+	return nil
 }
 
 // navigateHunk moves to the first line of the next/prev hunk.
@@ -833,7 +1008,7 @@ func (m Model) handleNarrowRegexKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 // --- Narrow prefix (T) handling ---
 
-// handleNarrowPrefixKey handles the second key after pressing 'T' for filter commands.
+// handleNarrowPrefixKey handles the second key after pressing 'x' for filter commands.
 func (m Model) handleNarrowPrefixKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	m.narrowPrefixActive = false
 	switch msg.String() {

@@ -358,7 +358,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 		})
 	})
 
-	ginkgo.Describe("navigateComment with pending comments", func() {
+	ginkgo.Describe("navigateThread with pending comments", func() {
 		ginkgo.BeforeEach(func() {
 			// Set up a file with diffLines
 			m.files = []diff.DiffFile{
@@ -391,7 +391,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 				Body: "pending fix", Author: "testuser", IsPending: true,
 			})
 
-			m.navigateComment(true)
+			m.navigateThread(true)
 
 			gomega.Expect(m.nav.cursor.LineIdx).To(gomega.Equal(2))
 			gomega.Expect(m.nav.cursor.Kind).To(gomega.Equal(CursorComment))
@@ -405,7 +405,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 				Body: "pending fix", Author: "testuser", IsPending: true,
 			})
 
-			m.navigateComment(false)
+			m.navigateThread(false)
 
 			gomega.Expect(m.nav.cursor.LineIdx).To(gomega.Equal(2))
 			gomega.Expect(m.nav.cursor.Kind).To(gomega.Equal(CursorComment))
@@ -435,7 +435,7 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 			m.nav.cursor.LineIdx = 0
 			m.nav.buildDiffLines(m.files)
 
-			m.navigateComment(true)
+			m.navigateThread(true)
 
 			// Should have jumped to the second file
 			gomega.Expect(m.nav.cursor.FileIdx).To(gomega.Equal(1))

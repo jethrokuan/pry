@@ -14,7 +14,8 @@ type CyclerKind int
 const (
 	CyclerHunk    CyclerKind = iota // default — hunk position
 	CyclerFile                      // file position
-	CyclerComment                   // comment position
+	CyclerThread                    // thread position
+	CyclerComment                   // individual comment position
 	CyclerSearch                    // search match position
 )
 

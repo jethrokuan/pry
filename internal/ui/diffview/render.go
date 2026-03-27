@@ -479,7 +479,7 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 
 	buildComment := func(header, bodyText string, bg color.Color) {
 		borderChar := lipgloss.NewStyle().Foreground(styles.Muted).Render("│")
-		selectedBorder := lipgloss.NewStyle().Foreground(styles.Warning).Render("│")
+		selectedBorder := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▌")
 		border := borderChar
 		if bg == cursorBg {
 			border = selectedBorder

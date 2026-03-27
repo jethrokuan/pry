@@ -229,13 +229,13 @@ var _ = ginkgo.Describe("Input Handling", func() {
 		})
 	})
 
-	ginkgo.Describe("Focus toggling with t key", func() {
+	ginkgo.Describe("Focus toggling with b key", func() {
 		ginkgo.It("should switch from diff to tree focus", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
 			m.nav.showTree = true
 
-			m, _ = m.Update(tea.KeyPressMsg{Code: 't'})
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'b'})
 			gomega.Expect(m.nav.focus).To(gomega.Equal(FocusFileTree))
 		})
 
@@ -244,7 +244,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m.nav.focus = FocusFileTree
 			m.nav.showTree = true
 
-			m, _ = m.Update(tea.KeyPressMsg{Code: 't'})
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'b'})
 			gomega.Expect(m.nav.focus).To(gomega.Equal(FocusDiff))
 		})
 
@@ -253,7 +253,7 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m.nav.showTree = false
 			m.nav.focus = FocusDiff
 
-			m, _ = m.Update(tea.KeyPressMsg{Code: 't'})
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'b'})
 			gomega.Expect(m.nav.showTree).To(gomega.BeTrue())
 			gomega.Expect(m.nav.focus).To(gomega.Equal(FocusFileTree))
 		})
@@ -484,12 +484,12 @@ var _ = ginkgo.Describe("Input Handling", func() {
 		})
 	})
 
-	ginkgo.Describe("Narrow prefix mode (T)", func() {
-		ginkgo.It("should activate narrow prefix mode with T key", func() {
+	ginkgo.Describe("Narrow prefix mode (x)", func() {
+		ginkgo.It("should activate narrow prefix mode with x key", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
 
-			m, cmd := m.Update(tea.KeyPressMsg{Code: 'T'})
+			m, cmd := m.Update(tea.KeyPressMsg{Code: 'x'})
 			gomega.Expect(m.narrowPrefixActive).To(gomega.BeTrue())
 			msg := cmd()
 			fmsg, ok := msg.(flash.ShowMsg)
@@ -497,21 +497,21 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			gomega.Expect(fmsg.Text).To(gomega.ContainSubstring("[o]wner"))
 		})
 
-		ginkgo.It("should open regex filter with T then f", func() {
+		ginkgo.It("should open regex filter with x then f", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
 
-			m, _ = m.Update(tea.KeyPressMsg{Code: 'T'})
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'x'})
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'f', Text: "f"})
 			gomega.Expect(m.narrowPrefixActive).To(gomega.BeFalse())
 			gomega.Expect(m.filter.regexActive).To(gomega.BeTrue())
 		})
 
-		ginkgo.It("should dismiss on unknown key after T", func() {
+		ginkgo.It("should dismiss on unknown key after x", func() {
 			m := newInputTestModel()
 			m.nav.focus = FocusDiff
 
-			m, _ = m.Update(tea.KeyPressMsg{Code: 'T'})
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'x'})
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
 			gomega.Expect(m.narrowPrefixActive).To(gomega.BeFalse())
 		})

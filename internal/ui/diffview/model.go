@@ -140,6 +140,8 @@ type KeyMap struct {
 	PrevFile    key.Binding
 	NextHunk    key.Binding
 	PrevHunk    key.Binding
+	NextThread  key.Binding
+	PrevThread  key.Binding
 	NextComment key.Binding
 	PrevComment key.Binding
 	// DeleteComment and EditComment are only active in comment-select mode
@@ -176,11 +178,13 @@ var keys = KeyMap{
 	Down:          key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
 	PageUp:        key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "page up")),
 	PageDown:      key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "page down")),
-	ToggleTree:    key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "toggle tree")),
+	ToggleTree:    key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "toggle tree")),
 	NextFile:      key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "next file")),
 	PrevFile:      key.NewBinding(key.WithKeys("F"), key.WithHelp("F", "prev file")),
 	NextHunk:      key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "next hunk")),
 	PrevHunk:      key.NewBinding(key.WithKeys("H"), key.WithHelp("H", "prev hunk")),
+	NextThread:    key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "next thread")),
+	PrevThread:    key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "prev thread")),
 	NextComment:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "next comment")),
 	PrevComment:   key.NewBinding(key.WithKeys("C"), key.WithHelp("C", "prev comment")),
 	DeleteComment: key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete comment")),
@@ -202,7 +206,7 @@ var keys = KeyMap{
 	FilterFile:    key.NewBinding(key.WithKeys("ctrl+p"), key.WithHelp("ctrl+p", "filter files")),
 	Help:          key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	Info:          key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "PR info")),
-	NarrowPrefix:  key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "filter prefix")),
+	NarrowPrefix:  key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "filter prefix")),
 	JumpBack:      key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "jump back")),
 	JumpForward:   key.NewBinding(key.WithKeys("ctrl+i"), key.WithHelp("ctrl+i", "jump forward")),
 	CopyLink:      key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy link")),
@@ -1238,9 +1242,9 @@ func (m Model) View() string {
 			if m.filter.isActive() {
 				helpParts = append(helpParts, "^x clear")
 			}
-			helpParts = append(helpParts, "T filter")
+			helpParts = append(helpParts, "x filter")
 			helpParts = append(helpParts, "m viewed")
-			helpParts = append(helpParts, "t tree")
+			helpParts = append(helpParts, "b tree")
 			helpParts = append(helpParts, "i info")
 			helpParts = append(helpParts, "ctrl+s submit")
 			helpParts = append(helpParts, "? help")
@@ -1248,11 +1252,12 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "j/k scroll")
 			helpParts = append(helpParts, "f/F file")
 			helpParts = append(helpParts, "h/H hunk")
+			helpParts = append(helpParts, "t/T thread")
 			helpParts = append(helpParts, "c/C comment")
 			helpParts = append(helpParts, "/ search")
-			helpParts = append(helpParts, "T filter")
+			helpParts = append(helpParts, "x filter")
 			helpParts = append(helpParts, "enter comment")
-			helpParts = append(helpParts, "t tree")
+			helpParts = append(helpParts, "b tree")
 			helpParts = append(helpParts, "m viewed")
 			if m.nav.visualMode {
 				helpParts = append(helpParts, "(SELECT)")
@@ -1300,9 +1305,9 @@ func (m Model) currentPosition() (label string, index int, total int) {
 	switch m.nav.activeCycler {
 	case CyclerFile:
 		return "File", m.nav.cursor.FileIdx + 1, len(m.files)
-	case CyclerComment:
+	case CyclerThread:
 		if len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
-			return "Comment", 0, 0
+			return "Thread", 0, 0
 		}
 		path := m.files[m.nav.cursor.FileIdx].Path
 		t, p := 0, 0
@@ -1314,7 +1319,18 @@ func (m Model) currentPosition() (label string, index int, total int) {
 				}
 			}
 		}
-		return "Comment", p, t
+		return "Thread", p, t
+	case CyclerComment:
+		positions := m.buildCommentPositions()
+		total := len(positions)
+		cur := 0
+		for i, cp := range positions {
+			if cp.fileIdx == m.nav.cursor.FileIdx && cp.diffLineIdx == m.nav.cursor.LineIdx && cp.commentIdx == m.nav.cursor.CommentIdx {
+				cur = i + 1
+				break
+			}
+		}
+		return "Comment", cur, total
 	case CyclerSearch:
 		if m.search.Query() == "" {
 			return "Match", 0, 0
@@ -1356,15 +1372,16 @@ func helpSections() []helppopup.Section {
 		helppopup.Bind("Navigation",
 			keys.Down, keys.Up, keys.PageDown, keys.PageUp,
 			keys.NextFile, keys.PrevFile, keys.NextHunk, keys.PrevHunk,
-			keys.NextComment, keys.PrevComment, keys.JumpBack, keys.JumpForward,
+			keys.NextThread, keys.PrevThread, keys.NextComment, keys.PrevComment,
+			keys.JumpBack, keys.JumpForward,
 		),
 		helppopup.Bind("Search",
 			keys.Search, keys.NextSearch, keys.PrevSearch, keys.FilterFile,
 		),
 		{Title: "Filter", Entries: []helppopup.Entry{
-			{Key: "Tf", Desc: "narrow by regex path"},
-			{Key: "To", Desc: "toggle CODEOWNERS filter"},
-			{Key: "Tx", Desc: "clear all filters"},
+			{Key: "xf", Desc: "narrow by regex path"},
+			{Key: "xo", Desc: "toggle CODEOWNERS filter"},
+			{Key: "xx", Desc: "clear all filters"},
 		}},
 		helppopup.Bind("Review",
 			keys.Enter, keys.SelectLine, keys.MarkViewed,
