@@ -89,3 +89,19 @@
 # Enable CODEOWNERS-based owner filter in the diff file tree.
 # true = always on, false = always off, omit = auto (on when identity available).
 # owner_filter = true
+
+# ---------------------------------------------------------------------------
+# AI Review Assistant
+# ---------------------------------------------------------------------------
+
+# [ai]
+# Enable the AI review assistant. Requires `claude` CLI installed
+# (npm install -g @anthropic-ai/claude-code).
+# enabled = false
+
+# Model to use. Optional — uses Claude Code's default if not set.
+# model = "sonnet"
+
+# Maximum agent turns per query. Higher = deeper exploration, slower response.
+# Optional — uses Claude Code's default if not set (0 = default).
+# max_turns = 10

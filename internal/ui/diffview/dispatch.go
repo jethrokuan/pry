@@ -23,6 +23,8 @@ const (
 	modePRInfo
 	modeCommentPopup
 	modeCommentSelect
+	modeAIInput
+	modeAIPanel
 )
 
 // activeMode returns the current input mode based on model state.
@@ -30,6 +32,10 @@ const (
 // first, then overlay modes, then normal.
 func (m Model) activeMode() inputMode {
 	switch {
+	case m.aiPanel.IsInputActive():
+		return modeAIInput
+	case m.aiPanel.IsOpen():
+		return modeAIPanel
 	case m.search.gotoActive:
 		return modeGoto
 	case m.search.active:
@@ -56,6 +62,10 @@ func (m Model) activeMode() inputMode {
 // handleKey dispatches a key event to the appropriate mode handler.
 func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch m.activeMode() {
+	case modeAIInput:
+		return m.handleAIInputKey(msg)
+	case modeAIPanel:
+		return m.handleAIPanelKey(msg)
 	case modeGoto, modeSearch, modeFilter:
 		return m.handleSearchBarKey(msg)
 	case modeNarrowRegex:
@@ -287,6 +297,13 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			flash.ShowMsg{ID: "refresh", Text: "Refreshing…", Style: flash.StyleSpinner}.Cmd(),
 			m.refreshCmd(),
 		)
+
+	// AI assistant
+	case key.Matches(msg, keys.AIAsk):
+		if !m.aiEnabled {
+			return m, flash.ShowMsg{ID: "diffview", Text: "AI not available — install claude CLI (npm i -g @anthropic-ai/claude-code)", Expires: 3 * time.Second}.Cmd()
+		}
+		return m.toggleAIPanel()
 
 	// Dedicated navigation keys (work in both tree and diff focus)
 	case key.Matches(msg, keys.NextFile):

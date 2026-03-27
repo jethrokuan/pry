@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os/exec"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/jethrokuan/pry/internal/ai"
 	"github.com/jethrokuan/pry/internal/config"
 	"github.com/jethrokuan/pry/internal/jj"
 	"github.com/jethrokuan/pry/internal/review"
@@ -49,6 +52,7 @@ type Model struct {
 	selectedPR *review.PullRequest
 	initialPR  int  // PR number passed via CLI argument (0 = none)
 	useJJ      bool // true when repo is Jujutsu-managed
+	aiAgent    *ai.Agent // nil when AI is disabled or claude not available
 }
 
 // New creates the application model.
@@ -64,6 +68,7 @@ func New(svc review.Service, cfg config.Config, filters []review.PRFilter) Model
 		prList:  pl,
 		flash:   flash.New(),
 		useJJ:   useJJ,
+		aiAgent: createAIAgent(cfg),
 	}
 }
 
@@ -84,10 +89,40 @@ func NewWithPR(svc review.Service, cfg config.Config, prNumber int, filters []re
 		flash:      flash.New(),
 		selectedPR: pr,
 		initialPR:  prNumber,
+		aiAgent:    createAIAgent(cfg),
 	}
 	m.diffView = diffview.New(svc, pr, m.diffviewOpts()...)
 	return m
 }
+
+// createAIAgent creates the AI agent if enabled and claude is available.
+func createAIAgent(cfg config.Config) *ai.Agent {
+	if cfg.AI.Enabled != nil && !*cfg.AI.Enabled {
+		return nil
+	}
+	if !ai.Available() {
+		slog.Info("AI assistant disabled: claude CLI not found on PATH")
+		return nil
+	}
+	repoRoot, err := gitRepoRoot()
+	if err != nil {
+		slog.Warn("AI assistant disabled: could not determine repo root", "error", err)
+		return nil
+	}
+	slog.Info("AI assistant enabled", "model", cfg.AI.Model, "max_turns", cfg.AI.MaxTurns)
+	return ai.NewAgent(repoRoot, cfg.AI.Model, cfg.AI.MaxTurns)
+}
+
+// gitRepoRoot returns the root directory of the current git repository.
+func gitRepoRoot() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 
 // diffviewOpts converts config to diffview options.
 func (m Model) diffviewOpts() []diffview.Option {
@@ -104,6 +139,9 @@ func (m Model) diffviewOpts() []diffview.Option {
 	}
 	if m.useJJ {
 		opts = append(opts, diffview.WithJujutsu())
+	}
+	if m.aiAgent != nil {
+		opts = append(opts, diffview.WithAI(m.aiAgent))
 	}
 	return opts
 }

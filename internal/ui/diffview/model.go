@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/jethrokuan/pry/internal/ai"
 	"github.com/jethrokuan/pry/internal/clipboard"
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/git"
@@ -171,6 +172,7 @@ type KeyMap struct {
 	Suggest       key.Binding
 	Checkout      key.Binding
 	Refresh       key.Binding
+	AIAsk         key.Binding
 }
 
 var keys = KeyMap{
@@ -213,6 +215,7 @@ var keys = KeyMap{
 	Suggest:       key.NewBinding(key.WithKeys("shift+enter"), key.WithHelp("S-enter", "suggest")),
 	Checkout:      key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "checkout PR")),
 	Refresh:       key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
+	AIAsk:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "AI assistant")),
 }
 
 // Inline comment key bindings (when textarea is active)
@@ -263,6 +266,10 @@ type Model struct {
 	prInfoActive   bool
 	prInfoViewport viewport.Model
 
+	// AI review assistant panel
+	aiPanel     AIPanel
+	aiEnabled   bool // true when AI is available and configured
+	aiCheckedOut bool // true after PR branch has been checked out for AI
 
 	// Caches
 	mdCache  map[mdCacheKey]string // rendered markdown cache
@@ -336,6 +343,14 @@ func WithOwnerFilterDisabled() Option {
 	}
 }
 
+// WithAI configures the AI review assistant agent.
+func WithAI(agent *ai.Agent) Option {
+	return func(m *Model) {
+		m.aiPanel.SetAgent(agent)
+		m.aiEnabled = true
+	}
+}
+
 func New(svc review.Service, pr *review.PullRequest, opts ...Option) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -359,6 +374,7 @@ func New(svc review.Service, pr *review.PullRequest, opts ...Option) Model {
 		comments: CommentPanel{
 			expanded: make(map[string]bool),
 		},
+		aiPanel: initAIPanel(),
 	}
 
 	for _, opt := range opts {
@@ -731,11 +747,72 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.editor.SetValue(msg.content)
 		}
 
+	// AI panel streaming messages
+	case aiFirstChunkMsg, aiNextChunkMsg, aiStreamDoneMsg, aiStreamErrorMsg:
+		cmd := m.aiPanel.HandleStreamMsg(msg)
+		return m, cmd
+
+	case aiDraftResultMsg:
+		m.aiPanel.HandleDraftResult(msg)
+		if msg.err == nil && msg.result != nil {
+			return m, m.applyDraftResult(msg.result)
+		}
+
+	case aiActionMsg:
+		// Emit inlineEditorSaveMsg for each action — reuses the existing comment flow
+		var cmds []tea.Cmd
+		for _, action := range msg.actions {
+			side := action.Side
+			if side == "" {
+				side = "RIGHT"
+			}
+			saveMsg := inlineEditorSaveMsg{
+				body: action.Body,
+				path: action.Path,
+				line: action.Line,
+				side: side,
+				mode: commentModeComment,
+			}
+			newM, cmd := m.handleEditorSave(saveMsg)
+			m = newM
+			cmds = append(cmds, cmd)
+		}
+		if len(msg.actions) > 0 {
+			cmds = append(cmds, flash.ShowMsg{
+				ID:      "ai-action",
+				Text:    fmt.Sprintf("AI posted %d comment(s)", len(msg.actions)),
+				Style:   flash.StyleSuccess,
+				Expires: 2 * time.Second,
+			}.Cmd())
+		}
+		return m, tea.Batch(cmds...)
+
+	case aiCheckoutDoneMsg:
+		if msg.err != nil {
+			m.aiCheckedOut = false // allow retry
+			m.aiPanel.errorText = fmt.Sprintf("Checkout failed: %v", msg.err)
+			m.aiPanel.state = aiPanelActive
+			m.aiPanel.input.Focus()
+			m.aiPanel.rebuildViewportContent()
+			return m, flash.ShowMsg{ID: "ai-checkout", Text: "Checkout failed: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
+		}
+		// Checkout succeeded — now submit the queued query
+		cmd := m.aiPanel.Submit(msg.task)
+		return m, tea.Batch(
+			flash.ShowMsg{ID: "ai-checkout", Text: "Checked out " + m.pr.Branch, Style: flash.StyleSuccess, Expires: 2 * time.Second}.Cmd(),
+			cmd,
+		)
 
 	case spinner.TickMsg:
+		var cmds []tea.Cmd
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		return m, cmd
+		cmds = append(cmds, cmd)
+		if m.aiPanel.IsOpen() || m.aiPanel.IsWorking() {
+			aiCmd := m.aiPanel.HandleStreamMsg(msg)
+			cmds = append(cmds, aiCmd)
+		}
+		return m, tea.Batch(cmds...)
 
 	case tea.MouseWheelMsg:
 		// Forward mouse wheel events to active popup viewports for scroll support
@@ -759,6 +836,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m.handleInlineEditorKey(msg)
 		}
 		return m.handleKey(msg)
+	}
+
+	// Forward non-key messages to AI panel textarea when input is active
+	if m.aiPanel.IsInputActive() {
+		var cmd tea.Cmd
+		m.aiPanel.input, cmd = m.aiPanel.input.Update(msg)
+		return m, cmd
 	}
 
 	// Forward non-key messages to textarea when active
@@ -957,6 +1041,19 @@ func (m *Model) updateViewports() {
 
 	m.nav.treeViewport = viewport.New(viewport.WithWidth(treeWidth), viewport.WithHeight(contentHeight))
 	m.nav.diffViewport = viewport.New(viewport.WithWidth(diffWidth), viewport.WithHeight(contentHeight))
+
+	if m.aiPanel.IsOpen() {
+		// Floating panel takes most of the screen
+		panelW := m.width - 6
+		if panelW > 120 {
+			panelW = 120
+		}
+		panelH := m.height - 6
+		if panelH < 10 {
+			panelH = 10
+		}
+		m.aiPanel.Resize(panelW, panelH)
+	}
 
 	if len(m.files) > 0 {
 		m.nav.treeViewport.SetContent(m.renderFileTree())
@@ -1246,6 +1343,9 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "m viewed")
 			helpParts = append(helpParts, "b tree")
 			helpParts = append(helpParts, "i info")
+			if m.aiEnabled {
+				helpParts = append(helpParts, "a AI")
+			}
 			helpParts = append(helpParts, "ctrl+s submit")
 			helpParts = append(helpParts, "? help")
 		} else {
@@ -1266,6 +1366,9 @@ func (m Model) View() string {
 				helpParts = append(helpParts, fmt.Sprintf("[/%s n/N]", m.search.Query()))
 			}
 			helpParts = append(helpParts, "i info")
+			if m.aiEnabled {
+				helpParts = append(helpParts, "a AI")
+			}
 			helpParts = append(helpParts, "ctrl+s submit")
 			helpParts = append(helpParts, "? help")
 		}
@@ -1281,6 +1384,17 @@ func (m Model) View() string {
 		}
 
 
+		// Show AI background indicator when working but hidden
+		if m.aiEnabled && m.aiPanel.IsWorking() && !m.aiPanel.IsOpen() {
+			status := m.aiPanel.StatusText()
+			if status == "" {
+				status = "working..."
+			}
+			aiLabel := fmt.Sprintf("[AI: %s]", status)
+			helpParts = append(helpParts,
+				lipgloss.NewStyle().Foreground(styles.Cyan).Render(aiLabel))
+		}
+
 		b.WriteString(styles.HelpStyle.Render(strings.Join(helpParts, "  ")))
 	}
 
@@ -1295,6 +1409,10 @@ func (m Model) View() string {
 	}
 	if m.prInfoActive {
 		result = m.overlayPRInfoPopup(result)
+	}
+	if m.aiPanel.IsOpen() {
+		dropdown := m.renderAIContextDropdown()
+		result = m.overlayAIPanel(result, dropdown)
 	}
 
 	return result
@@ -1371,13 +1489,13 @@ func (m Model) currentPosition() (label string, index int, total int) {
 
 // overlayHelpPopup renders a centered help popup over the existing content.
 func (m Model) overlayHelpPopup(base string) string {
-	popup := helppopup.Render(helpSections(), m.width)
+	popup := helppopup.Render(m.helpSections(), m.width)
 	return m.overlayGeneric(base, popup)
 }
 
 // helpSections returns the keybinding sections for the diffview help popup.
-func helpSections() []helppopup.Section {
-	return []helppopup.Section{
+func (m Model) helpSections() []helppopup.Section {
+	sections := []helppopup.Section{
 		helppopup.Bind("Navigation",
 			keys.Down, keys.Up, keys.PageDown, keys.PageUp,
 			keys.NextFile, keys.PrevFile, keys.NextHunk, keys.PrevHunk,
@@ -1402,9 +1520,15 @@ func helpSections() []helppopup.Section {
 			helppopup.FromBinding(keys.EditComment),
 			helppopup.FromBinding(keys.DeleteComment),
 		}},
-		helppopup.Bind("Other",
-			keys.ToggleTree, keys.Info, keys.Refresh, keys.OpenInBrowser, keys.CopyLink,
-			keys.Checkout, keys.Editor, keys.Help, keys.Back, keys.Quit,
-		),
 	}
+	if m.aiEnabled {
+		sections = append(sections, helppopup.Bind("AI Assistant",
+			keys.AIAsk,
+		))
+	}
+	sections = append(sections, helppopup.Bind("Other",
+		keys.ToggleTree, keys.Info, keys.Refresh, keys.OpenInBrowser, keys.CopyLink,
+		keys.Checkout, keys.Editor, keys.Help, keys.Back, keys.Quit,
+	))
+	return sections
 }

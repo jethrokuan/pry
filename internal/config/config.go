@@ -39,6 +39,13 @@ type CacheConfig struct {
 	TTL     string `koanf:"ttl"`
 }
 
+// AIConfig holds AI review assistant settings.
+type AIConfig struct {
+	Enabled  *bool  `koanf:"enabled"`  // nil = auto (on when claude found), false = off
+	Model    string `koanf:"model"`
+	MaxTurns int    `koanf:"max_turns"`
+}
+
 // Config holds user configuration for the tool.
 type Config struct {
 	Editor   string         `koanf:"editor"`
@@ -48,6 +55,7 @@ type Config struct {
 	FileTree FileTreeConfig `koanf:"file_tree"`
 	PRList   PRListConfig   `koanf:"pr_list"`
 	Cache    CacheConfig    `koanf:"cache"`
+	AI       AIConfig       `koanf:"ai"`
 }
 
 // CacheEnabled returns whether caching is enabled (default: true).
