@@ -520,7 +520,9 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 	hidden := len(allLines) - (maxH - 1)
 	truncText :=
 		lipgloss.NewStyle().Foreground(styles.Warning).Render(fmt.Sprintf("  … %d more lines", hidden)) +
-		" " + lipgloss.NewStyle().Foreground(styles.Muted).Render("[enter to view all]")
+		" " + lipgloss.NewStyle().Foreground(styles.Muted).Render("[") +
+		lipgloss.NewStyle().Foreground(styles.Info).Bold(true).Render(keys.ViewComment.Help().Key) +
+		lipgloss.NewStyle().Foreground(styles.Muted).Render(" to view all]")
 	truncLine := gutterBase + truncText
 	b.WriteString(truncLine + "\n")
 
