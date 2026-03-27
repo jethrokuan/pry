@@ -522,7 +522,7 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 		lipgloss.NewStyle().Foreground(styles.Warning).Render(fmt.Sprintf("  … %d more lines", hidden)) +
 		" " + lipgloss.NewStyle().Foreground(styles.Muted).Render("[") +
 		lipgloss.NewStyle().Foreground(styles.Info).Bold(true).Render(keys.ViewComment.Help().Key) +
-		lipgloss.NewStyle().Foreground(styles.Muted).Render(" to view all]")
+		lipgloss.NewStyle().Foreground(styles.Muted).Render(" to expand]")
 	truncLine := gutterBase + truncText
 	b.WriteString(truncLine + "\n")
 
@@ -531,20 +531,14 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 
 // renderCommentPopup builds the bordered comment popup.
 func (m Model) renderCommentPopup() string {
-	path := ""
-	lineNum := 0
-	if len(m.files) > 0 && m.nav.cursor.LineIdx < len(m.nav.diffLines) {
-		path = m.files[m.nav.cursor.FileIdx].Path
-		dl := m.nav.diffLines[m.nav.cursor.LineIdx]
-		if dl.newLine > 0 {
-			lineNum = dl.newLine
-		} else {
-			lineNum = dl.oldLine
-		}
+	c := m.selectedComment()
+	author := ""
+	if c != nil {
+		author = "@" + c.Author
 	}
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
-	title := titleStyle.Render(fmt.Sprintf("  Comments on %s:%d", path, lineNum))
+	title := titleStyle.Render(fmt.Sprintf("  Comment by %s", author))
 
 	scrollPct := ""
 	if m.comments.popupViewport.TotalLineCount() > m.comments.popupViewport.Height() {
@@ -564,7 +558,6 @@ func (m Model) renderCommentPopup() string {
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Primary).
-		Background(styles.BgOverlay).
 		Padding(0, 1).
 		Width(popupW)
 
@@ -645,7 +638,7 @@ func (m *Model) buildPRInfoContent(width int) string {
 	if m.pr.Body == "" {
 		b.WriteString(labelStyle.Render("No description provided."))
 	} else {
-		rendered := m.renderMarkdown(m.pr.Body, width, styles.BgOverlay)
+		rendered := m.renderMarkdown(m.pr.Body, width)
 		b.WriteString(rendered)
 	}
 
@@ -673,7 +666,7 @@ func (m *Model) buildPRInfoContent(width int) string {
 					b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", t.Path, t.Line)))
 				}
 				b.WriteString("\n")
-				rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
+				rendered := m.renderMarkdown(c.Body, width)
 				b.WriteString(bodyStyle.Render(rendered) + "\n")
 				b.WriteString(innerSep + "\n\n")
 			}
@@ -706,7 +699,6 @@ func (m Model) renderPRInfoPopup() string {
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Primary).
-		Background(styles.BgOverlay).
 		Padding(0, 1).
 		Width(popupW)
 

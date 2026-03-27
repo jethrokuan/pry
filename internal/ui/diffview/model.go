@@ -1210,7 +1210,7 @@ func (m Model) View() string {
 		var helpParts []string
 		helpParts = append(helpParts, "j/k select comment")
 		helpParts = append(helpParts, "enter reply")
-		helpParts = append(helpParts, keys.ViewComment.Help().Key+" view all")
+		helpParts = append(helpParts, keys.ViewComment.Help().Key+" expand")
 		if flatIdx := m.flatCommentIndex(); flatIdx < len(refs) && refs[flatIdx].editable {
 			helpParts = append(helpParts, "e edit")
 			helpParts = append(helpParts, "d delete")

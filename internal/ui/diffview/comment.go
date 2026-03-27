@@ -9,10 +9,11 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
+	"charm.land/glamour/v2"
+	glamourstyles "charm.land/glamour/v2/styles"
 
 	"github.com/jethrokuan/pry/internal/review"
-	"github.com/jethrokuan/pry/internal/ui/styles"
+	"github.com/jethrokuan/pry/internal/ui/mdutil"
 )
 
 // --- Comment selection ---
@@ -175,10 +176,11 @@ func commentKey(path string, line int) string {
 	return fmt.Sprintf("%s:%d", path, line)
 }
 
-// openCommentPopup opens a scrollable popup showing all comments for the
-// current diff line.
+// openCommentPopup opens a scrollable popup showing the currently selected comment
+// rendered in markdown.
 func (m *Model) openCommentPopup() {
-	if len(m.files) == 0 || m.nav.cursor.LineIdx >= len(m.nav.diffLines) {
+	c := m.selectedComment()
+	if c == nil {
 		return
 	}
 
@@ -186,15 +188,19 @@ func (m *Model) openCommentPopup() {
 	if popupW > 120 {
 		popupW = 120
 	}
-	// Height leaves room for border + title + footer
-	popupH := m.height - 6
-	if popupH < 5 {
-		popupH = 5
-	}
 	contentW := popupW - 4 // border(2) + padding(2)
-	vpH := popupH - 2     // title + footer
+	content := m.buildCommentPopupContent(c, contentW)
 
-	content := m.buildCommentPopupContent(contentW)
+	// Size the viewport to fit content, capped at terminal height - 6
+	contentLines := strings.Count(content, "\n") + 1
+	maxH := m.height - 8 // border(2) + title + footer + margin
+	if maxH < 5 {
+		maxH = 5
+	}
+	vpH := contentLines
+	if vpH > maxH {
+		vpH = maxH
+	}
 
 	vp := viewport.New(viewport.WithWidth(contentW), viewport.WithHeight(vpH))
 	vp.SetContent(content)
@@ -203,46 +209,34 @@ func (m *Model) openCommentPopup() {
 	m.comments.popupViewport = vp
 }
 
-// buildCommentPopupContent formats all comments for the current diff line
-// into a string suitable for display in the popup viewport.
-func (m *Model) buildCommentPopupContent(width int) string {
-	dl := m.nav.diffLines[m.nav.cursor.LineIdx]
-	path := m.files[m.nav.cursor.FileIdx].Path
-
-	authorStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
-	draftStyle := lipgloss.NewStyle().Foreground(styles.Warning)
-	bodyStyle := lipgloss.NewStyle().Width(width)
-	sepStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-	separator := sepStyle.Render(strings.Repeat("─", width))
-
-	var b strings.Builder
-
-	writeComments := func(lineNum int, side string) {
-		for _, c := range m.comments.CommentsForLine(path, lineNum, side) {
-			label := "💬"
-			if c.IsPending {
-				label = "📝"
-			}
-			b.WriteString(label + " " + authorStyle.Render("@"+c.Author))
-			if c.IsPending {
-				b.WriteString(" " + draftStyle.Render("(draft)"))
-			}
-			b.WriteString("\n\n")
-			rendered := m.renderMarkdown(c.Body, width, styles.BgOverlay)
-			b.WriteString(bodyStyle.Render(rendered) + "\n\n")
-			b.WriteString(separator + "\n\n")
-		}
+// buildCommentPopupContent renders a single comment's body as markdown
+// using glamour's standard dark style with zero document margin (the popup
+// border already provides padding).
+func (m *Model) buildCommentPopupContent(c *review.Comment, width int) string {
+	if width < 10 {
+		width = 10
 	}
-
-	if dl.newLine > 0 {
-		writeComments(dl.newLine, "RIGHT")
+	body := mdutil.ReplaceImages(c.Body)
+	sc := glamourstyles.DarkStyleConfig
+	sc.Document.Margin = uintPtr(0)
+	// Clear all background colors — the popup border handles the background
+	sc.H1.StylePrimitive.BackgroundColor = nil
+	sc.Code.StylePrimitive.BackgroundColor = nil
+	sc.CodeBlock.StyleBlock.StylePrimitive.BackgroundColor = nil
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithWordWrap(width),
+		glamour.WithStyles(sc),
+	)
+	if err != nil {
+		return body
 	}
-	if dl.oldLine > 0 {
-		writeComments(dl.oldLine, "LEFT")
+	rendered, err := renderer.Render(body)
+	if err != nil {
+		return body
 	}
-
-	return strings.TrimRight(b.String(), "\n")
+	return strings.TrimRight(rendered, "\n")
 }
+
 
 // --- Thread/comment mutation methods ---
 // All data mutations go through these methods, which automatically
