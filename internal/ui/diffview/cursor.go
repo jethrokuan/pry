@@ -15,7 +15,8 @@ type CursorTarget struct {
 	Kind       CursorKind
 	FileIdx    int // index into the files slice
 	LineIdx    int // index into diffLines
-	CommentIdx int // index into comment refs at LineIdx (only meaningful when Kind == CursorComment)
+	ThreadIdx  int // index into threads at this line (cross-side: RIGHT first, then LEFT)
+	CommentIdx int // index within the thread's Comments slice
 }
 
 // AsLine returns a copy of this cursor reset to line mode, preserving LineIdx.

@@ -59,16 +59,62 @@ func (m *Model) commentRefsAtCursor() []commentRef {
 	return m.commentRefsAtLine(m.nav.cursor.LineIdx)
 }
 
+// threadsAtLine returns all threads at a diff line in cross-side order (RIGHT first, then LEFT),
+// matching the order used by commentRefsAtLine and renderSideComments.
+func (m *Model) threadsAtLine(lineIdx int) []review.Thread {
+	if lineIdx < 0 || lineIdx >= len(m.nav.diffLines) || len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
+		return nil
+	}
+	dl := m.nav.diffLines[lineIdx]
+	path := m.files[m.nav.cursor.FileIdx].Path
+	var threads []review.Thread
+	if dl.newLine > 0 {
+		threads = append(threads, m.comments.ThreadsForLine(path, dl.newLine, "RIGHT")...)
+	}
+	if dl.oldLine > 0 {
+		threads = append(threads, m.comments.ThreadsForLine(path, dl.oldLine, "LEFT")...)
+	}
+	return threads
+}
+
+// threadsAtCursor returns all threads at the current cursor line.
+func (m *Model) threadsAtCursor() []review.Thread {
+	return m.threadsAtLine(m.nav.cursor.LineIdx)
+}
+
+// flatCommentIndex converts a (ThreadIdx, CommentIdx) pair to a flat index
+// into the cross-side comment list (as returned by commentRefsAtLine).
+func (m *Model) flatCommentIndex() int {
+	threads := m.threadsAtCursor()
+	flat := 0
+	for i := 0; i < m.nav.cursor.ThreadIdx && i < len(threads); i++ {
+		flat += len(threads[i].Comments)
+	}
+	return flat + m.nav.cursor.CommentIdx
+}
+
+// selectedThread returns the thread at the cursor's ThreadIdx, or nil.
+func (m *Model) selectedThread() *review.Thread {
+	threads := m.threadsAtCursor()
+	if m.nav.cursor.ThreadIdx < 0 || m.nav.cursor.ThreadIdx >= len(threads) {
+		return nil
+	}
+	return &threads[m.nav.cursor.ThreadIdx]
+}
+
+// selectedComment returns the comment at the cursor's ThreadIdx/CommentIdx, or nil.
+func (m *Model) selectedComment() *review.Comment {
+	t := m.selectedThread()
+	if t == nil || m.nav.cursor.CommentIdx < 0 || m.nav.cursor.CommentIdx >= len(t.Comments) {
+		return nil
+	}
+	return &t.Comments[m.nav.cursor.CommentIdx]
+}
+
 // replyToSelectedThread opens the inline editor in reply mode for the thread
 // containing the currently selected comment.
 func (m Model) replyToSelectedThread() (Model, tea.Cmd) {
-	refs := m.commentRefsAtCursor()
-	if !m.nav.cursor.IsComment() || m.nav.cursor.CommentIdx >= len(refs) {
-		return m, nil
-	}
-	ref := refs[m.nav.cursor.CommentIdx]
-
-	t, _ := m.findThreadAndComment(ref.commentID)
+	t := m.selectedThread()
 	if t == nil || len(t.Comments) == 0 {
 		return m, nil
 	}
@@ -90,17 +136,12 @@ func (m Model) replyToSelectedThread() (Model, tea.Cmd) {
 
 // editSelectedComment opens the inline editor for the selected editable comment.
 func (m Model) editSelectedComment() (Model, tea.Cmd) {
-	refs := m.commentRefsAtCursor()
-	if !m.nav.cursor.IsComment() || m.nav.cursor.CommentIdx >= len(refs) {
-		return m, nil
-	}
-	ref := refs[m.nav.cursor.CommentIdx]
-	if !ref.editable {
-		return m, nil
-	}
-
-	t, c := m.findThreadAndComment(ref.commentID)
+	t := m.selectedThread()
+	c := m.selectedComment()
 	if t == nil || c == nil {
+		return m, nil
+	}
+	if !c.IsPending || c.Author != m.currentUser {
 		return m, nil
 	}
 
@@ -113,16 +154,12 @@ func (m Model) editSelectedComment() (Model, tea.Cmd) {
 
 // deleteSelectedComment deletes the selected editable comment.
 func (m Model) deleteSelectedComment() (Model, tea.Cmd) {
-	refs := m.commentRefsAtCursor()
-	if !m.nav.cursor.IsComment() || m.nav.cursor.CommentIdx >= len(refs) {
-		return m, nil
-	}
-	ref := refs[m.nav.cursor.CommentIdx]
-	if !ref.editable {
+	c := m.selectedComment()
+	if c == nil || !c.IsPending || c.Author != m.currentUser {
 		return m, nil
 	}
 
-	commentID := ref.commentID
+	commentID := c.ID
 
 	// Optimistically remove
 	m.removeCommentByID(commentID)

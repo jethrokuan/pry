@@ -103,17 +103,37 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 			m.updateDiffContent()
 			return m, nil, true
 		}
+		// At first comment in thread — try previous thread
+		if m.nav.cursor.ThreadIdx > 0 {
+			m.nav.cursor.ThreadIdx--
+			threads := m.threadsAtCursor()
+			if m.nav.cursor.ThreadIdx < len(threads) {
+				m.nav.cursor.CommentIdx = len(threads[m.nav.cursor.ThreadIdx].Comments) - 1
+			}
+			m.updateDiffContent()
+			return m, nil, true
+		}
 		m.nav.cursor = m.nav.cursor.AsLine()
 		m.updateDiffContent()
 		return m, nil, true
 	case key.Matches(msg, keys.Down):
-		refs := m.commentRefsAtCursor()
-		if m.nav.cursor.CommentIdx < len(refs)-1 {
-			m.nav.cursor.CommentIdx++
-			m.updateDiffContent()
-			return m, nil, true
+		threads := m.threadsAtCursor()
+		if m.nav.cursor.ThreadIdx < len(threads) {
+			t := threads[m.nav.cursor.ThreadIdx]
+			if m.nav.cursor.CommentIdx < len(t.Comments)-1 {
+				m.nav.cursor.CommentIdx++
+				m.updateDiffContent()
+				return m, nil, true
+			}
+			// Past last comment in thread — try next thread
+			if m.nav.cursor.ThreadIdx < len(threads)-1 {
+				m.nav.cursor.ThreadIdx++
+				m.nav.cursor.CommentIdx = 0
+				m.updateDiffContent()
+				return m, nil, true
+			}
 		}
-		// Past last comment → move to next diff line
+		// Past last thread → move to next diff line
 		m.nav.cursor = m.nav.cursor.AsLine()
 		if m.nav.cursor.LineIdx < len(m.nav.diffLines)-1 {
 			m.nav.cursor.LineIdx++
@@ -137,8 +157,8 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 		newM, cmd := m.editSelectedComment()
 		return newM, cmd, true
 	case key.Matches(msg, keys.DeleteComment):
-		refs := m.commentRefsAtCursor()
-		if m.nav.cursor.CommentIdx >= 0 && m.nav.cursor.CommentIdx < len(refs) && refs[m.nav.cursor.CommentIdx].editable {
+		c := m.selectedComment()
+		if c != nil && c.IsPending && c.Author == m.currentUser {
 			m.confirmDelete = true
 			return m, nil, true
 		}

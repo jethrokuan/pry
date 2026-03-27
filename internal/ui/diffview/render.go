@@ -399,7 +399,7 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 			renderSideComments := func(lineNum int, side string) {
 				sel := -1
 				if isCurrent && m.nav.cursor.IsComment() {
-					sel = m.nav.cursor.CommentIdx - commentSelBase
+					sel = m.flatCommentIndex() - commentSelBase
 				}
 				n := m.renderLineComments(&b, file.Path, lineNum, side, sel)
 				commentSelBase += n
@@ -440,8 +440,6 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 
 	// Gutter matching diff lines: marker(▎) + line-num-area("     │") + space
 	// Content area gets a subtle background to visually group the comment
-	commentBg := styles.BgSurface
-	cursorBg := styles.BgCursor
 	gutterPipe := lipgloss.NewStyle().Foreground(styles.Muted).Render("     │")
 	bar := lipgloss.NewStyle().Foreground(styles.Warning).Render("▎")
 	gutterBase := bar + gutterPipe
@@ -477,11 +475,11 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 	// Build all comment lines into a buffer for potential capping
 	var allLines []string
 
-	buildComment := func(header, bodyText string, bg color.Color) {
+	buildComment := func(header, bodyText string, selected bool) {
 		borderChar := lipgloss.NewStyle().Foreground(styles.Muted).Render("│")
 		selectedBorder := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▌")
 		border := borderChar
-		if bg == cursorBg {
+		if selected {
 			border = selectedBorder
 		}
 
@@ -497,17 +495,13 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 	}
 
 	for idx, c := range comments {
-		bg := commentBg
-		if idx == selectedIdx {
-			bg = cursorBg
-		}
 		label := "💬"
 		if c.IsPending {
 			label = "📝 (draft)"
 		}
 		header := fmt.Sprintf("%s %s:", label,
 			styles.CommentAuthor.Render("@"+c.Author))
-		buildComment(header, c.Body, bg)
+		buildComment(header, c.Body, idx == selectedIdx)
 	}
 
 	// Check if capping is needed

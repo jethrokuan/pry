@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/flash"
 )
 
@@ -354,7 +355,7 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 				if dl.oldLine > 0 {
 					m.comments.expanded[commentKey(path, dl.oldLine)] = true
 				}
-				m.nav.cursor = CursorTarget{Kind: CursorComment, FileIdx: m.nav.cursor.FileIdx, LineIdx: m.nav.cursor.LineIdx, CommentIdx: 0}
+				m.nav.cursor = CursorTarget{Kind: CursorComment, FileIdx: m.nav.cursor.FileIdx, LineIdx: m.nav.cursor.LineIdx, ThreadIdx: 0, CommentIdx: 0}
 				m.updateDiffContent()
 				return m, nil
 			}
@@ -617,7 +618,7 @@ func (m *Model) navigateThread(forward bool) tea.Cmd {
 	}
 
 	m.nav.cursor.LineIdx = diffIdx
-	m.expandAndSelectComment(diffIdx, -1)
+	m.expandAndSelectComment(diffIdx, 0, -1)
 	m.updateDiffContent()
 	m.syncViewportToCursorWithComments()
 
@@ -632,8 +633,8 @@ func (m *Model) navigateThread(forward bool) tea.Cmd {
 }
 
 // expandAndSelectComment expands the comment block at the given line index and enters comment select mode.
-// commentIdx selects which comment to highlight; -1 means the last comment.
-func (m *Model) expandAndSelectComment(lineIdx int, commentIdx int) {
+// threadIdx selects which thread; commentIdx selects which comment within the thread (-1 means last).
+func (m *Model) expandAndSelectComment(lineIdx int, threadIdx int, commentIdx int) {
 	if lineIdx < 0 || lineIdx >= len(m.nav.diffLines) || len(m.files) == 0 {
 		return
 	}
@@ -645,58 +646,88 @@ func (m *Model) expandAndSelectComment(lineIdx int, commentIdx int) {
 	if dl.oldLine > 0 {
 		m.comments.expanded[commentKey(path, dl.oldLine)] = true
 	}
-	if commentIdx < 0 {
-		refs := m.commentRefsAtLine(lineIdx)
-		if len(refs) > 0 {
-			commentIdx = len(refs) - 1
-		} else {
+	threads := m.threadsAtLine(lineIdx)
+	if threadIdx < 0 || threadIdx >= len(threads) {
+		threadIdx = 0
+	}
+	if commentIdx < 0 && threadIdx < len(threads) {
+		commentIdx = len(threads[threadIdx].Comments) - 1
+		if commentIdx < 0 {
 			commentIdx = 0
 		}
 	}
-	m.nav.cursor = CursorTarget{Kind: CursorComment, FileIdx: m.nav.cursor.FileIdx, LineIdx: lineIdx, CommentIdx: commentIdx}
+	m.nav.cursor = CursorTarget{Kind: CursorComment, FileIdx: m.nav.cursor.FileIdx, LineIdx: lineIdx, ThreadIdx: threadIdx, CommentIdx: commentIdx}
 }
 
 // commentPosition identifies a single comment's location across all files for flat navigation.
 type commentPosition struct {
-	fileIdx     int
-	line        int
-	side        string
-	diffLineIdx int // index into diffLines (for the current file)
-	commentIdx  int // index into commentRefs at that diff line
+	fileIdx    int
+	line       int
+	side       string
+	threadIdx  int // index into threads at this line (cross-side order)
+	commentIdx int // index within the thread's Comments slice
 }
 
 // buildCommentPositions returns all individual comment positions across all files,
-// sorted by file index, line, then comment index within the thread.
+// sorted by file index, line, then thread/comment index.
+// ThreadIdx is the cross-side index (RIGHT threads first, then LEFT) matching threadsAtLine.
 func (m *Model) buildCommentPositions() []commentPosition {
 	fileIdxByPath := make(map[string]int, len(m.files))
 	for i, f := range m.files {
 		fileIdxByPath[f.Path] = i
 	}
 
-	var positions []commentPosition
+	// Group threads by (file, line) to compute cross-side threadIdx.
+	type locKey struct {
+		fileIdx int
+		line    int
+	}
+	// Collect unique locations in sorted order.
+	locThreads := make(map[locKey][]review.Thread)
 	for _, t := range m.comments.threads {
 		fi, ok := fileIdxByPath[t.Path]
 		if !ok {
 			continue
 		}
-		for ci := range t.Comments {
-			positions = append(positions, commentPosition{
-				fileIdx:    fi,
-				line:       t.Line,
-				side:       t.Side,
-				commentIdx: ci,
-			})
+		lk := locKey{fi, t.Line}
+		locThreads[lk] = append(locThreads[lk], t)
+	}
+
+	var positions []commentPosition
+	for lk, threads := range locThreads {
+		// Sort threads in cross-side order: RIGHT first, then LEFT (matching threadsAtLine).
+		sort.SliceStable(threads, func(i, j int) bool {
+			if threads[i].Side == "RIGHT" && threads[j].Side != "RIGHT" {
+				return true
+			}
+			if threads[i].Side != "RIGHT" && threads[j].Side == "RIGHT" {
+				return false
+			}
+			return false
+		})
+		for ti, t := range threads {
+			for ci := range t.Comments {
+				positions = append(positions, commentPosition{
+					fileIdx:    lk.fileIdx,
+					line:       lk.line,
+					side:       t.Side,
+					threadIdx:  ti,
+					commentIdx: ci,
+				})
+			}
 		}
 	}
 
-	// Deduplicate: multiple threads at same location are already separate,
-	// but we need stable sort by file, line, comment index.
+	// Sort by file index, then line, then threadIdx, then commentIdx.
 	sort.Slice(positions, func(i, j int) bool {
 		if positions[i].fileIdx != positions[j].fileIdx {
 			return positions[i].fileIdx < positions[j].fileIdx
 		}
 		if positions[i].line != positions[j].line {
 			return positions[i].line < positions[j].line
+		}
+		if positions[i].threadIdx != positions[j].threadIdx {
+			return positions[i].threadIdx < positions[j].threadIdx
 		}
 		return positions[i].commentIdx < positions[j].commentIdx
 	})
@@ -715,22 +746,7 @@ func (m *Model) navigateComment(forward bool) tea.Cmd {
 		return flash.ShowMsg{ID: "diffview", Text: "No comments found", Expires: 1500 * time.Millisecond}.Cmd()
 	}
 
-	// Build thread positions to map comment positions to commentRef indices.
-	// Comments in a thread at a given line are indexed sequentially in commentRefsAtLine.
-	// We need to compute the commentRef index for each position.
-	type locKey struct {
-		fileIdx int
-		line    int
-		side    string
-	}
-	refIdxCounter := make(map[locKey]int)
-	for i := range positions {
-		lk := locKey{positions[i].fileIdx, positions[i].line, positions[i].side}
-		positions[i].commentIdx = refIdxCounter[lk]
-		refIdxCounter[lk]++
-	}
-
-	// Find current position
+	// Find current position in the list
 	curFileIdx := m.nav.cursor.FileIdx
 	curLine := 0
 	if m.nav.cursor.LineIdx < len(m.nav.diffLines) {
@@ -741,15 +757,15 @@ func (m *Model) navigateComment(forward bool) tea.Cmd {
 			curLine = dl.oldLine
 		}
 	}
+	curThreadIdx := m.nav.cursor.ThreadIdx
 	curCommentIdx := 0
 	if m.nav.cursor.IsComment() {
 		curCommentIdx = m.nav.cursor.CommentIdx
 	}
 
-	// Find where we are in the flat list
 	curIdx := -1
 	for i, p := range positions {
-		if p.fileIdx == curFileIdx && p.line == curLine && p.commentIdx == curCommentIdx {
+		if p.fileIdx == curFileIdx && p.line == curLine && p.threadIdx == curThreadIdx && p.commentIdx == curCommentIdx {
 			curIdx = i
 			break
 		}
@@ -800,7 +816,7 @@ func (m *Model) navigateComment(forward bool) tea.Cmd {
 	}
 
 	m.nav.cursor.LineIdx = diffIdx
-	m.expandAndSelectComment(diffIdx, target.commentIdx)
+	m.expandAndSelectComment(diffIdx, target.threadIdx, target.commentIdx)
 	m.updateDiffContent()
 	m.syncViewportToCursorWithComments()
 

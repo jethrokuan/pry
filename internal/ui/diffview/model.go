@@ -1211,7 +1211,7 @@ func (m Model) View() string {
 		helpParts = append(helpParts, "j/k select comment")
 		helpParts = append(helpParts, "enter reply")
 		helpParts = append(helpParts, "o view all")
-		if m.nav.cursor.CommentIdx < len(refs) && refs[m.nav.cursor.CommentIdx].editable {
+		if flatIdx := m.flatCommentIndex(); flatIdx < len(refs) && refs[flatIdx].editable {
 			helpParts = append(helpParts, "e edit")
 			helpParts = append(helpParts, "d delete")
 		}
@@ -1323,9 +1323,18 @@ func (m Model) currentPosition() (label string, index int, total int) {
 	case CyclerComment:
 		positions := m.buildCommentPositions()
 		total := len(positions)
+		curLine := 0
+		if m.nav.cursor.LineIdx < len(m.nav.diffLines) {
+			dl := m.nav.diffLines[m.nav.cursor.LineIdx]
+			if dl.newLine > 0 {
+				curLine = dl.newLine
+			} else {
+				curLine = dl.oldLine
+			}
+		}
 		cur := 0
 		for i, cp := range positions {
-			if cp.fileIdx == m.nav.cursor.FileIdx && cp.diffLineIdx == m.nav.cursor.LineIdx && cp.commentIdx == m.nav.cursor.CommentIdx {
+			if cp.fileIdx == m.nav.cursor.FileIdx && cp.line == curLine && cp.threadIdx == m.nav.cursor.ThreadIdx && cp.commentIdx == m.nav.cursor.CommentIdx {
 				cur = i + 1
 				break
 			}
