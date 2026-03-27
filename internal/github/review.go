@@ -65,6 +65,7 @@ func (c *Client) FetchCommentsAndReview(_ context.Context, prNumber int) ([]revi
 				}
 				reviewThreads(first: 100, after: $threadCursor) {
 					nodes {
+						id
 						path
 						line
 						originalLine
@@ -76,6 +77,7 @@ func (c *Client) FetchCommentsAndReview(_ context.Context, prNumber int) ([]revi
 						comments(first: 100) {
 							nodes {
 								databaseId
+								id
 								body
 								author { login }
 								createdAt
@@ -94,6 +96,7 @@ func (c *Client) FetchCommentsAndReview(_ context.Context, prNumber int) ([]revi
 
 	type gqlComment struct {
 		DatabaseId int    `json:"databaseId"`
+		Id         string `json:"id"`
 		Body       string `json:"body"`
 		Author     struct {
 			Login string `json:"login"`
@@ -105,6 +108,7 @@ func (c *Client) FetchCommentsAndReview(_ context.Context, prNumber int) ([]revi
 	}
 
 	type gqlThread struct {
+		Id                string `json:"id"`
 		Path              string `json:"path"`
 		Line              *int   `json:"line"`
 		OriginalLine      int    `json:"originalLine"`
@@ -191,6 +195,7 @@ func (c *Client) FetchCommentsAndReview(_ context.Context, prNumber int) ([]revi
 		}
 
 		t := review.Thread{
+			NodeID:     gt.Id,
 			Path:       gt.Path,
 			Line:       line,
 			StartLine:  startLine,
@@ -201,6 +206,7 @@ func (c *Client) FetchCommentsAndReview(_ context.Context, prNumber int) ([]revi
 		for _, gc := range gt.Comments.Nodes {
 			t.Comments = append(t.Comments, review.Comment{
 				ID:        gc.DatabaseId,
+				NodeID:    gc.Id,
 				Body:      gc.Body,
 				Author:    gc.Author.Login,
 				CreatedAt: gc.CreatedAt,
@@ -245,12 +251,12 @@ func (c *Client) CreatePendingReview(_ context.Context, prNumber int) (int, stri
 // reviewNodeID is non-empty it is tried first as a fast path (single GraphQL
 // call). If the hint is empty or stale, the method falls back to
 // ensurePendingReview (fetch-or-create) before retrying.
-func (c *Client) AddReviewComment(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, int, string, error) {
+func (c *Client) AddReviewComment(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, string, int, string, error) {
 	// Fast path: try the cached review node ID directly.
 	if reviewNodeID != "" {
-		commentID, err := c.addReviewThread(reviewNodeID, path, line, startLine, side, body)
+		commentID, commentNodeID, err := c.addReviewThread(reviewNodeID, path, line, startLine, side, body)
 		if err == nil {
-			return commentID, 0, reviewNodeID, nil
+			return commentID, commentNodeID, 0, reviewNodeID, nil
 		}
 		slog.Info("fast-path addReviewThread failed, falling back to ensurePendingReview",
 			"reviewNodeID", reviewNodeID, "err", err)
@@ -259,14 +265,14 @@ func (c *Client) AddReviewComment(ctx context.Context, prNumber int, reviewNodeI
 	// Slow path: fetch or create a valid pending review.
 	reviewID, nodeID, err := c.ensurePendingReview(ctx, prNumber)
 	if err != nil {
-		return 0, 0, "", err
+		return 0, "", 0, "", err
 	}
 
-	commentID, err := c.addReviewThread(nodeID, path, line, startLine, side, body)
+	commentID, commentNodeID, err := c.addReviewThread(nodeID, path, line, startLine, side, body)
 	if err != nil {
-		return 0, reviewID, nodeID, fmt.Errorf("failed to add comment to pending review: %w", err)
+		return 0, "", reviewID, nodeID, fmt.Errorf("failed to add comment to pending review: %w", err)
 	}
-	return commentID, reviewID, nodeID, nil
+	return commentID, commentNodeID, reviewID, nodeID, nil
 }
 
 // ensurePendingReview returns the user's existing pending review, creating
@@ -288,7 +294,8 @@ func (c *Client) ensurePendingReview(ctx context.Context, prNumber int) (int, st
 }
 
 // addReviewThread performs the GraphQL addPullRequestReviewThread mutation.
-func (c *Client) addReviewThread(reviewNodeID string, path string, line, startLine int, side, body string) (int, error) {
+// Returns (databaseId, nodeId, error).
+func (c *Client) addReviewThread(reviewNodeID string, path string, line, startLine int, side, body string) (int, string, error) {
 	mutation := `
 	mutation($reviewID: ID!, $body: String!, $path: String!, $line: Int!, $side: DiffSide!, $startLine: Int, $startSide: DiffSide) {
 		addPullRequestReviewThread(input: {
@@ -304,6 +311,7 @@ func (c *Client) addReviewThread(reviewNodeID string, path string, line, startLi
 				comments(first: 1) {
 					nodes {
 						databaseId
+						id
 					}
 				}
 			}
@@ -327,7 +335,8 @@ func (c *Client) addReviewThread(reviewNodeID string, path string, line, startLi
 			Thread struct {
 				Comments struct {
 					Nodes []struct {
-						DatabaseId int `json:"databaseId"`
+						DatabaseId int    `json:"databaseId"`
+						Id         string `json:"id"`
 					} `json:"nodes"`
 				} `json:"comments"`
 			} `json:"thread"`
@@ -338,16 +347,70 @@ func (c *Client) addReviewThread(reviewNodeID string, path string, line, startLi
 	err := c.graphql.Do(mutation, vars, &resp)
 	if err != nil {
 		slog.Error("failed to add review comment", "reviewNodeID", reviewNodeID, "path", path, "line", line, "error", err)
-		return 0, fmt.Errorf("graphql addPullRequestReviewThread: %w", err)
+		return 0, "", fmt.Errorf("graphql addPullRequestReviewThread: %w", err)
 	}
 
 	nodes := resp.AddPullRequestReviewThread.Thread.Comments.Nodes
 	if len(nodes) == 0 {
 		slog.Error("no comment returned from addPullRequestReviewThread", "reviewNodeID", reviewNodeID)
-		return 0, fmt.Errorf("no comment returned from addPullRequestReviewThread")
+		return 0, "", fmt.Errorf("no comment returned from addPullRequestReviewThread")
 	}
 	slog.Debug("added review comment", "commentID", nodes[0].DatabaseId)
-	return nodes[0].DatabaseId, nil
+	return nodes[0].DatabaseId, nodes[0].Id, nil
+}
+
+// ReplyToReviewComment adds a reply to an existing review thread using the
+// addPullRequestReviewComment mutation (with inReplyTo). Returns the comment's
+// database ID, node ID, and the current review IDs.
+func (c *Client) ReplyToReviewComment(ctx context.Context, prNumber int, reviewNodeID string, commentNodeID, body string) (int, string, int, string, error) {
+	// Ensure we have a valid pending review.
+	if reviewNodeID == "" {
+		_, nodeID, err := c.ensurePendingReview(ctx, prNumber)
+		if err != nil {
+			return 0, "", 0, "", err
+		}
+		reviewNodeID = nodeID
+	}
+
+	mutation := `
+	mutation($reviewID: ID!, $body: String!, $inReplyTo: ID!) {
+		addPullRequestReviewComment(input: {
+			pullRequestReviewId: $reviewID
+			body: $body
+			inReplyTo: $inReplyTo
+		}) {
+			comment {
+				databaseId
+				id
+			}
+		}
+	}`
+
+	vars := map[string]interface{}{
+		"reviewID":  reviewNodeID,
+		"body":      body,
+		"inReplyTo": commentNodeID,
+	}
+
+	var resp struct {
+		AddPullRequestReviewComment struct {
+			Comment struct {
+				DatabaseId int    `json:"databaseId"`
+				Id         string `json:"id"`
+			} `json:"comment"`
+		} `json:"addPullRequestReviewComment"`
+	}
+
+	slog.Debug("replying to review comment", "reviewNodeID", reviewNodeID, "inReplyTo", commentNodeID)
+	err := c.graphql.Do(mutation, vars, &resp)
+	if err != nil {
+		slog.Error("failed to reply to review comment", "inReplyTo", commentNodeID, "error", err)
+		return 0, "", 0, reviewNodeID, fmt.Errorf("graphql addPullRequestReviewComment: %w", err)
+	}
+
+	comment := resp.AddPullRequestReviewComment.Comment
+	slog.Debug("replied to review comment", "commentID", comment.DatabaseId)
+	return comment.DatabaseId, comment.Id, 0, reviewNodeID, nil
 }
 
 // DeleteReviewComment deletes a pending review comment by its database ID.

@@ -804,7 +804,7 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		commentID, _, nodeID, err := c.AddReviewComment(ctx, 1, "PRR_cached", "main.go", 10, 0, "RIGHT", "nit: typo")
+		commentID, _, _, nodeID, err := c.AddReviewComment(ctx, 1, "PRR_cached", "main.go", 10, 0, "RIGHT", "nit: typo")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commentID).To(Equal(555))
 		Expect(nodeID).To(Equal("PRR_cached"))
@@ -829,7 +829,7 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		commentID, reviewID, nodeID, err := c.AddReviewComment(ctx, 1, "", "main.go", 10, 0, "RIGHT", "nit: typo")
+		commentID, _, reviewID, nodeID, err := c.AddReviewComment(ctx, 1, "", "main.go", 10, 0, "RIGHT", "nit: typo")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commentID).To(Equal(556))
 		Expect(reviewID).To(Equal(42))
@@ -853,7 +853,7 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		_, _, _, err := c.AddReviewComment(ctx, 1, "PRR_hint", "main.go", 10, 5, "RIGHT", "refactor this block")
+		_, _, _, _, err := c.AddReviewComment(ctx, 1, "PRR_hint", "main.go", 10, 5, "RIGHT", "refactor this block")
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -872,7 +872,7 @@ var _ = Describe("AddReviewComment", func() {
 
 		// With hint, fast path returns "no comment" error; slow path also fails.
 		stubEnsurePendingReview()
-		_, _, _, err := c.AddReviewComment(ctx, 1, "PRR_hint", "main.go", 10, 0, "RIGHT", "test")
+		_, _, _, _, err := c.AddReviewComment(ctx, 1, "PRR_hint", "main.go", 10, 0, "RIGHT", "test")
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("no comment returned"))
 	})
@@ -905,7 +905,7 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		commentID, reviewID, nodeID, err := c.AddReviewComment(ctx, 1, "PRR_stale", "main.go", 5, 0, "RIGHT", "hello")
+		commentID, _, reviewID, nodeID, err := c.AddReviewComment(ctx, 1, "PRR_stale", "main.go", 5, 0, "RIGHT", "hello")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commentID).To(Equal(888))
 		Expect(reviewID).To(Equal(77))
@@ -938,7 +938,7 @@ var _ = Describe("AddReviewComment", func() {
 			}, resp)
 		}
 
-		commentID, reviewID, _, err := c.AddReviewComment(ctx, 1, "", "main.go", 5, 0, "RIGHT", "hello")
+		commentID, _, reviewID, _, err := c.AddReviewComment(ctx, 1, "", "main.go", 5, 0, "RIGHT", "hello")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(commentID).To(Equal(777))
 		Expect(reviewID).To(Equal(99))

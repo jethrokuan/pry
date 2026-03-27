@@ -195,7 +195,7 @@ var keys = KeyMap{
 	Editor:        key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "open in editor")),
 	Back:          key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	Quit:          key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
-	Enter:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "action")),
+	Enter:         key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "comment/select")),
 	Search:        key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 	NextSearch:    key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next match")),
 	PrevSearch:    key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev match")),
@@ -458,7 +458,7 @@ func (m Model) addReviewCommentCmd(tempID int, path string, line, startLine int,
 	cachedNodeID := m.pendingReview.ReviewNodeID
 
 	return func() tea.Msg {
-		forgeID, reviewID, reviewNodeID, err := svc.AddReviewComment(context.Background(), prNumber, cachedNodeID, path, line, startLine, side, body)
+		forgeID, forgeNodeID, reviewID, reviewNodeID, err := svc.AddReviewComment(context.Background(), prNumber, cachedNodeID, path, line, startLine, side, body)
 		if err != nil {
 			return commentAddedMsg{tempID: tempID, reviewID: reviewID, reviewNodeID: reviewNodeID, err: err}
 		}
@@ -469,6 +469,34 @@ func (m Model) addReviewCommentCmd(tempID int, path string, line, startLine int,
 			reviewNodeID: reviewNodeID,
 			comment: review.Comment{
 				ID:        forgeID,
+				NodeID:    forgeNodeID,
+				Body:      body,
+				Author:    currentUser,
+				IsPending: true,
+			},
+		}
+	}
+}
+
+// replyToReviewCommentCmd adds a reply to an existing thread via the service.
+func (m Model) replyToReviewCommentCmd(tempID int, commentNodeID, body string) tea.Cmd {
+	svc := m.svc
+	currentUser := m.currentUser
+	prNumber := m.pr.Number
+	cachedNodeID := m.pendingReview.ReviewNodeID
+
+	return func() tea.Msg {
+		forgeID, nodeID, _, reviewNodeID, err := svc.ReplyToReviewComment(context.Background(), prNumber, cachedNodeID, commentNodeID, body)
+		if err != nil {
+			return commentAddedMsg{tempID: tempID, reviewNodeID: reviewNodeID, err: err}
+		}
+
+		return commentAddedMsg{
+			tempID:       tempID,
+			reviewNodeID: reviewNodeID,
+			comment: review.Comment{
+				ID:        forgeID,
+				NodeID:    nodeID,
 				Body:      body,
 				Author:    currentUser,
 				IsPending: true,
@@ -1342,9 +1370,12 @@ func helpSections() []helppopup.Section {
 			keys.Enter, keys.SelectLine, keys.MarkViewed,
 			keys.ToggleComment, keys.FoldComment, keys.Submit,
 		),
-		helppopup.Bind("Comment Selection",
-			keys.ViewComment, keys.EditComment, keys.DeleteComment,
-		),
+		{Title: "Comment Selection", Entries: []helppopup.Entry{
+			{Key: "enter", Desc: "reply to thread"},
+			helppopup.FromBinding(keys.ViewComment),
+			helppopup.FromBinding(keys.EditComment),
+			helppopup.FromBinding(keys.DeleteComment),
+		}},
 		helppopup.Bind("Other",
 			keys.ToggleTree, keys.Info, keys.Refresh, keys.OpenInBrowser, keys.CopyLink,
 			keys.Checkout, keys.Editor, keys.Help, keys.Back, keys.Quit,

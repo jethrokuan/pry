@@ -17,13 +17,14 @@ import (
 
 // inlineEditorSaveMsg is emitted when the user saves the comment.
 type inlineEditorSaveMsg struct {
-	body        string
-	path        string
-	line        int
-	startLine   int
-	side        string
-	mode        commentMode
-	editCommentID int // non-zero when editing an existing comment
+	body          string
+	path          string
+	line          int
+	startLine     int
+	side          string
+	mode          commentMode
+	editCommentID int    // non-zero when editing an existing comment
+	replyToNodeID string // non-empty when replying to an existing thread
 }
 
 // inlineEditorCancelMsg is emitted when the user cancels the editor.
@@ -45,6 +46,7 @@ type InlineEditor struct {
 	mode           commentMode
 	suggestion     string // original code for suggestion mode
 	editCommentID    int    // non-zero when editing an existing comment
+	replyToNodeID    string // non-empty when replying to an existing thread
 	confirmDiscard bool   // true after first esc with unsaved content
 	width          int
 
@@ -110,10 +112,35 @@ func (e *InlineEditor) OpenForEdit(path string, line, startLine int, side string
 	e.ta = ta
 }
 
+// OpenForReply activates the inline editor to reply to an existing thread.
+func (e *InlineEditor) OpenForReply(path string, line, startLine int, side string, commentNodeID string, width int) {
+	e.active = true
+	e.path = path
+	e.line = line
+	e.startLine = startLine
+	e.side = side
+	e.mode = commentModeComment
+	e.suggestion = ""
+	e.editCommentID = 0
+	e.replyToNodeID = commentNodeID
+	e.confirmDiscard = false
+	e.width = width
+
+	ta := textarea.New()
+	ta.Placeholder = "Write a reply..."
+	ta.Focus()
+	ta.CharLimit = 0
+	ta.SetWidth(width - 4)
+	ta.SetHeight(5)
+
+	e.ta = ta
+}
+
 // Close deactivates the inline editor and resets state.
 func (e *InlineEditor) Close() {
 	e.active = false
 	e.editCommentID = 0
+	e.replyToNodeID = ""
 	e.confirmDiscard = false
 	e.mentionActive = false
 }
@@ -180,13 +207,14 @@ func (e InlineEditor) HandleKey(msg tea.KeyPressMsg) (InlineEditor, tea.Cmd, any
 			body = fmt.Sprintf("```suggestion\n%s\n```", text)
 		}
 		saveMsg := inlineEditorSaveMsg{
-			body:        body,
-			path:        e.path,
-			line:        e.line,
-			startLine:   e.startLine,
-			side:        e.side,
-			mode:        e.mode,
+			body:          body,
+			path:          e.path,
+			line:          e.line,
+			startLine:     e.startLine,
+			side:          e.side,
+			mode:          e.mode,
 			editCommentID: e.editCommentID,
+			replyToNodeID: e.replyToNodeID,
 		}
 		e.Close()
 		return e, nil, saveMsg
@@ -335,7 +363,9 @@ func (e InlineEditor) View() string {
 	}
 
 	modeStr := "Comment"
-	if e.mode == commentModeSuggestion {
+	if e.replyToNodeID != "" {
+		modeStr = "Reply"
+	} else if e.mode == commentModeSuggestion {
 		modeStr = "Suggestion"
 	}
 

@@ -137,6 +137,7 @@ type Thread struct {
 // Optimistic comments not yet confirmed by the server have negative IDs.
 type Comment struct {
 	ID        int    // Forge ID (negative = optimistic/temp, not yet confirmed)
+	NodeID    string // GraphQL node ID (used for reply-to; empty for optimistic)
 	Body      string
 	Author    string
 	CreatedAt string

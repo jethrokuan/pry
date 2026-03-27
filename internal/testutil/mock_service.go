@@ -20,7 +20,8 @@ type MockService struct {
 	FetchDiffFilesFn        func(ctx context.Context, number int) ([]diff.DiffFile, error)
 	FetchCommentsAndReviewFn func(ctx context.Context, number int) ([]review.Thread, int, string, error)
 	CreatePendingReviewFn func(ctx context.Context, prNumber int) (int, string, error)
-	AddReviewCommentFn    func(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, int, string, error)
+	AddReviewCommentFn      func(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, string, int, string, error)
+	ReplyToReviewCommentFn  func(ctx context.Context, prNumber int, reviewNodeID string, commentNodeID, body string) (int, string, int, string, error)
 	DeleteReviewCommentFn   func(ctx context.Context, prNumber, commentID int) error
 	EditReviewCommentFn     func(ctx context.Context, prNumber, commentID int, body string) error
 	SubmitReviewFn          func(ctx context.Context, pr *review.PullRequest, review *review.PendingReview) error
@@ -102,11 +103,18 @@ func (m *MockService) CreatePendingReview(ctx context.Context, prNumber int) (in
 	return 1, "R_node1", nil
 }
 
-func (m *MockService) AddReviewComment(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, int, string, error) {
+func (m *MockService) AddReviewComment(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, string, int, string, error) {
 	if m.AddReviewCommentFn != nil {
 		return m.AddReviewCommentFn(ctx, prNumber, reviewNodeID, path, line, startLine, side, body)
 	}
-	return 1, 1, "R_node1", nil
+	return 1, "C_node1", 1, "R_node1", nil
+}
+
+func (m *MockService) ReplyToReviewComment(ctx context.Context, prNumber int, reviewNodeID string, commentNodeID, body string) (int, string, int, string, error) {
+	if m.ReplyToReviewCommentFn != nil {
+		return m.ReplyToReviewCommentFn(ctx, prNumber, reviewNodeID, commentNodeID, body)
+	}
+	return 1, "C_node1", 1, "R_node1", nil
 }
 
 func (m *MockService) DeleteReviewComment(ctx context.Context, prNumber, commentID int) error {

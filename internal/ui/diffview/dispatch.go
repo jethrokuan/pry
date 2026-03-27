@@ -125,8 +125,8 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 		m.updateDiffContent()
 		return m, nil, true
 	case key.Matches(msg, keys.Enter):
-		m.nav.cursor = m.nav.cursor.AsLine()
-		return m, m.startComment(commentModeComment), true
+		newM, cmd := m.replyToSelectedThread()
+		return newM, cmd, true
 	}
 
 	switch {

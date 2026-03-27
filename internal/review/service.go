@@ -60,7 +60,12 @@ type Service interface {
 	// if non-empty, the service tries it first for speed, falling back to
 	// fetch-or-create if the hint is stale. Returns the forge comment ID
 	// and the current review IDs (so callers can stay in sync).
-	AddReviewComment(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, int, string, error)
+	AddReviewComment(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, string, int, string, error)
+
+	// ReplyToReviewComment adds a reply to an existing review thread.
+	// commentNodeID is the GraphQL node ID of any comment in the thread to reply to.
+	// Returns the forge comment ID, the forge comment node ID, and the current review IDs.
+	ReplyToReviewComment(ctx context.Context, prNumber int, reviewNodeID string, commentNodeID, body string) (int, string, int, string, error)
 
 	// DeleteReviewComment deletes a pending review comment by its forge ID.
 	DeleteReviewComment(ctx context.Context, prNumber, commentID int) error

@@ -59,6 +59,35 @@ func (m *Model) commentRefsAtCursor() []commentRef {
 	return m.commentRefsAtLine(m.nav.cursor.LineIdx)
 }
 
+// replyToSelectedThread opens the inline editor in reply mode for the thread
+// containing the currently selected comment.
+func (m Model) replyToSelectedThread() (Model, tea.Cmd) {
+	refs := m.commentRefsAtCursor()
+	if !m.nav.cursor.IsComment() || m.nav.cursor.CommentIdx >= len(refs) {
+		return m, nil
+	}
+	ref := refs[m.nav.cursor.CommentIdx]
+
+	t, _ := m.findThreadAndComment(ref.commentID)
+	if t == nil || len(t.Comments) == 0 {
+		return m, nil
+	}
+
+	// Use the last comment's node ID as the inReplyTo target.
+	lastComment := t.Comments[len(t.Comments)-1]
+	replyToNodeID := lastComment.NodeID
+	if replyToNodeID == "" {
+		// Optimistic comment without a node ID — fall back to new thread.
+		m.nav.cursor = m.nav.cursor.AsLine()
+		return m, m.startComment(commentModeComment)
+	}
+
+	m.nav.cursor = m.nav.cursor.AsLine()
+	m.editor.OpenForReply(t.Path, t.Line, t.StartLine, t.Side, replyToNodeID, m.inlineTextareaWidth())
+	m.updateViewports()
+	return m, m.editor.BlinkCmd()
+}
+
 // editSelectedComment opens the inline editor for the selected editable comment.
 func (m Model) editSelectedComment() (Model, tea.Cmd) {
 	refs := m.commentRefsAtCursor()
@@ -209,6 +238,24 @@ func (m *Model) addOptimisticThread(path string, line, startLine int, side strin
 	m.comments.threads = append(m.comments.threads, t)
 	m.syncThreads()
 	return tempID
+}
+
+// addOptimisticReply appends an optimistic comment to the thread that contains
+// the comment identified by replyToNodeID. Returns the temp ID, or 0 if the
+// thread was not found.
+func (m *Model) addOptimisticReply(replyToNodeID string, c review.Comment) int {
+	for i := range m.comments.threads {
+		for _, tc := range m.comments.threads[i].Comments {
+			if tc.NodeID == replyToNodeID {
+				tempID := m.pendingReview.NextTempID()
+				c.ID = tempID
+				m.comments.threads[i].Comments = append(m.comments.threads[i].Comments, c)
+				m.syncThreads()
+				return tempID
+			}
+		}
+	}
+	return 0
 }
 
 // replaceComment swaps an optimistic comment (by temp ID) with a real one from the server.
@@ -515,12 +562,28 @@ func (m Model) handleEditorSave(msg inlineEditorSaveMsg) (Model, tea.Cmd) {
 		side = "RIGHT"
 	}
 
-	// Create optimistic thread with one comment
 	optimistic := review.Comment{
 		Body:      msg.body,
 		Author:    m.currentUser,
 		IsPending: true,
 	}
+
+	// Reply to existing thread
+	if msg.replyToNodeID != "" {
+		tempID := m.addOptimisticReply(msg.replyToNodeID, optimistic)
+		if tempID == 0 {
+			// Thread not found — fall back to new thread
+			tempID = m.addOptimisticThread(msg.path, msg.line, msg.startLine, side, optimistic)
+			m.inflight[tempID] = true
+			m.closeInlineComment()
+			return m, m.addReviewCommentCmd(tempID, msg.path, msg.line, msg.startLine, side, msg.body)
+		}
+		m.inflight[tempID] = true
+		m.closeInlineComment()
+		return m, m.replyToReviewCommentCmd(tempID, msg.replyToNodeID, msg.body)
+	}
+
+	// Create new thread
 	tempID := m.addOptimisticThread(msg.path, msg.line, msg.startLine, side, optimistic)
 	m.inflight[tempID] = true
 
