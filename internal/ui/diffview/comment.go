@@ -267,9 +267,31 @@ func (m *Model) syncThreads() {
 }
 
 // setThreads replaces the full thread list and rebuilds the index.
+// It also initializes the expanded state: lines with any unresolved thread
+// start expanded, lines with only resolved threads start collapsed.
 func (m *Model) setThreads(threads []review.Thread) {
 	m.comments.threads = threads
 	m.syncThreads()
+	m.initCommentExpanded()
+}
+
+// initCommentExpanded sets the default expanded state for each comment line
+// based on thread resolution status. Lines with at least one open (unresolved)
+// thread are expanded; lines with only resolved threads are collapsed.
+func (m *Model) initCommentExpanded() {
+	// Build per-key resolution status: true if any thread on that line is open.
+	hasOpen := make(map[string]bool)
+	for _, t := range m.comments.threads {
+		ck := commentKey(t.Path, t.Line)
+		if !t.IsResolved {
+			hasOpen[ck] = true
+		} else if _, exists := hasOpen[ck]; !exists {
+			hasOpen[ck] = false
+		}
+	}
+	for ck, open := range hasOpen {
+		m.comments.expanded[ck] = open
+	}
 }
 
 // addOptimisticThread creates a new thread with one optimistic comment.
