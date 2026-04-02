@@ -192,6 +192,14 @@ func (e InlineEditor) BlinkCmd() tea.Cmd {
 	return textarea.Blink
 }
 
+// Height returns the rendered height of the editor in lines, or 0 if inactive.
+func (e InlineEditor) Height() int {
+	if !e.active {
+		return 0
+	}
+	return lipgloss.Height(e.View())
+}
+
 // HandleKey processes a key event while the inline editor is active.
 // Returns the updated editor, a tea.Cmd, and an optional outbound message.
 func (e InlineEditor) HandleKey(msg tea.KeyPressMsg) (InlineEditor, tea.Cmd, any) {

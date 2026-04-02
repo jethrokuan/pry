@@ -415,6 +415,14 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 				renderSideComments(line.OldNum, "LEFT")
 			}
 
+			// Render inline editor below cursor line's comments
+			if m.editor.IsActive() && lineIdx == m.nav.cursor.LineIdx {
+				editorView := m.editor.View()
+				if editorView != "" {
+					b.WriteString(editorView + "\n")
+				}
+			}
+
 			lineIdx++
 		}
 		b.WriteString("\n")
@@ -727,51 +735,29 @@ func (m Model) overlayGeneric(base, popup string) string {
 	return lipgloss.NewCompositor(baseLayer, popupLayer).Render()
 }
 
-// overlayInlineEditor composites the inline comment editor over the base view,
-// positioned just below the current cursor line in the diff viewport.
-func (m Model) overlayInlineEditor(base string) string {
-	popup := m.editor.View()
-	if popup == "" {
+// overlayAutocompleteDropdown composites the @mention autocomplete dropdown
+// over the base view when the inline editor is active and showing suggestions.
+func (m Model) overlayAutocompleteDropdown(base string) string {
+	dropdown := m.editor.DropdownView()
+	if dropdown == "" {
 		return base
 	}
 
 	// Y: header lines + cursor position within viewport + 1 (below cursor line)
+	// + comments height + editor offset to textarea cursor
 	rendered := m.renderedLineForCursor(m.nav.cursor.LineIdx)
 	cursorScreenY := rendered - m.nav.diffViewport.YOffset()
-	y := editorHeaderLines + cursorScreenY + 1
+	commentH := m.commentBlockHeight(m.nav.cursor.LineIdx) - m.editor.Height()
+	// editor border top(1) + header(1) + cursor line within textarea + 1 (below cursor)
+	editorCursorOffset := 2 + m.editor.CursorLine() + 1
+	y := editorHeaderLines + cursorScreenY + 1 + commentH + editorCursorOffset
 
-	// Clamp: don't let editor go below the viewport bottom
-	vpBottom := editorHeaderLines + m.nav.diffViewport.Height()
-	popupH := lipgloss.Height(popup)
-	if y+popupH > vpBottom {
-		// Place above the cursor line instead
-		y = editorHeaderLines + cursorScreenY - popupH
-	}
-	if y < editorHeaderLines {
-		y = editorHeaderLines
-	}
-
-	// X: offset by tree panel width if tree is visible
-	x := 0
-	if m.nav.showTree {
-		x = min(50, m.width/3) + 1
-	}
+	// X: offset by tree panel width if tree is visible, plus editor padding
+	x := 2 + m.treePanelWidth()
 
 	baseLayer := lipgloss.NewLayer(base)
-	popupLayer := lipgloss.NewLayer(popup).X(x).Y(y).Z(1)
-	result := lipgloss.NewCompositor(baseLayer, popupLayer).Render()
-
-	// Overlay the autocomplete dropdown at the textarea cursor
-	if dropdown := m.editor.DropdownView(); dropdown != "" {
-		// editor Y + header(1) + border top(1) + cursor line within textarea + 1 (below cursor)
-		dropY := y + 2 + m.editor.CursorLine() + 1
-		dropX := x + 2 // inside border+padding
-		base2 := lipgloss.NewLayer(result)
-		drop := lipgloss.NewLayer(dropdown).X(dropX).Y(dropY).Z(2)
-		result = lipgloss.NewCompositor(base2, drop).Render()
-	}
-
-	return result
+	drop := lipgloss.NewLayer(dropdown).X(x).Y(y).Z(2)
+	return lipgloss.NewCompositor(baseLayer, drop).Render()
 }
 
 // highlightMatches renders text with the base style, but applies a highlight

@@ -1172,6 +1172,7 @@ func (m Model) handleInlineEditorKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, m.openExternalEditorForComment()
 	}
 
+	m.updateDiffContent()
 	return m, cmd
 }
 

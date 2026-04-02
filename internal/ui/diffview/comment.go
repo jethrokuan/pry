@@ -554,6 +554,8 @@ func (m Model) markTreeItemViewed() (Model, tea.Cmd) {
 func (m *Model) openInlineComment(path string, line, startLine int, side string, mode commentMode, suggestion string) tea.Cmd {
 	m.editor.Open(path, line, startLine, side, mode, suggestion, m.inlineTextareaWidth())
 	m.updateViewports()
+	m.updateDiffContent()
+	m.syncViewportToCursorWithComments()
 	return m.editor.BlinkCmd()
 }
 
@@ -564,11 +566,7 @@ func (m *Model) closeInlineComment() {
 }
 
 func (m Model) inlineTextareaWidth() int {
-	treeWidth := 0
-	if m.nav.showTree {
-		treeWidth = min(50, m.width/3) + 1
-	}
-	return m.width - treeWidth
+	return m.width - m.treePanelWidth()
 }
 
 // handleEditorSave processes a save message from the InlineEditor.

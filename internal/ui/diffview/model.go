@@ -964,6 +964,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	if m.editor.IsActive() {
 		var cmd tea.Cmd
 		m.editor.ta, cmd = m.editor.ta.Update(msg)
+		m.updateDiffContent()
 		return m, cmd
 	}
 
@@ -1040,6 +1041,11 @@ func (m *Model) renderedLineForCursor(cursor int) int {
 				rendered += m.commentRenderedLines(file.Path, line.OldNum, "LEFT")
 			}
 
+			// Count inline editor height if it's on this line
+			if m.editor.IsActive() && lineIdx == m.nav.cursor.LineIdx {
+				rendered += m.editor.Height()
+			}
+
 			lineIdx++
 		}
 		rendered++ // blank line between hunks
@@ -1062,6 +1068,10 @@ func (m *Model) commentBlockHeight(cursor int) int {
 	}
 	if dl.oldLine > 0 {
 		h += m.commentRenderedLines(path, dl.oldLine, "LEFT")
+	}
+	// Include inline editor height if it's on this line
+	if m.editor.IsActive() && cursor == m.nav.cursor.LineIdx {
+		h += m.editor.Height()
 	}
 	return h
 }
@@ -1140,11 +1150,25 @@ func (m *Model) pendingCommentCount() int {
 
 const editorHeaderLines = 2 // title bar + file name bar before viewport
 
-func (m *Model) updateViewports() {
-	treeWidth := 0
-	if m.nav.showTree {
-		treeWidth = min(50, m.width/3)
+// treeWidth returns the width of the file tree panel (excluding separator), or 0 if hidden.
+func (m Model) treeWidth() int {
+	if !m.nav.showTree {
+		return 0
 	}
+	return min(50, m.width/3)
+}
+
+// treePanelWidth returns the total width consumed by the tree panel including the separator, or 0 if hidden.
+func (m Model) treePanelWidth() int {
+	w := m.treeWidth()
+	if w > 0 {
+		return w + 1
+	}
+	return 0
+}
+
+func (m *Model) updateViewports() {
+	treeWidth := m.treeWidth()
 	diffWidth := m.width - treeWidth - 1
 
 	headerHeight := 3
@@ -1517,9 +1541,9 @@ func (m Model) View() string {
 
 	result := b.String()
 
-	// Overlay inline editor at cursor position
+	// Overlay autocomplete dropdown for inline editor
 	if m.editor.IsActive() {
-		result = m.overlayInlineEditor(result)
+		result = m.overlayAutocompleteDropdown(result)
 	}
 
 	// Overlay popups if active
