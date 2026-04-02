@@ -44,7 +44,7 @@ type ConversationEntry struct {
 
 // Action represents a structured action the agent wants pry to execute.
 type Action struct {
-	Action string `json:"action"` // "comment" or "suggest"
+	Action string `json:"action"` // "comment", "suggest", "reply", or "edit"
 	Path   string `json:"path"`
 	Line   int    `json:"line"`
 	Side   string `json:"side"` // "RIGHT" or "LEFT"

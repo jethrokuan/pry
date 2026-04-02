@@ -761,11 +761,39 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case aiActionMsg:
 		// Emit inlineEditorSaveMsg for each action — reuses the existing comment flow
 		var cmds []tea.Cmd
+		var posted, edited int
 		for _, action := range msg.actions {
 			side := action.Side
 			if side == "" {
 				side = "RIGHT"
 			}
+
+			if action.Action == "edit" {
+				// Find the user's pending comment at this location to get its ID
+				var editID int
+				for _, c := range m.comments.CommentsForLine(action.Path, action.Line, side) {
+					if c.IsPending && c.Author == m.currentUser {
+						editID = c.ID
+						break
+					}
+				}
+				if editID == 0 {
+					continue // no editable comment at this location
+				}
+				saveMsg := inlineEditorSaveMsg{
+					body:          action.Body,
+					path:          action.Path,
+					line:          action.Line,
+					side:          side,
+					editCommentID: editID,
+				}
+				newM, cmd := m.handleEditorSave(saveMsg)
+				m = newM
+				cmds = append(cmds, cmd)
+				edited++
+				continue
+			}
+
 			saveMsg := inlineEditorSaveMsg{
 				body: action.Body,
 				path: action.Path,
@@ -776,11 +804,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			newM, cmd := m.handleEditorSave(saveMsg)
 			m = newM
 			cmds = append(cmds, cmd)
+			posted++
 		}
-		if len(msg.actions) > 0 {
+		if posted+edited > 0 {
+			var parts []string
+			if posted > 0 {
+				parts = append(parts, fmt.Sprintf("posted %d comment(s)", posted))
+			}
+			if edited > 0 {
+				parts = append(parts, fmt.Sprintf("edited %d comment(s)", edited))
+			}
 			cmds = append(cmds, flash.ShowMsg{
 				ID:      "ai-action",
-				Text:    fmt.Sprintf("AI posted %d comment(s)", len(msg.actions)),
+				Text:    "AI " + strings.Join(parts, ", "),
 				Style:   flash.StyleSuccess,
 				Expires: 2 * time.Second,
 			}.Cmd())

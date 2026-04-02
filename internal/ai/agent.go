@@ -107,11 +107,17 @@ To reply to an existing review thread:
 {"action":"reply","path":"src/handler.go","line":42,"side":"RIGHT","body":"Good catch — I see the same issue at line 78 too."}
 ` + "```" + `
 
+To edit a pending review comment (replaces the body of the user's pending comment at that location):
+` + "```pry-action" + `
+{"action":"edit","path":"src/handler.go","line":42,"side":"RIGHT","body":"Updated comment text here."}
+` + "```" + `
+
 Rules for actions:
 - "path" must be a file in the PR's diff
 - "line" must be a line number within a changed hunk (new-side line for RIGHT, old-side for LEFT)
 - "side" is "RIGHT" (commenting on new code, most common) or "LEFT" (commenting on deleted code)
 - For "reply", the path+line+side must match an existing thread — the reply is appended to that thread
+- For "edit", the path+line+side must match a pending comment by the reviewer — only pending (draft) comments can be edited
 - You may output multiple action blocks in one response
 - Always explain your reasoning before the action block
 - The reviewer can edit or cancel before the comment is saved`
