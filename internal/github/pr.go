@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"time"
 
@@ -142,8 +141,6 @@ func listPRsCacheKey(qualifier string) string {
 }
 
 // ListPRs fetches PRs based on the given filter.
-// If the qualifier contains @my-teams, it expands into one query per team
-// the authenticated user belongs to (in the repo's org) and deduplicates.
 func (c *Client) ListPRs(_ context.Context, filter review.PRFilter) ([]review.PullRequest, error) {
 	key := listPRsCacheKey(filter.Qualifier)
 	var cached []review.PullRequest
@@ -153,13 +150,7 @@ func (c *Client) ListPRs(_ context.Context, filter review.PRFilter) ([]review.Pu
 	}
 
 	slog.Debug("ListPRs: cache miss, fetching", "qualifier", filter.Qualifier)
-	var prs []review.PullRequest
-	var err error
-	if strings.Contains(filter.Qualifier, "@my-teams") {
-		prs, err = c.searchPRsForMyTeams(filter.Qualifier)
-	} else {
-		prs, err = c.searchPRs(filter.Qualifier)
-	}
+	prs, err := c.searchPRs(filter.Qualifier)
 	if err != nil {
 		return nil, err
 	}
@@ -169,43 +160,9 @@ func (c *Client) ListPRs(_ context.Context, filter review.PRFilter) ([]review.Pu
 	return prs, nil
 }
 
-// searchPRsForMyTeams expands @my-teams in the qualifier into one search per
-// team the authenticated user belongs to, then deduplicates and sorts results.
-func (c *Client) searchPRsForMyTeams(qualifier string) ([]review.PullRequest, error) {
-	teams, err := c.getUserTeams()
-	if err != nil {
-		return nil, err
-	}
-	if len(teams) == 0 {
-		slog.Debug("searchPRsForMyTeams: no teams, returning empty")
-		return nil, nil
-	}
-
-	seen := make(map[int]bool)
-	var result []review.PullRequest
-	for _, team := range teams {
-		// team is "org/slug"; GitHub qualifier expects "@org/slug"
-		expanded := strings.ReplaceAll(qualifier, "@my-teams", "@"+team)
-		prs, err := c.searchPRs(expanded)
-		if err != nil {
-			return nil, err
-		}
-		for _, pr := range prs {
-			if !seen[pr.Number] {
-				seen[pr.Number] = true
-				result = append(result, pr)
-			}
-		}
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].UpdatedAt.After(result[j].UpdatedAt)
-	})
-	return result, nil
-}
-
 // searchPRs runs a single GitHub search query and returns matching PRs.
 func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
-	query := fmt.Sprintf("is:pr is:open repo:%s/%s %s sort:updated-desc", c.owner, c.repo, qualifier)
+	query := fmt.Sprintf("is:pr repo:%s/%s %s sort:updated-desc", c.owner, c.repo, qualifier)
 
 	// Lightweight list query — only fields needed for the table rows.
 	// Heavy nested data (check runs, reviews, review requests) are fetched

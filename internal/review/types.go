@@ -6,9 +6,8 @@ import (
 
 // PRFilter defines a named filter with a GitHub search qualifier.
 type PRFilter struct {
-	Name                string
-	Qualifier           string
-	NeedsMyTeamApproval bool // if true, only show PRs where user's team has a pending review request and approval is still required
+	Name      string
+	Qualifier string
 }
 
 // CheckRunStatus represents the execution status of a check run.

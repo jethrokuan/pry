@@ -210,7 +210,7 @@ page_size = 30
 			gomega.Expect(filters[0].Name).To(gomega.Equal("My PRs"))
 			gomega.Expect(filters[1].Name).To(gomega.Equal("Assigned to Me"))
 			gomega.Expect(filters[2].Name).To(gomega.Equal("Needs My Review"))
-			gomega.Expect(filters[3].Name).To(gomega.Equal("Reviewed, Not Approved"))
+			gomega.Expect(filters[3].Name).To(gomega.Equal("Involved"))
 		})
 	})
 

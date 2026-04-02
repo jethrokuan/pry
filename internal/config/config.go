@@ -16,9 +16,8 @@ import (
 
 // FilterConfig defines a PR list filter in the config file.
 type FilterConfig struct {
-	Name                string `koanf:"name"`
-	Qualifier           string `koanf:"qualifier"`
-	NeedsMyTeamApproval bool   `koanf:"needs_my_team_approval"`
+	Name      string `koanf:"name"`
+	Qualifier string `koanf:"qualifier"`
 }
 
 // FileTreeConfig holds file tree display settings.
@@ -140,10 +139,10 @@ func load(path *string) Config {
 // DefaultFilters returns the built-in filter presets.
 func DefaultFilters() []FilterConfig {
 	return []FilterConfig{
-		{Name: "My PRs", Qualifier: "author:@me"},
-		{Name: "Assigned to Me", Qualifier: "assignee:@me"},
-		{Name: "Needs My Review", Qualifier: "team-review-requested:@my-teams draft:false -review:approved"},
-		{Name: "Reviewed, Not Approved", Qualifier: "reviewed-by:@me -review:approved"},
+		{Name: "My PRs", Qualifier: "is:open author:@me"},
+		{Name: "Assigned to Me", Qualifier: "is:open assignee:@me"},
+		{Name: "Needs My Review", Qualifier: "is:open review-requested:@me draft:false"},
+		{Name: "Involved", Qualifier: "is:open involves:@me -author:@me"},
 	}
 }
 
@@ -155,7 +154,7 @@ func (c Config) PRFilters() []review.PRFilter {
 	}
 	result := make([]review.PRFilter, len(filters))
 	for i, f := range filters {
-		result[i] = review.PRFilter{Name: f.Name, Qualifier: f.Qualifier, NeedsMyTeamApproval: f.NeedsMyTeamApproval}
+		result[i] = review.PRFilter{Name: f.Name, Qualifier: f.Qualifier}
 	}
 	return result
 }

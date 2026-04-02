@@ -65,6 +65,20 @@ func (m *Model) SetUserIdentity(id *review.UserIdentity) {
 	m.userIdentity = id
 }
 
+// isMyTeam reports whether the given team slug belongs to the current user.
+func (m *Model) isMyTeam(slug string) bool {
+	if m.userIdentity == nil {
+		return false
+	}
+	for _, t := range m.userIdentity.Teams {
+		// Teams are "org/slug"; match against the slug suffix.
+		if strings.HasSuffix(t, "/"+slug) {
+			return true
+		}
+	}
+	return false
+}
+
 // SetSize updates the sidebar dimensions.
 func (m *Model) SetSize(width, height int) {
 	m.sidebarWidth = width
@@ -376,7 +390,11 @@ func (m *Model) renderChecksTab(b *strings.Builder, pr *review.PullRequest) {
 				stateIcon = "●"
 				style = lipgloss.NewStyle().Foreground(styles.Warning)
 			}
-			b.WriteString("  " + style.Render(stateIcon) + " " + r.Login + "\n")
+			name := r.Login
+			if r.IsTeam && m.isMyTeam(r.Login) {
+				name = lipgloss.NewStyle().Bold(true).Render(name)
+			}
+			b.WriteString("  " + style.Render(stateIcon) + " " + name + "\n")
 		}
 		b.WriteString("\n")
 	}

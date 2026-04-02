@@ -43,10 +43,9 @@ type GoToPRMsg struct {
 type FilterChangedMsg struct{}
 
 type prsLoadedMsg struct {
-	tabIdx              int
-	prs                 []review.PullRequest
-	err                 error
-	needsMyTeamApproval bool // apply client-side team filter on arrival
+	tabIdx int
+	prs    []review.PullRequest
+	err    error
 }
 
 
@@ -196,8 +195,7 @@ type Model struct {
 	filters   []review.PRFilter
 	filterIdx int
 	tabs      []tabState          // per-tab state, indexed parallel to filters
-	userTeams map[string]bool     // cached user team membership ("org/slug" → true)
-	width     int
+	width int
 	height    int
 	spinner   spinner.Model
 
@@ -284,14 +282,7 @@ func New(svc review.Service, filters []review.PRFilter) Model {
 
 // Init starts the initial PR fetch.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spinner.Tick}
-	// For team-filtered tabs, defer the PR fetch until UserIdentityMsg arrives
-	// so teams are known before we apply the client-side filter.
-	if m.filters[m.filterIdx].NeedsMyTeamApproval {
-		m.tabs[m.filterIdx].loading = true
-	} else {
-		cmds = append(cmds, m.fetchPRs())
-	}
+	cmds := []tea.Cmd{m.spinner.Tick, m.fetchPRs()}
 	return tea.Batch(cmds...)
 }
 
@@ -332,10 +323,9 @@ func (m Model) activeFilter() review.PRFilter {
 func (m Model) fetchPRs() tea.Cmd {
 	filter := m.activeFilter()
 	tabIdx := m.filterIdx
-	needsTeamFilter := filter.NeedsMyTeamApproval
 	return func() tea.Msg {
 		prs, err := m.svc.ListPRs(context.Background(), filter)
-		return prsLoadedMsg{tabIdx: tabIdx, prs: prs, err: err, needsMyTeamApproval: needsTeamFilter}
+		return prsLoadedMsg{tabIdx: tabIdx, prs: prs, err: err}
 	}
 }
 
@@ -361,11 +351,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			errFlash := flash.ShowMsg{ID: "fetch-error", Text: fmt.Sprintf("Fetch failed: %v", msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
 			return m, tea.Batch(dismissCmd, errFlash)
 		}
-		if msg.needsMyTeamApproval {
-			t.prs = m.filterForMyTeam(msg.prs)
-		} else {
-			t.prs = msg.prs
-		}
+		t.prs = msg.prs
 		if len(t.prs) > 0 {
 			t.setCursor(0)
 		} else {
@@ -385,14 +371,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Identity != nil {
 			m.preview.SetUserIdentity(msg.Identity)
 			m.currentUser = msg.Identity.Login
-			m.userTeams = make(map[string]bool, len(msg.Identity.Teams))
-			for _, t := range msg.Identity.Teams {
-				m.userTeams[t] = true
-			}
-			// Trigger PR fetch for the active tab if it was waiting for team identity.
-			if m.filters[m.filterIdx].NeedsMyTeamApproval && !m.tab().fetched {
-				return m, m.startFetch()
-			}
 		}
 
 	case commitsLoadedMsg:
@@ -827,42 +805,6 @@ func (m *Model) enrichVisible() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// filterForMyTeam returns only PRs where the user's team has a pending review
-// request and approval is still required.
-func (m Model) filterForMyTeam(prs []review.PullRequest) []review.PullRequest {
-	out := make([]review.PullRequest, 0, len(prs))
-	for _, pr := range prs {
-		if m.needsMyTeamApproval(pr) {
-			out = append(out, pr)
-		}
-	}
-	return out
-}
-
-// needsMyTeamApproval reports whether a PR still requires approval from the
-// user's team or the user directly. Returns true if:
-//   - ReviewDecision is not APPROVED (approval still needed), AND
-//   - one of the user's teams has a pending review request, OR
-//   - the user themselves has a pending review request
-func (m Model) needsMyTeamApproval(pr review.PullRequest) bool {
-	if pr.ReviewDecision == "APPROVED" {
-		return false
-	}
-	for _, team := range pr.PendingTeams {
-		if m.userTeams[team] {
-			return true
-		}
-	}
-	if m.currentUser != "" {
-		for _, rv := range pr.Reviewers {
-			if !rv.IsTeam && strings.EqualFold(rv.Login, m.currentUser) && rv.State == "PENDING" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // hasEnrichmentPending returns true if any PR enrichment is in flight
 // for the active tab.
 func (m Model) hasEnrichmentPending() bool {
@@ -872,11 +814,6 @@ func (m Model) hasEnrichmentPending() bool {
 		}
 	}
 	return false
-}
-
-// renderCtx holds extra data needed at render time.
-type renderCtx struct {
-	userTeams map[string]bool // "org/team-slug" → true
 }
 
 // renderHeader renders the tab bar and separator line.
@@ -1018,18 +955,12 @@ func (m *Model) startFetch() tea.Cmd {
 
 // switchTab handles switching to a new tab. If the tab already has cached
 // data, it refreshes the sidebar immediately. Otherwise it triggers a fetch.
-// For team-filtered tabs, defers the fetch until UserIdentityMsg arrives.
 func (m *Model) switchTab() tea.Cmd {
 	t := m.tab()
 	m.preview.ResetCache()
 	if t.fetched {
 		// Tab already has data — just refresh the sidebar.
 		return m.refreshSidebarPreview()
-	}
-	if m.filters[m.filterIdx].NeedsMyTeamApproval && m.userTeams == nil {
-		// Identity not yet loaded; mark loading and wait for UserIdentityMsg.
-		t.loading = true
-		return m.spinner.Tick
 	}
 	return m.startFetch()
 }

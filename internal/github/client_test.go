@@ -193,13 +193,12 @@ var _ = Describe("ListPRs", func() {
 			return jsonInto(graphqlPRResponse{}, resp)
 		}
 
-		_, _ = c.ListPRs(ctx, review.PRFilter{Qualifier: "review-requested:me"})
+		_, _ = c.ListPRs(ctx, review.PRFilter{Qualifier: "is:open review-requested:me"})
 		Expect(gql.calls).To(HaveLen(1))
 		q := gql.calls[0].Variables["query"].(string)
 		Expect(q).To(ContainSubstring("is:pr"))
-		Expect(q).To(ContainSubstring("is:open"))
 		Expect(q).To(ContainSubstring("repo:testowner/testrepo"))
-		Expect(q).To(ContainSubstring("review-requested:me"))
+		Expect(q).To(ContainSubstring("is:open review-requested:me"))
 	})
 })
 

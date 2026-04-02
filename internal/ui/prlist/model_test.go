@@ -97,32 +97,6 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 	})
 
-	ginkgo.Describe("UserIdentityMsg", func() {
-		ginkgo.It("populates userTeams map from identity", func() {
-			svc := &reviewtest.MockService{}
-			m := newTestModel(svc)
-
-			m, _ = m.Update(UserIdentityMsg{Identity: &review.UserIdentity{
-				Login: "user",
-				Teams: []string{"org/team-a", "org/team-b"},
-			}})
-
-			gomega.Expect(m.userTeams).To(gomega.HaveLen(2))
-			gomega.Expect(m.userTeams["org/team-a"]).To(gomega.BeTrue())
-			gomega.Expect(m.userTeams["org/team-b"]).To(gomega.BeTrue())
-		})
-
-		ginkgo.It("creates empty map when no teams", func() {
-			svc := &reviewtest.MockService{}
-			m := newTestModel(svc)
-
-			m, _ = m.Update(UserIdentityMsg{Identity: &review.UserIdentity{Login: "user", Teams: nil}})
-
-			gomega.Expect(m.userTeams).NotTo(gomega.BeNil())
-			gomega.Expect(m.userTeams).To(gomega.BeEmpty())
-		})
-	})
-
 	ginkgo.Describe("keyboard navigation", func() {
 		ginkgo.It("moves cursor down with j", func() {
 			svc := &reviewtest.MockService{}
