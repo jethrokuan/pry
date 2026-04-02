@@ -1054,6 +1054,109 @@ func (m *Model) renderedLineForCursor(cursor int) int {
 	return rendered
 }
 
+// syncViewportToComment ensures the currently selected comment is visible
+// in the viewport, scrolling if necessary.
+func (m *Model) syncViewportToComment() {
+	// Start from the diff line's rendered position
+	rendered := m.renderedLineForCursor(m.nav.cursor.LineIdx)
+	// Add 1 for the diff line itself, then compute offset to the selected comment
+	commentY := rendered + 1 + m.commentOffsetForSelection()
+
+	vpTop := m.nav.diffViewport.YOffset()
+	vpBottom := vpTop + m.nav.diffViewport.Height()
+
+	if commentY < vpTop {
+		m.nav.diffViewport.SetYOffset(commentY)
+	} else if commentY >= vpBottom {
+		m.nav.diffViewport.SetYOffset(commentY - m.nav.diffViewport.Height() + 1)
+	}
+	m.updateDiffContent()
+}
+
+// commentOffsetForSelection returns the number of rendered lines from the start
+// of the comment block to the selected comment's box (top border).
+func (m *Model) commentOffsetForSelection() int {
+	if !m.nav.cursor.IsComment() || len(m.files) == 0 || m.nav.cursor.FileIdx >= len(m.files) {
+		return 0
+	}
+	dl := m.nav.diffLines[m.nav.cursor.LineIdx]
+	path := m.files[m.nav.cursor.FileIdx].Path
+
+	// Collect threads in the same order as rendering: RIGHT then LEFT
+	type lineThread struct {
+		lineNum int
+		side    string
+	}
+	var checks []lineThread
+	if dl.newLine > 0 {
+		checks = append(checks, lineThread{dl.newLine, "RIGHT"})
+	}
+	if dl.oldLine > 0 {
+		checks = append(checks, lineThread{dl.oldLine, "LEFT"})
+	}
+
+	boxWidth := m.nav.diffViewport.Width() - 4
+	commentContentWidth := boxWidth - 8
+	if commentContentWidth < 20 {
+		commentContentWidth = 20
+	}
+	maxBody := m.maxCommentBlockHeight()
+
+	targetThread := m.nav.cursor.ThreadIdx
+	targetComment := m.nav.cursor.CommentIdx
+
+	offset := 0
+	flatThreadIdx := 0
+	for _, lt := range checks {
+		threads := m.comments.ThreadsForLine(path, lt.lineNum, lt.side)
+		ck := commentKey(path, lt.lineNum)
+		if !m.comments.expanded[ck] {
+			offset += 3 // folded box
+			continue
+		}
+		for _, t := range threads {
+			// Thread box top border (1) + status header (1)
+			threadHeaderHeight := 2
+			if flatThreadIdx == targetThread {
+				offset += threadHeaderHeight
+				// Now count within this thread to the target comment
+				for ci, c := range t.Comments {
+					if ci == targetComment {
+						return offset
+					}
+					// Skip this comment's box height
+					bodyRendered := m.renderMarkdown(c.Body, commentContentWidth)
+					bodyLines := len(strings.Split(bodyRendered, "\n"))
+					commentHeight := 3 // borders (2) + header (1)
+					if bodyLines <= maxBody {
+						commentHeight += bodyLines
+					} else {
+						commentHeight += maxBody + 1
+					}
+					offset += commentHeight
+				}
+				return offset
+			}
+			// Skip entire thread
+			threadLines := 3 // borders (2) + status header (1)
+			for _, c := range t.Comments {
+				bodyRendered := m.renderMarkdown(c.Body, commentContentWidth)
+				bodyLines := len(strings.Split(bodyRendered, "\n"))
+				commentHeight := 3
+				if bodyLines <= maxBody {
+					commentHeight += bodyLines
+				} else {
+					commentHeight += maxBody + 1
+				}
+				threadLines += commentHeight
+			}
+			offset += threadLines
+			flatThreadIdx++
+		}
+	}
+	return offset
+}
+
 // commentBlockHeight returns the total rendered line count for all comments
 // attached to the diff line at the given cursor index.
 func (m *Model) commentBlockHeight(cursor int) int {
@@ -1089,36 +1192,42 @@ func (m *Model) maxCommentBlockHeight() int {
 // commentRenderedLines returns the number of rendered lines for comments
 // on a specific file path, line number, and side.
 func (m *Model) commentRenderedLines(path string, lineNum int, side string) int {
-	comments := m.comments.CommentsForLine(path, lineNum, side)
-	totalCount := len(comments)
-	if totalCount == 0 {
+	threads := m.comments.ThreadsForLine(path, lineNum, side)
+	if len(threads) == 0 {
 		return 0
 	}
 
 	ck := commentKey(path, lineNum)
 	if !m.comments.expanded[ck] {
-		return 1 // folded summary line
+		return 3 // folded box: top border + content + bottom border
 	}
 
-	// Expanded: each comment = header(1) + min(bodyLines, maxBody) + hint?(1) + separator(1)
-	contentWidth := m.nav.diffViewport.Width() - 8
-	if contentWidth < 20 {
-		contentWidth = 20
+	// Each thread is a bordered box containing a status header + comment boxes.
+	// Thread box = 2 (borders) + 1 (status header) + sum of comment box heights.
+	// Comment box = 2 (borders) + 1 (header) + bodyHeight.
+	boxWidth := m.nav.diffViewport.Width() - 4
+	commentContentWidth := boxWidth - 8 // outer box border/padding + inner box border/padding
+	if commentContentWidth < 20 {
+		commentContentWidth = 20
 	}
 	maxBody := m.maxCommentBlockHeight()
-	lines := 0
-	for _, c := range comments {
-		rendered := m.renderMarkdown(c.Body, contentWidth-2)
-		bodyLines := len(strings.Split(rendered, "\n"))
-		lines += 1 // header
-		if bodyLines <= maxBody {
-			lines += bodyLines
-		} else {
-			lines += maxBody + 1 // capped body + hint line
+	total := 0
+	for _, t := range threads {
+		threadLines := 3 // thread box borders (2) + status header (1)
+		for _, c := range t.Comments {
+			bodyRendered := m.renderMarkdown(c.Body, commentContentWidth)
+			bodyLines := len(strings.Split(bodyRendered, "\n"))
+			commentHeight := 3 // comment box borders (2) + header (1)
+			if bodyLines <= maxBody {
+				commentHeight += bodyLines
+			} else {
+				commentHeight += maxBody + 1 // capped body + hint line
+			}
+			threadLines += commentHeight
 		}
-		lines += 1 // separator
+		total += threadLines
 	}
-	return lines
+	return total
 }
 
 

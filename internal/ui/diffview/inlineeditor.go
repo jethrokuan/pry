@@ -356,7 +356,7 @@ func (e InlineEditor) View() string {
 		location = fmt.Sprintf("%s:%d-%d", e.path, e.startLine, e.line)
 	}
 
-	header := lipgloss.NewStyle().Foreground(styles.Warning).Bold(true).
+	header := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).
 		Render(fmt.Sprintf(" %s on %s ", modeStr, location))
 
 	helpText := "ctrl+s save  ctrl+e $EDITOR  esc cancel"
@@ -369,7 +369,7 @@ func (e InlineEditor) View() string {
 
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Warning).
+		BorderForeground(styles.Primary).
 		Background(styles.BgOverlay).
 		Padding(0, 1).
 		Width(e.width - 4).

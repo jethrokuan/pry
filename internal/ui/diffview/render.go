@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/diff"
+	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/mdutil"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
@@ -439,97 +440,162 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 	ck := commentKey(path, line)
 	expanded := m.comments.expanded[ck]
 
-	comments := m.comments.CommentsForLine(path, line, side)
-
-	totalCount := len(comments)
-	if totalCount == 0 {
+	threads := m.comments.ThreadsForLine(path, line, side)
+	if len(threads) == 0 {
 		return 0
 	}
+
+	// Collect all comments flat (for selection indexing)
+	var allComments []review.Comment
+	for _, t := range threads {
+		allComments = append(allComments, t.Comments...)
+	}
+	totalCount := len(allComments)
 
 	commentStyle := lipgloss.NewStyle().Foreground(styles.Cyan)
 	pendingStyle := lipgloss.NewStyle().Foreground(styles.Warning)
 	mutedStyle := lipgloss.NewStyle().Foreground(styles.Muted)
 
-	// Gutter matching diff lines: marker(▎) + line-num-area("     │") + space
-	// Content area gets a subtle background to visually group the comment
-	gutterPipe := lipgloss.NewStyle().Foreground(styles.Muted).Render("     │")
-	bar := lipgloss.NewStyle().Foreground(styles.Warning).Render("▎")
-	gutterBase := bar + gutterPipe
+	boxWidth := m.nav.diffViewport.Width() - 4
+	if boxWidth < 20 {
+		boxWidth = 20
+	}
 
 	if !expanded {
-		foldPrefix := gutterBase + " "
 		submitted := 0
 		pending := 0
-		for _, c := range comments {
-			if c.IsPending {
-				pending++
-			} else {
-				submitted++
+		resolved := 0
+		for _, t := range threads {
+			if t.IsResolved {
+				resolved++
+			}
+			for _, c := range t.Comments {
+				if c.IsPending {
+					pending++
+				} else {
+					submitted++
+				}
 			}
 		}
-		parts := make([]string, 0, 2)
+		parts := make([]string, 0, 3)
 		if submitted > 0 {
 			parts = append(parts, commentStyle.Render(fmt.Sprintf("💬 %d comment(s)", submitted)))
 		}
 		if pending > 0 {
 			parts = append(parts, pendingStyle.Render(fmt.Sprintf("📝 %d pending", pending)))
 		}
-		b.WriteString(foldPrefix + strings.Join(parts, "  ") + "  " +
-			mutedStyle.Render("[tab to expand]") + "\n")
+		if resolved > 0 {
+			parts = append(parts, mutedStyle.Render("✓ resolved"))
+		}
+		inner := strings.Join(parts, "  ") + "  " +
+			mutedStyle.Render("[tab to expand]")
+		box := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(styles.Muted).
+			Padding(0, 1).
+			Width(boxWidth).
+			Render(inner)
+		b.WriteString(box + "\n")
 		return 0
 	}
-
-	contentWidth := m.nav.diffViewport.Width() - 8 // 8 = gutter visual width
-	if contentWidth < 20 {
-		contentWidth = 20
-	}
-
-	borderChar := lipgloss.NewStyle().Foreground(styles.Muted).Render("│")
-	selectedBorder := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▌")
 
 	// Per-comment body budget: each comment gets its own height cap and
 	// its own "… N more lines" hint when truncated.
 	maxBodyLines := m.maxCommentBlockHeight()
+	commentBoxWidth := boxWidth - 4 // inner box width inside outer box
+	commentContentWidth := commentBoxWidth - 4 // account for border + padding
+	if commentContentWidth < 20 {
+		commentContentWidth = 20
+	}
 
-	for idx, c := range comments {
-		border := borderChar
-		if idx == selectedIdx {
-			border = selectedBorder
-		}
+	// Build each comment as its own bordered box, grouped by thread
+	var threadBoxes []string
+	commentIdx := 0
+	for _, t := range threads {
+		var commentBoxes []string
+		for _, c := range t.Comments {
+			isSelected := commentIdx == selectedIdx
 
-		label := "💬"
-		if c.IsPending {
-			label = "📝 (draft)"
-		}
-		header := fmt.Sprintf("%s %s:", label,
-			styles.CommentAuthor.Render("@"+c.Author))
-
-		// Header line
-		b.WriteString(gutterBase + " " + border + " " + header + "\n")
-
-		// Body lines
-		rendered := m.renderMarkdown(c.Body, contentWidth-4)
-		bodyLines := strings.Split(rendered, "\n")
-
-		if len(bodyLines) <= maxBodyLines {
-			for _, bodyLine := range bodyLines {
-				b.WriteString(gutterBase + " " + border + " " + bodyLine + "\n")
+			label := "💬"
+			if c.IsPending {
+				label = "📝 (draft)"
 			}
+
+			header := fmt.Sprintf("%s %s:", label,
+				styles.CommentAuthor.Render("@"+c.Author))
+
+			// Body
+			rendered := m.renderMarkdown(c.Body, commentContentWidth)
+			bodyLines := strings.Split(rendered, "\n")
+
+			var body string
+			if len(bodyLines) <= maxBodyLines {
+				body = rendered
+			} else {
+				body = strings.Join(bodyLines[:maxBodyLines], "\n") + "\n" +
+					lipgloss.NewStyle().Foreground(styles.Warning).Render(fmt.Sprintf("… %d more lines", len(bodyLines)-maxBodyLines)) +
+					" " + lipgloss.NewStyle().Foreground(styles.Muted).Render("[") +
+					lipgloss.NewStyle().Foreground(styles.Info).Bold(true).Render(keys.ViewComment.Help().Key) +
+					lipgloss.NewStyle().Foreground(styles.Muted).Render(" to expand]")
+			}
+
+			inner := header + "\n" + body
+
+			borderColor := styles.Muted
+			if c.IsPending {
+				borderColor = styles.Warning
+			}
+			if isSelected {
+				borderColor = styles.Primary
+			}
+
+			box := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(borderColor).
+				Padding(0, 1).
+				Width(commentBoxWidth).
+				Render(inner)
+			commentBoxes = append(commentBoxes, box)
+			commentIdx++
+		}
+
+		// Thread status header
+		statusParts := []string{
+			mutedStyle.Render(fmt.Sprintf("%d comment(s)", len(t.Comments))),
+		}
+		if t.IsResolved {
+			statusParts = append(statusParts, lipgloss.NewStyle().Foreground(styles.Success).Render("✓ resolved"))
 		} else {
-			for j := 0; j < maxBodyLines; j++ {
-				b.WriteString(gutterBase + " " + border + " " + bodyLines[j] + "\n")
-			}
-			hidden := len(bodyLines) - maxBodyLines
-			truncText :=
-				lipgloss.NewStyle().Foreground(styles.Warning).Render(fmt.Sprintf("  … %d more lines", hidden)) +
-				" " + lipgloss.NewStyle().Foreground(styles.Muted).Render("[") +
-				lipgloss.NewStyle().Foreground(styles.Info).Bold(true).Render(keys.ViewComment.Help().Key) +
-				lipgloss.NewStyle().Foreground(styles.Muted).Render(" to expand]")
-			b.WriteString(gutterBase + " " + border + " " + truncText + "\n")
+			statusParts = append(statusParts, mutedStyle.Render("○ open"))
 		}
 
-		// Blank separator between comments
-		b.WriteString(gutterBase + "\n")
+		// Determine thread border color
+		threadBorderColor := styles.Cyan
+		if t.IsResolved {
+			threadBorderColor = styles.Muted
+		}
+		for _, c := range t.Comments {
+			if c.IsPending {
+				threadBorderColor = styles.Warning
+				break
+			}
+		}
+
+		threadHeader := lipgloss.NewStyle().Foreground(threadBorderColor).
+			Render(strings.Join(statusParts, "  "))
+		boxContent := threadHeader + "\n" + strings.Join(commentBoxes, "\n")
+
+		box := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(threadBorderColor).
+			Padding(0, 1).
+			Width(boxWidth).
+			Render(boxContent)
+		threadBoxes = append(threadBoxes, box)
+	}
+
+	for _, tb := range threadBoxes {
+		b.WriteString(tb + "\n")
 	}
 
 	return totalCount
