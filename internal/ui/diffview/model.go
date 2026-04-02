@@ -1138,7 +1138,7 @@ func (m *Model) pendingCommentCount() int {
 	return n
 }
 
-const commentBoxHeight = 10 // textarea(5) + header(1) + border(2) + help(1) + padding(1)
+const editorHeaderLines = 2 // title bar + file name bar before viewport
 
 func (m *Model) updateViewports() {
 	treeWidth := 0
@@ -1150,9 +1150,6 @@ func (m *Model) updateViewports() {
 	headerHeight := 3
 	footerHeight := 2
 	contentHeight := m.height - headerHeight - footerHeight
-	if m.editor.IsActive() {
-		contentHeight -= commentBoxHeight
-	}
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -1414,11 +1411,6 @@ func (m Model) View() string {
 		b.WriteString(m.nav.diffViewport.View() + "\n")
 	}
 
-	// Inline comment box (below the diff)
-	if m.editor.IsActive() {
-		b.WriteString(m.editor.View() + "\n")
-	}
-
 	// Input mode bars
 	if m.search.IsActive() {
 		b.WriteString(m.search.View())
@@ -1524,6 +1516,11 @@ func (m Model) View() string {
 	}
 
 	result := b.String()
+
+	// Overlay inline editor at cursor position
+	if m.editor.IsActive() {
+		result = m.overlayInlineEditor(result)
+	}
 
 	// Overlay popups if active
 	if m.showHelp {

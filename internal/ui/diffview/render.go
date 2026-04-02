@@ -723,6 +723,53 @@ func (m Model) overlayGeneric(base, popup string) string {
 	return lipgloss.NewCompositor(baseLayer, popupLayer).Render()
 }
 
+// overlayInlineEditor composites the inline comment editor over the base view,
+// positioned just below the current cursor line in the diff viewport.
+func (m Model) overlayInlineEditor(base string) string {
+	popup := m.editor.View()
+	if popup == "" {
+		return base
+	}
+
+	// Y: header lines + cursor position within viewport + 1 (below cursor line)
+	rendered := m.renderedLineForCursor(m.nav.cursor.LineIdx)
+	cursorScreenY := rendered - m.nav.diffViewport.YOffset()
+	y := editorHeaderLines + cursorScreenY + 1
+
+	// Clamp: don't let editor go below the viewport bottom
+	vpBottom := editorHeaderLines + m.nav.diffViewport.Height()
+	popupH := lipgloss.Height(popup)
+	if y+popupH > vpBottom {
+		// Place above the cursor line instead
+		y = editorHeaderLines + cursorScreenY - popupH
+	}
+	if y < editorHeaderLines {
+		y = editorHeaderLines
+	}
+
+	// X: offset by tree panel width if tree is visible
+	x := 0
+	if m.nav.showTree {
+		x = min(50, m.width/3) + 1
+	}
+
+	baseLayer := lipgloss.NewLayer(base)
+	popupLayer := lipgloss.NewLayer(popup).X(x).Y(y).Z(1)
+	result := lipgloss.NewCompositor(baseLayer, popupLayer).Render()
+
+	// Overlay the autocomplete dropdown at the textarea cursor
+	if dropdown := m.editor.DropdownView(); dropdown != "" {
+		// editor Y + header(1) + border top(1) + cursor line within textarea + 1 (below cursor)
+		dropY := y + 2 + m.editor.CursorLine() + 1
+		dropX := x + 2 // inside border+padding
+		base2 := lipgloss.NewLayer(result)
+		drop := lipgloss.NewLayer(dropdown).X(dropX).Y(dropY).Z(2)
+		result = lipgloss.NewCompositor(base2, drop).Render()
+	}
+
+	return result
+}
+
 // highlightMatches renders text with the base style, but applies a highlight
 // background to substrings matching the query (case-insensitive).
 func highlightMatches(text, query string, base lipgloss.Style, hlBg color.Color) string {

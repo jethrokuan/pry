@@ -58,6 +58,28 @@ type InlineEditor struct {
 // IsActive returns true if the inline editor is open.
 func (e InlineEditor) IsActive() bool { return e.active }
 
+func newEditorTextarea(width int) textarea.Model {
+	ta := textarea.New()
+	ta.Placeholder = ""
+	ta.ShowLineNumbers = false
+	ta.Focus()
+	ta.CharLimit = 0
+	ta.SetWidth(width - 8)
+	ta.SetHeight(5)
+
+	// Match textarea background to the overlay background.
+	s := ta.Styles()
+	bg := styles.BgOverlay
+	s.Focused.Base = s.Focused.Base.Background(bg)
+	s.Focused.Text = s.Focused.Text.Background(bg)
+	s.Focused.CursorLine = s.Focused.CursorLine.Background(bg)
+	s.Focused.EndOfBuffer = s.Focused.EndOfBuffer.Background(bg)
+	s.Focused.Prompt = s.Focused.Prompt.Background(bg)
+	ta.SetStyles(s)
+
+	return ta
+}
+
 // Open activates the inline editor for a new comment.
 func (e *InlineEditor) Open(path string, line, startLine int, side string, mode commentMode, suggestion string, width int) {
 	e.active = true
@@ -71,12 +93,7 @@ func (e *InlineEditor) Open(path string, line, startLine int, side string, mode 
 	e.confirmDiscard = false
 	e.width = width
 
-	ta := textarea.New()
-	ta.Placeholder = "Write your comment..."
-	ta.Focus()
-	ta.CharLimit = 0
-	ta.SetWidth(width - 4)
-	ta.SetHeight(5)
+	ta := newEditorTextarea(width)
 
 	if mode == commentModeSuggestion && suggestion != "" {
 		ta.SetValue(suggestion)
@@ -98,12 +115,7 @@ func (e *InlineEditor) OpenForEdit(path string, line, startLine int, side string
 	e.confirmDiscard = false
 	e.width = width
 
-	ta := textarea.New()
-	ta.Placeholder = "Edit your comment..."
-	ta.Focus()
-	ta.CharLimit = 0
-	ta.SetWidth(width - 4)
-	ta.SetHeight(5)
+	ta := newEditorTextarea(width)
 	ta.SetValue(body)
 
 	e.ta = ta
@@ -123,12 +135,7 @@ func (e *InlineEditor) OpenForReply(path string, line, startLine int, side strin
 	e.confirmDiscard = false
 	e.width = width
 
-	ta := textarea.New()
-	ta.Placeholder = "Write a reply..."
-	ta.Focus()
-	ta.CharLimit = 0
-	ta.SetWidth(width - 4)
-	ta.SetHeight(5)
+	ta := newEditorTextarea(width)
 
 	e.ta = ta
 }
@@ -162,7 +169,7 @@ func (e *InlineEditor) SetMentionUsers(users []review.MentionableUser) {
 func (e *InlineEditor) SetWidth(w int) {
 	e.width = w
 	if e.active {
-		e.ta.SetWidth(w - 4)
+		e.ta.SetWidth(w - 8)
 	}
 }
 
@@ -344,22 +351,29 @@ func (e InlineEditor) View() string {
 	header := lipgloss.NewStyle().Foreground(styles.Warning).Bold(true).
 		Render(fmt.Sprintf(" %s on %s ", modeStr, location))
 
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Warning).
-		Padding(0, 1).
-		Width(e.width - 2)
-
 	helpText := "ctrl+s save  ctrl+e $EDITOR  esc cancel"
 	if e.confirmDiscard {
 		helpText = "Press esc again to discard  ctrl+s save"
 	}
 	help := styles.HelpStyle.Render(helpText)
 
-	content := e.ta.View()
-	if dropdown := e.mentionAC.View(); dropdown != "" {
-		content += "\n" + dropdown
-	}
+	inner := header + "\n" + e.ta.View() + "\n" + help
 
-	return header + "\n" + boxStyle.Render(content) + "\n" + help
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.Warning).
+		Background(styles.BgOverlay).
+		Padding(0, 1).
+		Width(e.width - 4).
+		Render(inner)
+}
+
+// DropdownView returns the autocomplete dropdown view, or "" if inactive.
+func (e InlineEditor) DropdownView() string {
+	return e.mentionAC.View()
+}
+
+// CursorLine returns the textarea cursor's line index (0-based).
+func (e InlineEditor) CursorLine() int {
+	return e.ta.Line()
 }
