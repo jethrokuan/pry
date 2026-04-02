@@ -115,7 +115,7 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 	case key.Matches(msg, keys.Up):
 		if m.nav.cursor.CommentIdx > 0 {
 			m.nav.cursor.CommentIdx--
-			m.syncViewportToComment()
+			m.syncViewport()
 			return m, nil, true
 		}
 		// At first comment in thread — try previous thread
@@ -125,11 +125,11 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 			if m.nav.cursor.ThreadIdx < len(threads) {
 				m.nav.cursor.CommentIdx = len(threads[m.nav.cursor.ThreadIdx].Comments) - 1
 			}
-			m.syncViewportToComment()
+			m.syncViewport()
 			return m, nil, true
 		}
 		m.nav.cursor = m.nav.cursor.AsLine()
-		m.syncViewportToCursor()
+		m.syncViewport()
 		return m, nil, true
 	case key.Matches(msg, keys.Down):
 		threads := m.threadsAtCursor()
@@ -137,14 +137,14 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 			t := threads[m.nav.cursor.ThreadIdx]
 			if m.nav.cursor.CommentIdx < len(t.Comments)-1 {
 				m.nav.cursor.CommentIdx++
-				m.syncViewportToComment()
+				m.syncViewport()
 				return m, nil, true
 			}
 			// Past last comment in thread — try next thread
 			if m.nav.cursor.ThreadIdx < len(threads)-1 {
 				m.nav.cursor.ThreadIdx++
 				m.nav.cursor.CommentIdx = 0
-				m.syncViewportToComment()
+				m.syncViewport()
 				return m, nil, true
 			}
 		}
@@ -152,7 +152,7 @@ func (m Model) handleCommentSelectKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool
 		m.nav.cursor = m.nav.cursor.AsLine()
 		if m.nav.cursor.LineIdx < len(m.nav.diffLines)-1 {
 			m.nav.cursor.LineIdx++
-			m.syncViewportToCursor()
+			m.syncViewport()
 		}
 		return m, nil, true
 	case key.Matches(msg, keys.Back):

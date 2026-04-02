@@ -313,7 +313,7 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			if m.nav.visualMode {
 				m.nav.visualEnd = m.nav.cursor
 			}
-			m.syncViewportToCursor()
+			m.syncViewport()
 		}
 	case key.Matches(msg, keys.Down):
 		if m.nav.cursor.LineIdx < len(m.nav.diffLines)-1 {
@@ -321,7 +321,7 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			if m.nav.visualMode {
 				m.nav.visualEnd = m.nav.cursor
 			}
-			m.syncViewportToCursor()
+			m.syncViewport()
 		}
 	case key.Matches(msg, keys.PageUp):
 		m.nav.cursor.LineIdx -= m.nav.diffViewport.Height() / 2
@@ -331,7 +331,7 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if m.nav.visualMode {
 			m.nav.visualEnd = m.nav.cursor
 		}
-		m.syncViewportToCursor()
+		m.syncViewport()
 	case key.Matches(msg, keys.PageDown):
 		m.nav.cursor.LineIdx += m.nav.diffViewport.Height() / 2
 		if m.nav.cursor.LineIdx >= len(m.nav.diffLines) {
@@ -340,7 +340,7 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if m.nav.visualMode {
 			m.nav.visualEnd = m.nav.cursor
 		}
-		m.syncViewportToCursor()
+		m.syncViewport()
 
 	// Context-dependent Enter: enter comment select on commented line, create comment on empty line
 	case key.Matches(msg, keys.Enter):
@@ -625,8 +625,7 @@ func (m *Model) navigateThread(forward bool) tea.Cmd {
 
 	m.nav.cursor.LineIdx = diffIdx
 	m.expandAndSelectComment(diffIdx, 0, -1)
-	m.updateDiffContent()
-	m.syncViewportToCursorWithComments()
+	m.syncViewport()
 
 	if wrapped {
 		dir := "first"
@@ -823,8 +822,7 @@ func (m *Model) navigateComment(forward bool) tea.Cmd {
 
 	m.nav.cursor.LineIdx = diffIdx
 	m.expandAndSelectComment(diffIdx, target.threadIdx, target.commentIdx)
-	m.updateDiffContent()
-	m.syncViewportToCursorWithComments()
+	m.syncViewport()
 
 	if wrapped {
 		dir := "first"
@@ -849,7 +847,7 @@ func (m *Model) navigateHunk(forward bool) tea.Cmd {
 		for i := m.nav.cursor.LineIdx + 1; i < len(m.nav.diffLines); i++ {
 			if m.nav.diffLines[i].hunkIdx != currentHunk {
 				m.nav.cursor.LineIdx = i
-				m.syncViewportToCursor()
+				m.syncViewport()
 				return nil
 			}
 		}
@@ -865,7 +863,7 @@ func (m *Model) navigateHunk(forward bool) tea.Cmd {
 	if startOfCurrent < m.nav.cursor.LineIdx {
 		// We weren't at the start — go there
 		m.nav.cursor.LineIdx = startOfCurrent
-		m.syncViewportToCursor()
+		m.syncViewport()
 		return nil
 	}
 	// Already at start — go to start of previous hunk
@@ -874,7 +872,7 @@ func (m *Model) navigateHunk(forward bool) tea.Cmd {
 		for i := startOfCurrent - 1; i >= 0; i-- {
 			if i == 0 || m.nav.diffLines[i-1].hunkIdx != prevHunk {
 				m.nav.cursor.LineIdx = i
-				m.syncViewportToCursor()
+				m.syncViewport()
 				return nil
 			}
 		}
@@ -914,7 +912,7 @@ func (m *Model) navigateHunkCrossFile(forward bool) tea.Cmd {
 	m.nav.diffViewport.GotoTop()
 	m.updateDiffContent()
 	m.autoFollowFile(oldIdx, m.nav.cursor.FileIdx)
-	m.syncViewportToCursor()
+	m.syncViewport()
 	wrapped := (forward && nextIdx <= oldIdx) || (!forward && nextIdx >= oldIdx)
 	if wrapped {
 		if forward {
@@ -962,7 +960,7 @@ func (m *Model) jumpToLine(lineNum int) {
 	for i, dl := range m.nav.diffLines {
 		if dl.newLine == lineNum || dl.oldLine == lineNum {
 			m.nav.cursor = CursorTarget{Kind: CursorLine, FileIdx: m.nav.cursor.FileIdx, LineIdx: i}
-			m.syncViewportToCursor()
+			m.syncViewport()
 			return
 		}
 	}
@@ -976,7 +974,7 @@ func (m *Model) jumpToNextSearchMatch() tea.Cmd {
 	for i := m.nav.cursor.LineIdx + 1; i < len(m.nav.diffLines); i++ {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.cursor.LineIdx = i
-			m.syncViewportToCursor()
+			m.syncViewport()
 			return nil
 		}
 	}
@@ -984,7 +982,7 @@ func (m *Model) jumpToNextSearchMatch() tea.Cmd {
 	for i := 0; i <= m.nav.cursor.LineIdx; i++ {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.cursor.LineIdx = i
-			m.syncViewportToCursor()
+			m.syncViewport()
 			return flash.ShowMsg{ID: "diffview", Text: "Wrapped to first match", Expires: 1500 * time.Millisecond}.Cmd()
 		}
 	}
@@ -997,7 +995,7 @@ func (m *Model) jumpToPrevSearchMatch() tea.Cmd {
 	for i := m.nav.cursor.LineIdx - 1; i >= 0; i-- {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.cursor.LineIdx = i
-			m.syncViewportToCursor()
+			m.syncViewport()
 			return nil
 		}
 	}
@@ -1005,7 +1003,7 @@ func (m *Model) jumpToPrevSearchMatch() tea.Cmd {
 	for i := len(m.nav.diffLines) - 1; i >= m.nav.cursor.LineIdx; i-- {
 		if strings.Contains(strings.ToLower(m.nav.diffLines[i].content), query) {
 			m.nav.cursor.LineIdx = i
-			m.syncViewportToCursor()
+			m.syncViewport()
 			return flash.ShowMsg{ID: "diffview", Text: "Wrapped to last match", Expires: 1500 * time.Millisecond}.Cmd()
 		}
 	}
@@ -1101,7 +1099,7 @@ func (m *Model) applyJumpPos(pos CursorTarget) {
 		m.nav.cursor.LineIdx = 0
 	}
 	m.updateDiffContent()
-	m.syncViewportToCursor()
+	m.syncViewport()
 }
 
 // clearAllFilters removes all narrowing filters.

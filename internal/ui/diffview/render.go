@@ -226,6 +226,13 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 
 	var b strings.Builder
 	lineIdx := 0
+	currentY := 0
+
+	// Initialize render offsets
+	m.offsets = RenderOffsets{
+		DiffLineY:          make([]int, len(m.nav.diffLines)),
+		CommentBlockHeight: make([]int, len(m.nav.diffLines)),
+	}
 
 	hunkStyle := styles.HunkHeader
 	commentMarker := lipgloss.NewStyle().Foreground(styles.Warning).Render("▎")
@@ -264,6 +271,7 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 			renderedHeader += hs.Render(strings.Repeat(" ", m.nav.diffViewport.Width()-w))
 		}
 		b.WriteString(renderedHeader + "\n")
+		currentY++
 
 		if isCollapsed {
 			// Render a single selectable placeholder line for the collapsed hunk
@@ -280,8 +288,11 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 			} else {
 				b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render(summary) + "\n")
 			}
+			m.offsets.DiffLineY[lineIdx] = currentY
+			currentY++
 			lineIdx++
 			b.WriteString("\n")
+			currentY++
 			hunkIndex++
 			continue
 		}
@@ -397,16 +408,24 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 				}
 			}
 
+			m.offsets.DiffLineY[lineIdx] = currentY
 			b.WriteString(fullLine + "\n")
+			currentY++
 
 			// Render comments for this line (with folding and selection)
+			commentStartY := currentY
 			commentSelBase := 0
 			renderSideComments := func(lineNum int, side string) {
 				sel := -1
 				if isCurrent && m.nav.cursor.IsComment() {
 					sel = m.flatCommentIndex() - commentSelBase
 				}
-				n := m.renderLineComments(&b, file.Path, lineNum, side, sel)
+				n, selInfo, renderedLines := m.renderLineComments(&b, file.Path, lineNum, side, sel)
+				if sel >= 0 && sel < n && selInfo.height > 0 {
+					m.offsets.SelectedCommentY = currentY + selInfo.offset
+					m.offsets.SelectedCommentHeight = selInfo.height
+				}
+				currentY += renderedLines
 				commentSelBase += n
 			}
 			if line.NewNum > 0 {
@@ -421,28 +440,38 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 				editorView := m.editor.View()
 				if editorView != "" {
 					b.WriteString(editorView + "\n")
+					currentY += strings.Count(editorView, "\n") + 1
 				}
 			}
 
+			m.offsets.CommentBlockHeight[lineIdx] = currentY - commentStartY
 			lineIdx++
 		}
 		b.WriteString("\n")
+		currentY++
 		hunkIndex++
 	}
 
 	return b.String()
 }
 
+// commentSelInfo holds the position of the selected comment within the rendered output.
+type commentSelInfo struct {
+	offset int // lines from start of this block to the selected comment box
+	height int // height of the selected comment box in lines
+}
+
 // renderLineComments renders comments for a specific line/side.
 // selectedIdx is the 0-based index of the comment to highlight within this call's comments (-1 for none).
-// Returns the number of individual comments rendered (0 if folded or no comments).
-func (m *Model) renderLineComments(b *strings.Builder, path string, line int, side string, selectedIdx int) int {
+// Returns the number of individual comments rendered (0 if folded or no comments),
+// selection info if a comment was selected, and the total rendered line count written.
+func (m *Model) renderLineComments(b *strings.Builder, path string, line int, side string, selectedIdx int) (int, commentSelInfo, int) {
 	ck := commentKey(path, line)
 	expanded := m.comments.expanded[ck]
 
 	threads := m.comments.ThreadsForLine(path, line, side)
 	if len(threads) == 0 {
-		return 0
+		return 0, commentSelInfo{}, 0
 	}
 
 	// Collect all comments flat (for selection indexing)
@@ -496,7 +525,8 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 			Width(boxWidth).
 			Render(inner)
 		b.WriteString(box + "\n")
-		return 0
+		foldedLines := strings.Count(box, "\n") + 1
+		return 0, commentSelInfo{}, foldedLines
 	}
 
 	// Per-comment body budget: each comment gets its own height cap and
@@ -508,9 +538,17 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 		commentContentWidth = 20
 	}
 
-	// Build each comment as its own bordered box, grouped by thread
+	// Build each comment as its own bordered box, grouped by thread.
+	// Keep a flat list of all comment boxes for position tracking.
+	type commentBoxInfo struct {
+		box    string
+		height int // lines in rendered box
+	}
+	var allBoxes []commentBoxInfo
 	var threadBoxes []string
 	commentIdx := 0
+	// threadCommentCounts[i] = number of comments in thread i
+	var threadCommentCounts []int
 	for _, t := range threads {
 		var commentBoxes []string
 		for _, c := range t.Comments {
@@ -556,8 +594,11 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 				Width(commentBoxWidth).
 				Render(inner)
 			commentBoxes = append(commentBoxes, box)
+			allBoxes = append(allBoxes, commentBoxInfo{box: box, height: strings.Count(box, "\n") + 1})
 			commentIdx++
 		}
+
+		threadCommentCounts = append(threadCommentCounts, len(t.Comments))
 
 		// Thread status header
 		statusParts := []string{
@@ -594,11 +635,35 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 		threadBoxes = append(threadBoxes, box)
 	}
 
-	for _, tb := range threadBoxes {
+	// Write thread boxes and compute selected comment position.
+	var sel commentSelInfo
+	// Write thread boxes and compute total rendered lines + selected comment offset.
+	totalRenderedLines := 0
+	lineOffset := 0
+	flatIdx := 0
+	for ti, tb := range threadBoxes {
 		b.WriteString(tb + "\n")
+		tbLines := strings.Count(tb, "\n") + 1
+		totalRenderedLines += tbLines
+
+		// Track selected comment position within this thread
+		if selectedIdx >= 0 && sel.height == 0 {
+			innerOffset := 2 // thread box top border + status header
+			for ci := 0; ci < threadCommentCounts[ti]; ci++ {
+				if flatIdx == selectedIdx {
+					sel.offset = lineOffset + innerOffset
+					sel.height = allBoxes[flatIdx].height
+				}
+				innerOffset += allBoxes[flatIdx].height
+				flatIdx++
+			}
+		} else {
+			flatIdx += threadCommentCounts[ti]
+		}
+		lineOffset += tbLines
 	}
 
-	return totalCount
+	return totalCount, sel, totalRenderedLines
 }
 
 // renderCommentPopup builds the bordered comment popup.
@@ -811,9 +876,14 @@ func (m Model) overlayAutocompleteDropdown(base string) string {
 
 	// Y: header lines + cursor position within viewport + 1 (below cursor line)
 	// + comments height + editor offset to textarea cursor
-	rendered := m.renderedLineForCursor(m.nav.cursor.LineIdx)
+	cursor := m.nav.cursor.LineIdx
+	rendered := 0
+	commentH := 0
+	if cursor < len(m.offsets.DiffLineY) {
+		rendered = m.offsets.DiffLineY[cursor]
+		commentH = m.offsets.CommentBlockHeight[cursor] - m.editor.Height()
+	}
 	cursorScreenY := rendered - m.nav.diffViewport.YOffset()
-	commentH := m.commentBlockHeight(m.nav.cursor.LineIdx) - m.editor.Height()
 	// editor border top(1) + header(1) + cursor line within textarea + 1 (below cursor)
 	editorCursorOffset := 2 + m.editor.CursorLine() + 1
 	y := editorHeaderLines + cursorScreenY + 1 + commentH + editorCursorOffset

@@ -555,7 +555,7 @@ func (m *Model) openInlineComment(path string, line, startLine int, side string,
 	m.editor.Open(path, line, startLine, side, mode, suggestion, m.inlineTextareaWidth())
 	m.updateViewports()
 	m.updateDiffContent()
-	m.syncViewportToCursorWithComments()
+	m.syncViewport()
 	return m.editor.BlinkCmd()
 }
 

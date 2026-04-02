@@ -251,7 +251,7 @@ func (m Model) applyDraftResult(result *ai.DraftResult) tea.Cmd {
 	}
 
 	m.nav.cursor.LineIdx = targetLine
-	m.syncViewportToCursor()
+	m.syncViewport()
 
 	side := result.Side
 	if side == "" {
