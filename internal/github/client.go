@@ -25,13 +25,14 @@ type graphqlClient interface {
 
 // Client wraps the go-gh REST and GraphQL clients.
 type Client struct {
-	rest     restClient
-	graphql  graphqlClient
-	owner    string
-	repo     string
-	cache    cache.Cache
-	prTTL    time.Duration // TTL for ListPRs/GetPR cache entries
-	pageSize int           // Number of PRs to fetch per ListPRs call
+	rest       restClient
+	graphql    graphqlClient
+	owner      string
+	repo       string
+	cache      cache.Cache
+	prTTL      time.Duration // TTL for ListPRs/GetPR cache entries
+	pageSize   int           // Number of PRs to fetch per ListPRs call
+	apiTimeout time.Duration // Per-request timeout for GitHub API calls
 }
 
 // CurrentUser returns the authenticated user's login.
@@ -58,12 +59,14 @@ func (c *Client) CurrentUser(_ context.Context) (string, error) {
 }
 
 // NewClient creates a new GitHub client for the given repository.
-func NewClient(owner, repo string, c cache.Cache, prTTL time.Duration, pageSize int) (*Client, error) {
-	rest, err := ghAPI.DefaultRESTClient()
+func NewClient(owner, repo string, c cache.Cache, prTTL time.Duration, pageSize int, apiTimeout time.Duration) (*Client, error) {
+	opts := ghAPI.ClientOptions{Timeout: apiTimeout}
+
+	rest, err := ghAPI.NewRESTClient(opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create REST client (is gh authenticated?): %w", err)
 	}
-	graphql, err := ghAPI.DefaultGraphQLClient()
+	graphql, err := ghAPI.NewGraphQLClient(opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GraphQL client: %w", err)
 	}
@@ -76,13 +79,14 @@ func NewClient(owner, repo string, c cache.Cache, prTTL time.Duration, pageSize 
 	}
 
 	return &Client{
-		rest:     rest,
-		graphql:  graphql,
-		owner:    owner,
-		repo:     repo,
-		cache:    c,
-		prTTL:    prTTL,
-		pageSize: pageSize,
+		rest:       rest,
+		graphql:    graphql,
+		owner:      owner,
+		repo:       repo,
+		cache:      c,
+		prTTL:      prTTL,
+		pageSize:   pageSize,
+		apiTimeout: apiTimeout,
 	}, nil
 }
 

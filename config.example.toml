@@ -12,6 +12,10 @@
 # Number of PRs to fetch per filter tab (max 100, GitHub API limit).
 # page_size = 50
 
+# Timeout for each GitHub API request. Go duration format (e.g. "30s", "1m").
+# Increase if you see 502 errors or timeouts on large repos. Default: no timeout.
+# api_timeout = "30s"
+
 # [cache]
 # Cache PR list results per filter. Avoids repeated API calls when switching
 # between filters. Press 'r' to force a refresh. Cache is persisted to disk

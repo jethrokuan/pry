@@ -78,7 +78,7 @@ func main() {
 	}
 
 	// Create GitHub client (implements review.Service directly)
-	ghClient, err := gh.NewClient(owner, repo, c, prTTL, cfg.PageSize)
+	ghClient, err := gh.NewClient(owner, repo, c, prTTL, cfg.PageSize, cfg.APITimeoutDuration())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

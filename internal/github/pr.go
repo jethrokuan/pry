@@ -165,9 +165,9 @@ func (c *Client) ListPRs(_ context.Context, filter review.PRFilter) ([]review.Pu
 func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 	query := fmt.Sprintf("is:pr repo:%s/%s %s sort:updated-desc", c.owner, c.repo, qualifier)
 
-	// Lightweight list query — only fields needed for the table rows.
-	// Heavy nested data (check runs, reviews, review requests) are fetched
-	// lazily via GetPR when the sidebar preview is shown.
+	// Lightweight list query — scalar fields only for the table rows.
+	// Nested data (check runs, reviews, review requests) are fetched
+	// lazily via GetPR / enrichVisible.
 	graphqlQuery := fmt.Sprintf(`
 	query($query: String!) {
 		viewer { login }
@@ -192,42 +192,6 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 					mergeable
 					author { login }
 					comments { totalCount }
-					reviewRequests(first: 100) {
-						nodes {
-							requestedReviewer {
-								... on Team {
-									slug
-									organization { login }
-								}
-								... on User {
-									login
-								}
-							}
-						}
-					}
-					latestReviews(first: 20) {
-						nodes {
-							author { login }
-							state
-						}
-					}
-					commits(last: 1) {
-						totalCount
-						nodes {
-							commit {
-								statusCheckRollup {
-									state
-									contexts {
-										totalCount
-										checkRunCount
-										checkRunCountsByState { count state }
-										statusContextCount
-										statusContextCountsByState { count state }
-									}
-								}
-							}
-						}
-					}
 				}
 			}
 		}

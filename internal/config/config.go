@@ -48,14 +48,28 @@ type AIConfig struct {
 
 // Config holds user configuration for the tool.
 type Config struct {
-	Editor   string         `koanf:"editor"`
-	PageSize int            `koanf:"page_size"`
-	Filters  []FilterConfig `koanf:"filters"`
-	Columns  []string       `koanf:"columns"`
-	FileTree FileTreeConfig `koanf:"file_tree"`
-	PRList   PRListConfig   `koanf:"pr_list"`
-	Cache    CacheConfig    `koanf:"cache"`
-	AI       AIConfig       `koanf:"ai"`
+	Editor     string         `koanf:"editor"`
+	PageSize   int            `koanf:"page_size"`
+	APITimeout string         `koanf:"api_timeout"`
+	Filters    []FilterConfig `koanf:"filters"`
+	Columns    []string       `koanf:"columns"`
+	FileTree   FileTreeConfig `koanf:"file_tree"`
+	PRList     PRListConfig   `koanf:"pr_list"`
+	Cache      CacheConfig    `koanf:"cache"`
+	AI         AIConfig       `koanf:"ai"`
+}
+
+// APITimeoutDuration parses the api_timeout string into a time.Duration.
+// Returns 0 (no timeout) by default.
+func (c Config) APITimeoutDuration() time.Duration {
+	if c.APITimeout == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(c.APITimeout)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 // CacheEnabled returns whether caching is enabled (default: true).
