@@ -67,6 +67,13 @@ type prEnrichedMsg struct {
 	Err      error
 }
 
+// commitsLoadedMsg carries the result of a lazy commits fetch.
+type commitsLoadedMsg struct {
+	PRNumber int
+	Commits  []review.Commit
+	Err      error
+}
+
 // maxEnrichPRs is the number of PRs to background-enrich after list load.
 const maxEnrichPRs = 10
 
@@ -79,8 +86,10 @@ type KeyMap struct {
 	PrevTab     key.Binding
 	EditFilter  key.Binding
 	Refresh     key.Binding
-	SidebarDown key.Binding
-	SidebarUp   key.Binding
+	SidebarDown    key.Binding
+	SidebarUp      key.Binding
+	SidebarNextTab key.Binding
+	SidebarPrevTab key.Binding
 	OpenInBrowser key.Binding
 	CopyNumber   key.Binding
 	CopyURL      key.Binding
@@ -110,8 +119,10 @@ var keys = KeyMap{
 	PrevTab:     key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev tab")),
 	EditFilter:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "edit filter")),
 	Refresh:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-	SidebarDown: key.NewBinding(key.WithKeys("J"), key.WithHelp("J", "scroll preview down")),
-	SidebarUp:   key.NewBinding(key.WithKeys("K"), key.WithHelp("K", "scroll preview up")),
+	SidebarDown:    key.NewBinding(key.WithKeys("J"), key.WithHelp("J", "scroll preview down")),
+	SidebarUp:      key.NewBinding(key.WithKeys("K"), key.WithHelp("K", "scroll preview up")),
+	SidebarNextTab: key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next section")),
+	SidebarPrevTab: key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev section")),
 	OpenInBrowser: key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "open in browser")),
 	CopyNumber:   key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy PR number")),
 	CopyURL:      key.NewBinding(key.WithKeys("Y"), key.WithHelp("Y", "copy PR URL")),
@@ -384,6 +395,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 
+	case commitsLoadedMsg:
+		m.preview.HandleCommitsLoaded(prpreview.CommitsLoadedMsg{
+			PRNumber: msg.PRNumber,
+			Commits:  msg.Commits,
+			Err:      msg.Err,
+		})
+		return m, nil
+
 	case prEnrichedMsg:
 		// Route to the correct tab; ignore stale messages.
 		if msg.tabIdx < 0 || msg.tabIdx >= len(m.tabs) {
@@ -604,6 +623,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.preview.ScrollDown(3)
 		case key.Matches(msg, keys.SidebarUp):
 			m.preview.ScrollUp(3)
+		case key.Matches(msg, keys.SidebarNextTab):
+			m.preview.NextSection()
+			if cmd := m.fetchCommitsIfNeeded(); cmd != nil {
+				return m, cmd
+			}
+		case key.Matches(msg, keys.SidebarPrevTab):
+			m.preview.PrevSection()
+			if cmd := m.fetchCommitsIfNeeded(); cmd != nil {
+				return m, cmd
+			}
 		case key.Matches(msg, keys.OpenInBrowser):
 			if t.hasCursor() {
 				return m, openBrowser(t.prs[t.cur()].URL)
@@ -966,7 +995,7 @@ func helpSections() []helppopup.Section {
 	return []helppopup.Section{
 		helppopup.Bind("Navigation", keys.Up, keys.Down, keys.HalfPageDown, keys.HalfPageUp, keys.Select, keys.GoToPR),
 		helppopup.Bind("Tabs & Filters", keys.NextTab, keys.PrevTab, keys.EditFilter),
-		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp),
+		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp, keys.SidebarNextTab, keys.SidebarPrevTab),
 		helppopup.Bind("PR Actions", keys.Assign, keys.Unassign, keys.Close, keys.Reopen, keys.Merge, keys.ReadyForReview, keys.Checkout),
 		helppopup.Bind("Copy", keys.CopyNumber, keys.CopyURL),
 		helppopup.Bind("Other", keys.OpenInBrowser, keys.Refresh, keys.Help, keys.Quit),
@@ -1190,6 +1219,19 @@ func shortTimeAgo(t time.Time) string {
 		return fmt.Sprintf("%dw", int(d.Hours()/(24*7)))
 	default:
 		return fmt.Sprintf("%dmo", int(d.Hours()/(24*30)))
+	}
+}
+
+// fetchCommitsIfNeeded returns a command to fetch commits if the sidebar needs them.
+func (m Model) fetchCommitsIfNeeded() tea.Cmd {
+	prNum, needed := m.preview.NeedsCommits()
+	if !needed {
+		return nil
+	}
+	svc := m.svc
+	return func() tea.Msg {
+		commits, err := svc.FetchCommits(context.Background(), prNum)
+		return commitsLoadedMsg{PRNumber: prNum, Commits: commits, Err: err}
 	}
 }
 

@@ -97,6 +97,10 @@ func (m *MockService) FetchIssueComments(ctx context.Context, number int) ([]rev
 	return nil, nil
 }
 
+func (m *MockService) FetchCommits(_ context.Context, _ int) ([]review.Commit, error) {
+	return nil, nil
+}
+
 func (m *MockService) FetchCommentsAndReview(ctx context.Context, number int) ([]review.Thread, int, string, error) {
 	if m.FetchCommentsAndReviewFn != nil {
 		return m.FetchCommentsAndReviewFn(ctx, number)

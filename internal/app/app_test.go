@@ -34,6 +34,9 @@ func (s *stubService) FetchDiffFiles(_ context.Context, _ int) ([]diff.DiffFile,
 func (s *stubService) FetchIssueComments(_ context.Context, _ int) ([]review.IssueComment, error) {
 	return nil, nil
 }
+func (s *stubService) FetchCommits(_ context.Context, _ int) ([]review.Commit, error) {
+	return nil, nil
+}
 func (s *stubService) FetchCommentsAndReview(_ context.Context, _ int) ([]review.Thread, int, string, error) {
 	return nil, 0, "", nil
 }

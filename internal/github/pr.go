@@ -68,14 +68,24 @@ type graphqlPRNode struct {
 				StatusCheckRollup struct {
 					State    string `json:"state"`
 					Contexts struct {
-						TotalCount int                   `json:"totalCount"`
-						Nodes      []graphqlCheckContext  `json:"nodes"`
-						PageInfo   graphqlPageInfo        `json:"pageInfo"`
+						TotalCount                 int                    `json:"totalCount"`
+						CheckRunCount              int                    `json:"checkRunCount"`
+						CheckRunCountsByState      []graphqlCountByState  `json:"checkRunCountsByState"`
+						StatusContextCount         int                    `json:"statusContextCount"`
+						StatusContextCountsByState []graphqlCountByState  `json:"statusContextCountsByState"`
+						Nodes                      []graphqlCheckContext  `json:"nodes"`
+						PageInfo                   graphqlPageInfo        `json:"pageInfo"`
 					} `json:"contexts"`
 				} `json:"statusCheckRollup"`
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+}
+
+// graphqlCountByState represents a count + state pair from checkRunCountsByState / statusContextCountsByState.
+type graphqlCountByState struct {
+	Count int    `json:"count"`
+	State string `json:"state"`
 }
 
 // graphqlCheckContext represents a union of CheckRun | StatusContext from the API.
@@ -249,6 +259,13 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 							commit {
 								statusCheckRollup {
 									state
+									contexts {
+										totalCount
+										checkRunCount
+										checkRunCountsByState { count state }
+										statusContextCount
+										statusContextCountsByState { count state }
+									}
 								}
 							}
 						}
@@ -349,6 +366,7 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 	var checksPass *bool
 	var checkRuns []review.CheckRun
 	var checksTotal int
+	var checkCounts review.CheckCounts
 	if len(node.Commits.Nodes) > 0 {
 		rollup := node.Commits.Nodes[len(node.Commits.Nodes)-1].Commit.StatusCheckRollup
 		switch rollup.State {
@@ -367,6 +385,12 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 			cr := graphqlContextToCheckRun(ctx)
 			checkRuns = append(checkRuns, cr)
 		}
+
+		checkCounts = aggregateCountsByState(
+			rollup.Contexts.CheckRunCountsByState,
+			rollup.Contexts.StatusContextCountsByState,
+			checksTotal,
+		)
 	}
 
 	pr := review.PullRequest{
@@ -393,6 +417,7 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		ChecksPass:     checksPass,
 		CheckRuns:      checkRuns,
 		ChecksTotal:    checksTotal,
+		CheckCounts:    checkCounts,
 		MergeState:     node.MergeStateStatus,
 		Mergeable:      node.Mergeable,
 		ReviewDecision: node.ReviewDecision,
@@ -489,6 +514,35 @@ func graphqlContextToCheckRun(ctx graphqlCheckContext) review.CheckRun {
 	return cr
 }
 
+// aggregateCountsByState combines checkRunCountsByState and statusContextCountsByState
+// into a single CheckCounts summary.
+func aggregateCountsByState(crCounts, scCounts []graphqlCountByState, total int) review.CheckCounts {
+	cc := review.CheckCounts{Total: total}
+	for _, c := range crCounts {
+		switch c.State {
+		case "SUCCESS":
+			cc.Passing += c.Count
+		case "FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "CANCELLED":
+			cc.Failing += c.Count
+		case "SKIPPED", "NEUTRAL":
+			cc.Skipped += c.Count
+		case "IN_PROGRESS", "QUEUED", "PENDING", "WAITING":
+			cc.Pending += c.Count
+		}
+	}
+	for _, c := range scCounts {
+		switch c.State {
+		case "SUCCESS":
+			cc.Passing += c.Count
+		case "ERROR", "FAILURE":
+			cc.Failing += c.Count
+		case "PENDING", "EXPECTED":
+			cc.Pending += c.Count
+		}
+	}
+	return cc
+}
+
 // GetPR fetches a single PR by number, including the full body.
 func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, error) {
 	key := fmt.Sprintf("pr__%d", number)
@@ -543,6 +597,10 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 								state
 								contexts(first: 100) {
 									totalCount
+									checkRunCount
+									checkRunCountsByState { count state }
+									statusContextCount
+									statusContextCountsByState { count state }
 									pageInfo { hasNextPage endCursor }
 									nodes {
 										__typename
@@ -719,4 +777,119 @@ func (c *Client) fetchRemainingCheckContexts(number int, after string) ([]graphq
 	}
 
 	return all, nil
+}
+
+// FetchCommits fetches individual commits for a PR.
+func (c *Client) FetchCommits(_ context.Context, number int) ([]review.Commit, error) {
+	key := fmt.Sprintf("commits__%d", number)
+	var cached []review.Commit
+	if c.cache.Get(key, &cached) {
+		return cached, nil
+	}
+
+	query := `
+	query($owner: String!, $repo: String!, $number: Int!) {
+		repository(owner: $owner, name: $repo) {
+			pullRequest(number: $number) {
+				commits(last: 30) {
+					nodes {
+						commit {
+							oid
+							abbreviatedOid
+							messageHeadline
+							committedDate
+							additions
+							deletions
+							authors(first: 1) {
+								nodes {
+									user { login }
+									name
+								}
+							}
+							statusCheckRollup {
+								state
+								contexts { totalCount }
+							}
+						}
+					}
+				}
+			}
+		}
+	}`
+
+	var resp struct {
+		Repository struct {
+			PullRequest struct {
+				Commits struct {
+					Nodes []struct {
+						Commit struct {
+							OID              string    `json:"oid"`
+							AbbreviatedOID   string    `json:"abbreviatedOid"`
+							MessageHeadline  string    `json:"messageHeadline"`
+							CommittedDate    time.Time `json:"committedDate"`
+							Additions        int       `json:"additions"`
+							Deletions        int       `json:"deletions"`
+							Authors          struct {
+								Nodes []struct {
+									User struct {
+										Login string `json:"login"`
+									} `json:"user"`
+									Name string `json:"name"`
+								} `json:"nodes"`
+							} `json:"authors"`
+							StatusCheckRollup struct {
+								State    string `json:"state"`
+								Contexts struct {
+									TotalCount int `json:"totalCount"`
+								} `json:"contexts"`
+							} `json:"statusCheckRollup"`
+						} `json:"commit"`
+					} `json:"nodes"`
+				} `json:"commits"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	}
+
+	err := c.graphql.Do(query, map[string]interface{}{
+		"owner":  c.owner,
+		"repo":   c.repo,
+		"number": number,
+	}, &resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch commits for PR #%d: %w", number, err)
+	}
+
+	var commits []review.Commit
+	for _, n := range resp.Repository.PullRequest.Commits.Nodes {
+		c := n.Commit
+		author := c.Authors.Nodes[0].User.Login
+		if author == "" {
+			author = c.Authors.Nodes[0].Name
+		}
+
+		var checksPass *bool
+		switch c.StatusCheckRollup.State {
+		case "SUCCESS":
+			t := true
+			checksPass = &t
+		case "ERROR", "FAILURE":
+			f := false
+			checksPass = &f
+		}
+
+		commits = append(commits, review.Commit{
+			SHA:         c.OID,
+			ShortSHA:    c.AbbreviatedOID,
+			Message:     c.MessageHeadline,
+			Author:      author,
+			CommittedAt: c.CommittedDate,
+			Additions:   c.Additions,
+			Deletions:   c.Deletions,
+			ChecksPass:  checksPass,
+			ChecksTotal: c.StatusCheckRollup.Contexts.TotalCount,
+		})
+	}
+
+	c.cache.Set(key, commits, c.prTTL)
+	return commits, nil
 }

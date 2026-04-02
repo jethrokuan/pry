@@ -14,4 +14,9 @@ const (
 	Files   = "\uf440" // nf-oct-diff
 	Updated = "\uf472" // nf-oct-history
 	Created = "\uf455" // nf-oct-calendar
+
+	// Tab icons
+	Overview  = "\uf0ce"     // nf-fa-table
+	Checklist = "\uf46a"     // nf-oct-checklist
+	GitCommit = "\uf4bb"     // nf-oct-git_commit
 )

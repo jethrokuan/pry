@@ -45,6 +45,30 @@ type CheckRun struct {
 	DetailsURL  string
 }
 
+// CheckCounts holds pre-aggregated check counts by outcome category.
+// Populated from the API's checkRunCountsByState / statusContextCountsByState
+// so we don't need to paginate through individual check nodes.
+type CheckCounts struct {
+	Failing int // FAILURE, TIMED_OUT, STARTUP_FAILURE, ERROR, ACTION_REQUIRED, CANCELLED
+	Passing int // SUCCESS
+	Skipped int // SKIPPED, NEUTRAL
+	Pending int // IN_PROGRESS, QUEUED, PENDING, WAITING, EXPECTED
+	Total   int
+}
+
+// Commit represents a single commit on a PR.
+type Commit struct {
+	SHA            string
+	ShortSHA       string
+	Message        string // first line only
+	Author         string
+	CommittedAt    time.Time
+	Additions      int
+	Deletions      int
+	ChecksPass     *bool // nil = pending, true = pass, false = fail
+	ChecksTotal    int
+}
+
 // Reviewer represents a reviewer and their review status on a PR.
 type Reviewer struct {
 	Login  string // User login or team slug
@@ -69,6 +93,7 @@ type PullRequest struct {
 	Deletions int
 	Files        int
 	Commits      int
+	CommitList   []Commit // Individual commits (populated by GetPR)
 	CommentCount int
 	Body         string
 	URL       string
@@ -78,7 +103,8 @@ type PullRequest struct {
 	ChecksPass    *bool
 	ChecksSummary string
 	CheckRuns     []CheckRun
-	ChecksTotal   int // Total number of checks (from API totalCount); 0 means unknown
+	ChecksTotal   int         // Total number of checks (from API totalCount); 0 means unknown
+	CheckCounts   CheckCounts // Pre-aggregated counts by outcome (from API countsByState)
 
 	// Assignees
 	Assignees []string // User logins assigned to this PR

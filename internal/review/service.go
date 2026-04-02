@@ -45,6 +45,9 @@ type Service interface {
 	// FetchDiffFiles fetches and parses the changed files for a PR.
 	FetchDiffFiles(ctx context.Context, number int) ([]diff.DiffFile, error)
 
+	// FetchCommits fetches individual commits for a PR (lazy-loaded).
+	FetchCommits(ctx context.Context, number int) ([]Commit, error)
+
 	// FetchIssueComments fetches top-level conversation comments on a PR.
 	FetchIssueComments(ctx context.Context, number int) ([]IssueComment, error)
 

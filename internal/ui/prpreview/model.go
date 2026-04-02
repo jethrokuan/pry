@@ -2,6 +2,7 @@ package prpreview
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -10,17 +11,40 @@ import (
 
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/sidebar"
+	"github.com/jethrokuan/pry/internal/ui/components/tabbar"
+	"github.com/jethrokuan/pry/internal/ui/icons"
 	"github.com/jethrokuan/pry/internal/ui/mdutil"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
+
+// Sidebar tab indices.
+const (
+	tabOverview = iota
+	tabCommits
+	tabChecks
+)
+
+// CommitsLoadedMsg carries the result of an async commits fetch.
+type CommitsLoadedMsg struct {
+	PRNumber int
+	Commits  []review.Commit
+	Err      error
+}
 
 // Model manages the PR preview sidebar content and async body fetching.
 type Model struct {
 	userIdentity *review.UserIdentity
 	sidebar      sidebar.Model
+	tabs         tabbar.Model
 	sidebarWidth int
 	previewPRNum int
 	loading      bool
+
+	// Cached state for re-rendering when switching tabs.
+	cachedPR      *review.PullRequest
+	cachedBody    string
+	cachedCommits []review.Commit
+	commitsLoaded bool // true once commits have been fetched for current PR
 }
 
 // New creates a new PR preview model.
@@ -28,6 +52,11 @@ func New() Model {
 	return Model{
 		sidebar:      sidebar.New(),
 		sidebarWidth: 50,
+		tabs: tabbar.New([]tabbar.Tab{
+			{Label: icons.Overview + " Overview", Count: -1},
+			{Label: icons.GitCommit + " Commits", Count: -1},
+			{Label: icons.Checklist + " Checks", Count: -1},
+		}),
 	}
 }
 
@@ -39,6 +68,7 @@ func (m *Model) SetUserIdentity(id *review.UserIdentity) {
 // SetSize updates the sidebar dimensions.
 func (m *Model) SetSize(width, height int) {
 	m.sidebarWidth = width
+	m.tabs.SetWidth(width - 4) // account for sidebar border + padding
 	m.sidebar.SetSize(width, height)
 }
 
@@ -50,6 +80,27 @@ func (m *Model) ScrollDown(n int) {
 // ScrollUp scrolls the sidebar viewport up by n lines.
 func (m *Model) ScrollUp(n int) {
 	m.sidebar.ScrollUp(n)
+}
+
+// NextSection moves to the next sidebar tab.
+func (m *Model) NextSection() {
+	if m.tabs.Next() {
+		m.rerender()
+	}
+}
+
+// PrevSection moves to the previous sidebar tab.
+func (m *Model) PrevSection() {
+	if m.tabs.Prev() {
+		m.rerender()
+	}
+}
+
+// rerender re-renders using cached PR data for the current tab.
+func (m *Model) rerender() {
+	if m.cachedPR != nil {
+		m.renderContent(m.cachedPR, m.cachedBody)
+	}
 }
 
 // View renders the sidebar.
@@ -72,19 +123,51 @@ type BodyLoadedMsg struct {
 // Background enrichment (via prEnrichedMsg) will call HandleBodyLoaded
 // when full data arrives.
 func (m *Model) Refresh(pr *review.PullRequest) {
+	if m.previewPRNum != pr.Number {
+		// New PR — reset lazy-loaded data
+		m.cachedCommits = nil
+		m.commitsLoaded = false
+	}
 	m.previewPRNum = pr.Number
 	// If check runs are loaded, the PR has been enriched.
 	m.loading = pr.CheckRuns == nil
+	m.cachedPR = pr
+	m.cachedBody = pr.Body
 	m.renderContent(pr, pr.Body)
+}
+
+// HandleCommitsLoaded processes a CommitsLoadedMsg.
+func (m *Model) HandleCommitsLoaded(msg CommitsLoadedMsg) {
+	if msg.PRNumber != m.previewPRNum {
+		return
+	}
+	m.commitsLoaded = true
+	if msg.Err == nil {
+		m.cachedCommits = msg.Commits
+	}
+	if m.tabs.Active() == tabCommits {
+		m.rerender()
+	}
+}
+
+// NeedsCommits returns true if the Commits tab is active but data hasn't been fetched yet.
+func (m *Model) NeedsCommits() (int, bool) {
+	if m.tabs.Active() == tabCommits && !m.commitsLoaded && m.previewPRNum > 0 {
+		return m.previewPRNum, true
+	}
+	return 0, false
 }
 
 // HandleBodyLoaded processes a BodyLoadedMsg, updating the sidebar if it matches the current PR.
 func (m *Model) HandleBodyLoaded(msg BodyLoadedMsg, pr *review.PullRequest) {
 	if pr != nil && pr.Number == msg.PRNumber {
 		m.loading = false
+		m.cachedPR = pr
 		if msg.Err == nil {
+			m.cachedBody = msg.Body
 			m.renderContent(pr, msg.Body)
 		} else {
+			m.cachedBody = ""
 			m.renderContent(pr, "")
 		}
 	}
@@ -102,21 +185,14 @@ func (m *Model) SetNoSelection() {
 
 func (m *Model) renderContent(pr *review.PullRequest, body string) {
 	var b strings.Builder
+	muted := lipgloss.NewStyle().Foreground(styles.Muted)
 
-	// Header: number + title on one line
+	// --- Persistent header (always visible, above tabs) ---
+
+	// Title
 	prLabel := lipgloss.NewStyle().Foreground(lipgloss.BrightYellow).Bold(true).Render(fmt.Sprintf("#%d", pr.Number))
 	prTitle := lipgloss.NewStyle().Bold(true).Render(pr.Title)
 	b.WriteString(prLabel + " " + prTitle + "\n")
-
-	// Changes summary (compact, right below title)
-	add := lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("+%d", pr.Additions))
-	del := lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("-%d", pr.Deletions))
-	muted := lipgloss.NewStyle().Foreground(styles.Muted)
-	commitLabel := "commits"
-	if pr.Commits == 1 {
-		commitLabel = "commit"
-	}
-	b.WriteString(muted.Render(fmt.Sprintf("%d %s · %d files changed  ", pr.Commits, commitLabel, pr.Files)) + add + " " + del + "\n\n")
 
 	// State badge + branch info
 	var stateBadge string
@@ -134,58 +210,48 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 		Foreground(lipgloss.BrightWhite).
 		Background(styles.BgSelected).
 		Padding(0, 1)
-	renderPill := func(text string) string {
-		return pill.Render(text)
-	}
-	arrow := lipgloss.NewStyle().Foreground(styles.Muted).Render(" ← ")
-	branchInfo := renderPill(pr.Base) + arrow + renderPill(pr.Branch)
+	arrow := muted.Render(" ← ")
+	branchInfo := pill.Render(pr.Base) + arrow + pill.Render(pr.Branch)
 	b.WriteString(stateBadge + "  " + branchInfo + "\n")
 
 	// Author + time
-	authorLine := fmt.Sprintf("by %s · %s",
+	b.WriteString(fmt.Sprintf("by %s · %s",
 		lipgloss.NewStyle().Foreground(styles.Cyan).Render("@"+pr.Author),
-		timeAgo(pr.UpdatedAt))
-	b.WriteString(authorLine + "\n\n")
+		timeAgo(pr.UpdatedAt)) + "\n")
 
-	// Merge status
+	// Tab bar with bottom border
+	contentWidth := m.sidebarWidth - 6
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
+	b.WriteString("\n" + m.tabs.View() + "\n")
+	b.WriteString(muted.Render(strings.Repeat("─", contentWidth)) + "\n\n")
+
+	// --- Tab-specific content ---
+	switch m.tabs.Active() {
+	case tabOverview:
+		m.renderOverview(&b, pr, body)
+	case tabCommits:
+		m.renderCommitsTab(&b, pr)
+	case tabChecks:
+		m.renderChecksTab(&b, pr)
+	}
+
+	m.sidebar.SetContent(b.String())
+}
+
+func (m *Model) renderOverview(b *strings.Builder, pr *review.PullRequest, body string) {
 	sectionHeader := lipgloss.NewStyle().Bold(true)
-	b.WriteString(sectionHeader.Render("☷ Merge Status") + "\n")
-	var mergeStatus string
-	switch pr.MergeState {
-	case "CLEAN":
-		mergeStatus = lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Ready to merge")
-	case "HAS_HOOKS":
-		mergeStatus = lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Ready (has hooks)")
-	case "DRAFT":
-		mergeStatus = lipgloss.NewStyle().Foreground(styles.Muted).Render("◌ Draft")
-	case "BLOCKED":
-		mergeStatus = lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ Blocked")
-	case "UNSTABLE":
-		mergeStatus = lipgloss.NewStyle().Foreground(styles.Warning).Render("○ Unstable")
-	case "DIRTY":
-		mergeStatus = lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ Merge conflicts")
-	default:
-		mergeStatus = lipgloss.NewStyle().Foreground(styles.Muted).Render("○ Unknown")
-	}
-	b.WriteString(mergeStatus + "\n")
+	muted := lipgloss.NewStyle().Foreground(styles.Muted)
 
-	// Blocking reasons / clean status detail.
-	// These sections depend on check runs and reviewers which are only
-	// available after the full PR detail (GetPR) loads. Show a loading
-	// indicator until then to avoid misleading empty data.
-	if m.loading {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("  Loading details...") + "\n")
-	} else if pr.MergeState == "BLOCKED" || pr.MergeState == "UNSTABLE" || pr.MergeState == "DIRTY" {
-		if pr.Mergeable == "CONFLICTING" {
-			b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Merge conflicts") + "\n")
-			renderConflictFiles(&b, pr.ConflictFiles)
-		}
-		renderReviewStatus(&b, pr, m.userIdentity)
-		renderCheckRunsDetail(&b, pr)
-	} else if pr.MergeState == "CLEAN" || pr.MergeState == "HAS_HOOKS" {
-		renderCleanStatus(&b, pr)
+	// Changes summary
+	add := lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("+%d", pr.Additions))
+	del := lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("-%d", pr.Deletions))
+	commitLabel := "commits"
+	if pr.Commits == 1 {
+		commitLabel = "commit"
 	}
-	b.WriteString("\n")
+	b.WriteString(muted.Render(fmt.Sprintf("%d %s · %d files  ", pr.Commits, commitLabel, pr.Files)) + add + " " + del + "\n\n")
 
 	// Labels
 	if len(pr.Labels) > 0 {
@@ -219,10 +285,339 @@ func (m *Model) renderContent(pr *review.PullRequest, body string) {
 		}
 	} else if m.loading {
 		b.WriteString(sectionHeader.Render("≡ Summary") + "\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Muted).Render("Loading...") + "\n")
+		b.WriteString(muted.Render("Loading...") + "\n")
 	}
 
-	m.sidebar.SetContent(b.String())
+	// Checks summary box
+	boxWidth := m.sidebarWidth - 6
+	if boxWidth < 20 {
+		boxWidth = 20
+	}
+	b.WriteString(sectionHeader.Render("☐ Checks") + "\n")
+	b.WriteString(m.renderChecksBox(pr, boxWidth) + "\n")
+}
+
+func (m *Model) renderCommitsTab(b *strings.Builder, pr *review.PullRequest) {
+	muted := lipgloss.NewStyle().Foreground(styles.Muted)
+	sectionHeader := lipgloss.NewStyle().Bold(true)
+
+	commitLabel := "commits"
+	if pr.Commits == 1 {
+		commitLabel = "commit"
+	}
+	b.WriteString(sectionHeader.Render(fmt.Sprintf("%s %d %s", icons.GitCommit, pr.Commits, commitLabel)) + "\n\n")
+
+	if !m.commitsLoaded {
+		b.WriteString(muted.Render("Loading commits...") + "\n")
+		return
+	}
+	if len(m.cachedCommits) == 0 {
+		b.WriteString(muted.Render("No commits") + "\n")
+		return
+	}
+
+	for _, c := range m.cachedCommits {
+		// Check status icon
+		var checkIcon string
+		switch {
+		case c.ChecksPass == nil:
+			checkIcon = lipgloss.NewStyle().Foreground(styles.Muted).Render("○")
+		case *c.ChecksPass:
+			checkIcon = lipgloss.NewStyle().Foreground(styles.Success).Render("✓")
+		default:
+			checkIcon = lipgloss.NewStyle().Foreground(styles.Danger).Render("✗")
+		}
+
+		// Commit message (truncated) + short SHA right-aligned
+		msg := c.Message
+		if len(msg) > 50 {
+			msg = msg[:47] + "..."
+		}
+		sha := muted.Render(c.ShortSHA)
+		b.WriteString(checkIcon + " " + msg + "  " + sha + "\n")
+
+		// Author + time + additions/deletions
+		add := lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("%d", c.Additions))
+		del := lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("%d", c.Deletions))
+		b.WriteString(muted.Render(fmt.Sprintf("  @%s %s · ", c.Author, timeAgo(c.CommittedAt))) + checkIcon + " " + add + "/" + del + "\n\n")
+	}
+}
+
+func (m *Model) renderChecksTab(b *strings.Builder, pr *review.PullRequest) {
+	sectionHeader := lipgloss.NewStyle().Bold(true)
+	muted := lipgloss.NewStyle().Foreground(styles.Muted)
+
+	boxWidth := m.sidebarWidth - 6
+	if boxWidth < 20 {
+		boxWidth = 20
+	}
+	b.WriteString(m.renderChecksBox(pr, boxWidth) + "\n\n")
+
+	// Reviewers section
+	if len(pr.Reviewers) > 0 {
+		b.WriteString(sectionHeader.Render("Reviewers") + "\n\n")
+		for _, r := range pr.Reviewers {
+			if r.State == "" {
+				continue
+			}
+			var stateIcon string
+			var style lipgloss.Style
+			switch r.State {
+			case "APPROVED":
+				stateIcon = "✓"
+				style = lipgloss.NewStyle().Foreground(styles.Success)
+			case "CHANGES_REQUESTED":
+				stateIcon = "●"
+				style = lipgloss.NewStyle().Foreground(styles.Danger)
+			case "COMMENTED", "DISMISSED":
+				stateIcon = icons.Comment
+				style = lipgloss.NewStyle().Foreground(styles.Muted)
+			default: // PENDING
+				stateIcon = "●"
+				style = lipgloss.NewStyle().Foreground(styles.Warning)
+			}
+			b.WriteString("  " + style.Render(stateIcon) + " " + r.Login + "\n")
+		}
+		b.WriteString("\n")
+	}
+
+	// All Checks list (sorted: failures first, then pending, then skipped, then success)
+	if len(pr.CheckRuns) > 0 {
+		sorted := make([]review.CheckRun, len(pr.CheckRuns))
+		copy(sorted, pr.CheckRuns)
+		sort.Slice(sorted, func(i, j int) bool {
+			return checkRunSortOrder(sorted[i]) < checkRunSortOrder(sorted[j])
+		})
+
+		b.WriteString(sectionHeader.Render(icons.Checklist+" All Checks") + "\n\n")
+		for _, cr := range sorted {
+			var checkIcon string
+			switch {
+			case cr.Status == review.CheckRunCompleted && cr.Conclusion == review.ConclusionSuccess:
+				checkIcon = lipgloss.NewStyle().Foreground(styles.Success).Render("✓")
+			case cr.Status == review.CheckRunCompleted && (cr.Conclusion == review.ConclusionFailure || cr.Conclusion == review.ConclusionTimedOut || cr.Conclusion == review.ConclusionStartupFailure || cr.Conclusion == review.ConclusionActionRequired):
+				checkIcon = lipgloss.NewStyle().Foreground(styles.Danger).Render("✗")
+			case cr.Status == review.CheckRunCompleted && (cr.Conclusion == review.ConclusionSkipped || cr.Conclusion == review.ConclusionNeutral || cr.Conclusion == review.ConclusionCancelled):
+				checkIcon = muted.Render("○")
+			default:
+				checkIcon = lipgloss.NewStyle().Foreground(styles.Warning).Render("◑")
+			}
+			b.WriteString("  " + checkIcon + " " + cr.Name + "\n")
+		}
+	} else if m.loading {
+		b.WriteString(muted.Render("Loading checks...") + "\n")
+	}
+}
+
+// renderChecksBox renders a bordered box with review, CI checks, and merge status subsections.
+func (m *Model) renderChecksBox(pr *review.PullRequest, boxWidth int) string {
+	muted := lipgloss.NewStyle().Foreground(styles.Muted)
+	innerWidth := boxWidth - 4
+
+	var sections []string
+
+	// 1. Review status subsection
+	if sec := reviewSubsection(pr, m.userIdentity); sec != "" {
+		sections = append(sections, sec)
+	}
+
+	// 2. CI checks subsection
+	if sec := checksSubsection(pr, innerWidth); sec != "" {
+		sections = append(sections, sec)
+	}
+
+	// 3. Merge/draft status subsection
+	if sec := mergeSubsection(pr); sec != "" {
+		sections = append(sections, sec)
+	}
+
+	if m.loading && len(sections) == 0 {
+		sections = append(sections, muted.Render("Loading..."))
+	}
+
+	if len(sections) == 0 {
+		sections = append(sections, lipgloss.NewStyle().Foreground(styles.Success).Render("✓ All checks passed"))
+	}
+
+	// Determine border color from worst status
+	borderColor := styles.Success
+	switch {
+	case pr.MergeState == "BLOCKED" || pr.MergeState == "DIRTY":
+		borderColor = styles.Danger
+	case pr.CheckCounts.Failing > 0:
+		borderColor = styles.Danger
+	case pr.ChecksPass != nil && !*pr.ChecksPass:
+		borderColor = styles.Danger
+	case pr.MergeState == "UNSTABLE" || pr.MergeState == "DRAFT" || pr.Draft:
+		borderColor = styles.Warning
+	case pr.CheckCounts.Pending > 0:
+		borderColor = styles.Warning
+	case pr.MergeState == "":
+		borderColor = styles.Muted
+	}
+
+	rule := muted.Render(strings.Repeat("─", innerWidth))
+	content := strings.Join(sections, "\n"+rule+"\n")
+
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(0, 1).
+		Width(boxWidth).
+		Render(content)
+}
+
+// reviewSubsection renders the review status part of the Checks box.
+func reviewSubsection(pr *review.PullRequest, _ *review.UserIdentity) string {
+	bold := lipgloss.NewStyle().Bold(true)
+	muted := lipgloss.NewStyle().Foreground(styles.Muted)
+
+	switch pr.ReviewDecision {
+	case "APPROVED":
+		var count int
+		for _, r := range pr.Reviewers {
+			if r.State == "APPROVED" {
+				count++
+			}
+		}
+		subtitle := fmt.Sprintf("%d approved", count)
+		return lipgloss.NewStyle().Foreground(styles.Success).Render("✓ ") +
+			bold.Render("Approved") + "\n" + muted.Render("  "+subtitle)
+
+	case "CHANGES_REQUESTED":
+		var changesCount, approvedCount int
+		for _, r := range pr.Reviewers {
+			switch r.State {
+			case "CHANGES_REQUESTED":
+				changesCount++
+			case "APPROVED":
+				approvedCount++
+			}
+		}
+		// latestReviews may not reflect "changes requested" if the reviewer
+		// commented afterward — GitHub tracks it as sticky until approval.
+		// Fall back to a descriptive message when count is 0.
+		var subtitle string
+		if changesCount > 0 {
+			parts := []string{fmt.Sprintf("%d requesting changes", changesCount)}
+			if approvedCount > 0 {
+				parts = append(parts, fmt.Sprintf("%d approved", approvedCount))
+			}
+			subtitle = strings.Join(parts, ", ")
+		} else {
+			subtitle = "Changes must be addressed to merge"
+		}
+		return lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ ") +
+			bold.Render("Changes requested") + "\n" + muted.Render("  "+subtitle)
+
+	case "REVIEW_REQUIRED":
+		var commented int
+		for _, r := range pr.Reviewers {
+			if r.State == "COMMENTED" || r.State == "DISMISSED" {
+				commented++
+			}
+		}
+		var subtitle string
+		if commented > 0 {
+			label := "reviewer left comments"
+			if commented > 1 {
+				label = "reviewers left comments"
+			}
+			subtitle = fmt.Sprintf("%d %s", commented, label)
+		} else {
+			subtitle = "Awaiting required reviews"
+		}
+		return lipgloss.NewStyle().Foreground(styles.Warning).Render("◑ ") +
+			bold.Render("Review Required") + "\n" + muted.Render("  "+subtitle)
+	}
+	return ""
+}
+
+// checksSubsection renders the CI checks part of the Checks box.
+func checksSubsection(pr *review.PullRequest, barWidth int) string {
+	cc := pr.CheckCounts
+	if cc.Total == 0 && len(pr.CheckRuns) > 0 {
+		cc = countsFromCheckRuns(pr.CheckRuns, pr.ChecksTotal)
+	}
+	if cc.Total == 0 {
+		return ""
+	}
+
+	bold := lipgloss.NewStyle().Bold(true)
+	muted := lipgloss.NewStyle().Foreground(styles.Muted)
+
+	allPassed := cc.Failing == 0 && cc.Pending == 0
+	if allPassed {
+		title := lipgloss.NewStyle().Foreground(styles.Success).Render("✓ ") +
+			bold.Render("All checks passed")
+		return title + "\n" + muted.Render(fmt.Sprintf("  %d successful", cc.Passing))
+	}
+
+	// Title
+	var icon, titleText string
+	if cc.Failing > 0 {
+		icon = lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ ")
+		titleText = "Some checks were not successful"
+	} else {
+		icon = lipgloss.NewStyle().Foreground(styles.Warning).Render("◑ ")
+		titleText = "Some checks are pending"
+	}
+	title := icon + bold.Render(titleText)
+
+	// Stats line: "1 failing, 60 skipped, 48 successful"
+	var statParts []string
+	if cc.Failing > 0 {
+		statParts = append(statParts, fmt.Sprintf("%d failing", cc.Failing))
+	}
+	if cc.Pending > 0 {
+		statParts = append(statParts, fmt.Sprintf("%d pending", cc.Pending))
+	}
+	if cc.Skipped > 0 {
+		statParts = append(statParts, fmt.Sprintf("%d skipped", cc.Skipped))
+	}
+	if cc.Passing > 0 {
+		statParts = append(statParts, fmt.Sprintf("%d successful", cc.Passing))
+	}
+	subtitle := muted.Render("  " + strings.Join(statParts, ", "))
+
+	// Progress bar
+	bar := renderChecksProgressBar(cc, barWidth)
+
+	result := title + "\n" + subtitle
+	if bar != "" {
+		result += "\n" + bar
+	}
+	return result
+}
+
+// mergeSubsection renders the merge/draft status part of the Checks box.
+func mergeSubsection(pr *review.PullRequest) string {
+	bold := lipgloss.NewStyle().Bold(true)
+	muted := lipgloss.NewStyle().Foreground(styles.Muted)
+
+	if pr.Draft {
+		return lipgloss.NewStyle().Foreground(styles.Muted).Render("◌ ") +
+			bold.Render("This pull request is still a work in progress") + "\n" +
+			muted.Render("  Draft pull requests cannot be merged")
+	}
+	if pr.Mergeable == "CONFLICTING" {
+		title := lipgloss.NewStyle().Foreground(styles.Danger).Render("✗ ") +
+			bold.Render("Merge conflicts")
+		if len(pr.ConflictFiles) > 0 {
+			const maxShow = 3
+			show := pr.ConflictFiles
+			if len(show) > maxShow {
+				show = show[:maxShow]
+			}
+			title += "\n" + muted.Render("  "+strings.Join(show, ", "))
+			if len(pr.ConflictFiles) > maxShow {
+				title += muted.Render(fmt.Sprintf(", +%d more", len(pr.ConflictFiles)-maxShow))
+			}
+		}
+		return title
+	}
+	// Don't show a merge subsection if everything is clean
+	return ""
 }
 
 func truncateLines(s string, max int) string {
@@ -235,276 +630,92 @@ func truncateLines(s string, max int) string {
 	return strings.Join(lines[:max], "\n") + "\n" + lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render(label) + "\n"
 }
 
-// renderReviewStatus renders the review/approval status line with pending reviewer names.
-func renderReviewStatus(b *strings.Builder, pr *review.PullRequest, userIdentity *review.UserIdentity) {
-	if pr.ReviewDecision == "CHANGES_REQUESTED" {
-		// Collect reviewers who requested changes
-		var requesters []string
-		for _, r := range pr.Reviewers {
-			if r.State == "CHANGES_REQUESTED" {
-				requesters = append(requesters, r.Login)
-			}
-		}
-
-		if len(requesters) == 0 {
-			b.WriteString(lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Changes requested") + "\n")
-		} else {
-			const maxVisible = 4
-			display := requesters
-			var overflow int
-			if len(display) > maxVisible {
-				overflow = len(display) - maxVisible
-				display = display[:maxVisible]
-			}
-			dangerStyle := lipgloss.NewStyle().Foreground(styles.Danger)
-			names := strings.Join(display, dangerStyle.Render(", "))
-			suffix := ""
-			if overflow > 0 {
-				suffix = lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf(", +%d more", overflow))
-			}
-			b.WriteString(dangerStyle.Render("  ✗ Changes requested by: ") + names + suffix + "\n")
-		}
-		return
-	}
-	if pr.ReviewDecision != "REVIEW_REQUIRED" {
-		return
-	}
-
-	// Collect pending reviewer names (individuals + teams)
-	var pending []string
-	userTeams := make(map[string]bool)
-	if userIdentity != nil {
-		for _, t := range userIdentity.Teams {
-			userTeams[t] = true
-		}
-	}
-
-	for _, r := range pr.Reviewers {
-		if r.State == "PENDING" && !r.IsTeam {
-			pending = append(pending, r.Login)
-		}
-	}
-	for _, t := range pr.PendingTeams {
-		pending = append(pending, stripOrgPrefix(t))
-	}
-
-	// If no explicit pending reviewers, show reviewers who interacted but haven't approved
-	// (e.g., COMMENTED or DISMISSED — they're still required to approve).
-	// This handles cases where a team reviewer commented (removing the team from
-	// reviewRequests) but hasn't approved yet.
-	if len(pending) == 0 {
-		for _, r := range pr.Reviewers {
-			if r.State != "" && r.State != "APPROVED" && r.State != "PENDING" {
-				pending = append(pending, r.Login)
-			}
-		}
-	}
-
-	if len(pending) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Warning).Render("  ○ Awaiting required reviews") + "\n")
-		return
-	}
-
-	const maxVisible = 4
-	display := pending
-	var overflow int
-	if len(display) > maxVisible {
-		overflow = len(display) - maxVisible
-		display = display[:maxVisible]
-	}
-
-	highlight := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Underline(true)
-	normal := lipgloss.NewStyle().Foreground(styles.Warning)
-
-	var parts []string
-	for _, name := range display {
-		// Highlight if name matches a user's team
-		isUserTeam := false
-		for _, t := range pr.PendingTeams {
-			if stripOrgPrefix(t) == name && userTeams[t] {
-				isUserTeam = true
-				break
-			}
-		}
-		if isUserTeam {
-			parts = append(parts, highlight.Render(name))
-		} else {
-			parts = append(parts, normal.Render(name))
-		}
-	}
-
-	prefix := lipgloss.NewStyle().Foreground(styles.Warning).Render("  ○ Awaiting reviews: ")
-	names := strings.Join(parts, lipgloss.NewStyle().Foreground(styles.Warning).Render(", "))
-	if overflow > 0 {
-		names += lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf(", +%d more", overflow))
-	}
-	b.WriteString(prefix + names + "\n")
-}
-
-// renderConflictFiles renders the list of conflicted file names.
-func renderConflictFiles(b *strings.Builder, files []string) {
-	if len(files) == 0 {
-		return
-	}
-	fileStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-	const maxVisible = 5
-	show := files
-	if len(show) > maxVisible {
-		show = show[:maxVisible]
-	}
-	for _, f := range show {
-		b.WriteString(fileStyle.Render("    "+f) + "\n")
-	}
-	if len(files) > maxVisible {
-		b.WriteString(fileStyle.Italic(true).Render(fmt.Sprintf("    +%d more", len(files)-maxVisible)) + "\n")
-	}
-}
-
-// renderCheckRunsDetail renders the check runs summary and detail lines.
-func renderCheckRunsDetail(b *strings.Builder, pr *review.PullRequest) {
-	if len(pr.CheckRuns) == 0 {
-		// No detailed check runs yet — don't render from the summary boolean
-		// as it may be stale. Enrichment will provide real data.
-		return
-	}
-
-	var failed, running, passed, skipped, other []review.CheckRun
-	for _, cr := range pr.CheckRuns {
-		switch {
-		case cr.Status == review.CheckRunCompleted && (cr.Conclusion == review.ConclusionFailure || cr.Conclusion == review.ConclusionTimedOut || cr.Conclusion == review.ConclusionStartupFailure || cr.Conclusion == review.ConclusionActionRequired):
-			failed = append(failed, cr)
-		case cr.Status == review.CheckRunInProgress || cr.Status == review.CheckRunQueued:
-			running = append(running, cr)
-		case cr.Status == review.CheckRunCompleted && (cr.Conclusion == review.ConclusionSkipped || cr.Conclusion == review.ConclusionCancelled):
-			skipped = append(skipped, cr)
-		case cr.Status == review.CheckRunCompleted && (cr.Conclusion == review.ConclusionSuccess || cr.Conclusion == review.ConclusionNeutral):
-			passed = append(passed, cr)
-		default:
-			other = append(other, cr)
-		}
-	}
-
-	allPassed := len(failed) == 0 && len(running) == 0
-	total := len(passed) + len(skipped) + len(other)
-	// Use ChecksTotal from the API when available (handles pagination).
-	apiTotal := pr.ChecksTotal
-	if apiTotal < total {
-		apiTotal = total
-	}
-	if allPassed {
-		b.WriteString(lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("  ✓ %d/%d checks passed", total, apiTotal)) + "\n")
-		return
-	}
-
-	// Summary line: "Checks: 2 failing, 1 running · ✓ 5 passed"
-	var summaryParts []string
-	if len(failed) > 0 {
-		summaryParts = append(summaryParts, lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("%d failing", len(failed))))
-	}
-	if len(running) > 0 {
-		summaryParts = append(summaryParts, lipgloss.NewStyle().Foreground(styles.Warning).Render(fmt.Sprintf("%d running", len(running))))
-	}
-
-	prefix := lipgloss.NewStyle().Foreground(styles.Danger).Render("  ✗ Checks: ")
-	rest := strings.Join(summaryParts, lipgloss.NewStyle().Foreground(styles.Muted).Render(", "))
-	if len(passed) > 0 {
-		rest += lipgloss.NewStyle().Foreground(styles.Muted).Render(" · ") +
-			lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("✓ %d passed", len(passed)))
-	}
-	b.WriteString(prefix + rest + "\n")
-
-	// Detail lines: show failed and running checks, one per line
-	var detailChecks []review.CheckRun
-	detailChecks = append(detailChecks, failed...)
-	detailChecks = append(detailChecks, running...)
-
-	const maxDetailChecks = 6
-	showChecks := detailChecks
-	if len(showChecks) > maxDetailChecks {
-		showChecks = showChecks[:maxDetailChecks]
-	}
-
-	for _, cr := range showChecks {
-		var icon string
-		var style lipgloss.Style
-		switch {
-		case cr.Status == review.CheckRunCompleted && cr.Conclusion != review.ConclusionSuccess:
-			icon = "✗"
-			style = lipgloss.NewStyle().Foreground(styles.Danger)
-		case cr.Status == review.CheckRunInProgress:
-			icon = "◑"
-			style = lipgloss.NewStyle().Foreground(styles.Warning)
-		case cr.Status == review.CheckRunQueued:
-			icon = "○"
-			style = lipgloss.NewStyle().Foreground(styles.Muted)
-		default:
-			icon = "○"
-			style = lipgloss.NewStyle().Foreground(styles.Muted)
-		}
-		entry := icon + " " + cr.Name
-		dur := formatCheckDuration(cr)
-		if dur != "" {
-			entry += " (" + dur + ")"
-		}
-		b.WriteString("    " + style.Render(entry) + "\n")
-	}
-
-	if len(detailChecks) > maxDetailChecks {
-		b.WriteString("    " + lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf("+%d more", len(detailChecks)-maxDetailChecks)) + "\n")
-	}
-}
-
-// renderCleanStatus renders the status line when PR is ready to merge.
-func renderCleanStatus(b *strings.Builder, pr *review.PullRequest) {
-	var parts []string
-	if len(pr.CheckRuns) > 0 {
-		total := len(pr.CheckRuns)
-		apiTotal := pr.ChecksTotal
-		if apiTotal < total {
-			apiTotal = total
-		}
-		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("✓ %d/%d checks passed", total, apiTotal)))
-	} else if pr.ChecksPass != nil && *pr.ChecksPass {
-		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Checks passing"))
-	}
-	if pr.ReviewDecision == "APPROVED" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(styles.Success).Render("✓ Approved"))
-	}
-	if len(parts) > 0 {
-		b.WriteString("  " + strings.Join(parts, lipgloss.NewStyle().Foreground(styles.Muted).Render(" · ")) + "\n")
-	}
-}
-
-// formatCheckDuration formats the duration of a check run.
-func formatCheckDuration(cr review.CheckRun) string {
-	if cr.StartedAt.IsZero() {
+// renderChecksProgressBar renders a proportional progress bar using ▃ characters.
+func renderChecksProgressBar(cc review.CheckCounts, width int) string {
+	if cc.Total == 0 {
 		return ""
 	}
-	var d time.Duration
-	if cr.Status == review.CheckRunInProgress || cr.CompletedAt.IsZero() {
-		d = time.Since(cr.StartedAt)
-	} else {
-		d = cr.CompletedAt.Sub(cr.StartedAt)
+
+	// Calculate proportional widths, ensuring at least 1 char for non-zero segments.
+	type segment struct {
+		count int
+		color lipgloss.Style
+	}
+	segments := []segment{
+		{cc.Failing, lipgloss.NewStyle().Foreground(styles.Danger)},
+		{cc.Pending, lipgloss.NewStyle().Foreground(styles.Warning)},
+		{cc.Skipped, lipgloss.NewStyle().Foreground(styles.Muted)},
+		{cc.Passing, lipgloss.NewStyle().Foreground(styles.Success)},
 	}
 
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
-	suffix := ""
-	if cr.Status == review.CheckRunInProgress {
-		suffix = "↑"
+	// Distribute width proportionally
+	widths := make([]int, len(segments))
+	remaining := width
+	for i, s := range segments {
+		if s.count > 0 {
+			w := s.count * width / cc.Total
+			if w == 0 {
+				w = 1
+			}
+			widths[i] = w
+			remaining -= w
+		}
+	}
+	// Distribute leftover to largest segment
+	if remaining > 0 {
+		maxIdx := 0
+		for i, s := range segments {
+			if s.count > segments[maxIdx].count {
+				maxIdx = i
+			}
+		}
+		widths[maxIdx] += remaining
 	}
 
-	if minutes > 0 {
-		return fmt.Sprintf("%dm %02ds%s", minutes, seconds, suffix)
+	var bar strings.Builder
+	for i, s := range segments {
+		if widths[i] > 0 {
+			bar.WriteString(s.color.Render(strings.Repeat("▃", widths[i])))
+		}
 	}
-	return fmt.Sprintf("%ds%s", seconds, suffix)
+	return bar.String()
 }
 
-func stripOrgPrefix(slug string) string {
-	if i := strings.Index(slug, "/"); i >= 0 {
-		return slug[i+1:]
+// countsFromCheckRuns computes CheckCounts by iterating individual CheckRuns.
+// Used as fallback when pre-aggregated API counts aren't available.
+func countsFromCheckRuns(runs []review.CheckRun, apiTotal int) review.CheckCounts {
+	var cc review.CheckCounts
+	for _, cr := range runs {
+		switch {
+		case cr.Status == review.CheckRunCompleted && (cr.Conclusion == review.ConclusionFailure || cr.Conclusion == review.ConclusionTimedOut || cr.Conclusion == review.ConclusionStartupFailure || cr.Conclusion == review.ConclusionActionRequired || cr.Conclusion == review.ConclusionCancelled):
+			cc.Failing++
+		case cr.Status == review.CheckRunInProgress || cr.Status == review.CheckRunQueued:
+			cc.Pending++
+		case cr.Status == review.CheckRunCompleted && (cr.Conclusion == review.ConclusionSkipped || cr.Conclusion == review.ConclusionNeutral):
+			cc.Skipped++
+		case cr.Status == review.CheckRunCompleted && cr.Conclusion == review.ConclusionSuccess:
+			cc.Passing++
+		}
 	}
-	return slug
+	cc.Total = cc.Failing + cc.Passing + cc.Skipped + cc.Pending
+	if apiTotal > cc.Total {
+		cc.Total = apiTotal
+	}
+	return cc
+}
+
+// checkRunSortOrder returns a sort key: failures first, then pending, skipped, success.
+func checkRunSortOrder(cr review.CheckRun) int {
+	switch {
+	case cr.Status == review.CheckRunCompleted && (cr.Conclusion == review.ConclusionFailure || cr.Conclusion == review.ConclusionTimedOut || cr.Conclusion == review.ConclusionStartupFailure || cr.Conclusion == review.ConclusionActionRequired):
+		return 0
+	case cr.Status == review.CheckRunInProgress || cr.Status == review.CheckRunQueued:
+		return 1
+	case cr.Status == review.CheckRunCompleted && (cr.Conclusion == review.ConclusionSkipped || cr.Conclusion == review.ConclusionNeutral || cr.Conclusion == review.ConclusionCancelled):
+		return 2
+	default: // SUCCESS
+		return 3
+	}
 }
 
 func timeAgo(t time.Time) string {
