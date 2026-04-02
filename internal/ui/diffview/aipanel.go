@@ -386,15 +386,12 @@ func (p *AIPanel) rebuildViewportContent() {
 		if current != "" {
 			// Streaming text: render raw (partial markdown looks broken)
 			b.WriteString(current)
-			if p.statusText != "" {
-				b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render(p.statusText))
-			}
-		} else {
-			status := "Thinking..."
-			if p.statusText != "" {
-				status = p.statusText
-			}
-			b.WriteString(p.spinner.View() + " " + status)
+		}
+		// Always show tool status while streaming
+		if p.statusText != "" {
+			b.WriteString("\n" + lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render(p.spinner.View()+" "+p.statusText))
+		} else if current == "" {
+			b.WriteString(p.spinner.View() + " Thinking...")
 		}
 	}
 

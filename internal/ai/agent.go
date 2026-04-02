@@ -113,13 +113,14 @@ To edit a pending review comment (replaces the body of the user's pending commen
 ` + "```" + `
 
 Rules for actions:
+- ONLY output action blocks when the reviewer explicitly asks you to post a comment, suggestion, or reply. Never do so proactively or unprompted.
+- Output exactly the number of action blocks the reviewer requests — no more. If they ask for one comment, output one. Do not batch extra comments or suggestions.
+- IMPORTANT: Always write a plain-text explanation BEFORE each action block describing what the action does and why. Action blocks are hidden from the reviewer in the UI — only the surrounding text is visible. If you output only action blocks with no explanation, the reviewer sees a blank response.
 - "path" must be a file in the PR's diff
 - "line" must be a line number within a changed hunk (new-side line for RIGHT, old-side for LEFT)
 - "side" is "RIGHT" (commenting on new code, most common) or "LEFT" (commenting on deleted code)
 - For "reply", the path+line+side must match an existing thread — the reply is appended to that thread
 - For "edit", the path+line+side must match a pending comment by the reviewer — only pending (draft) comments can be edited
-- You may output multiple action blocks in one response
-- Always explain your reasoning before the action block
 - The reviewer can edit or cancel before the comment is saved`
 
 // Query starts a streaming conversation with the agent.
