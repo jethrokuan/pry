@@ -315,6 +315,152 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 	})
 
+	ginkgo.Describe("filterAtTrigger", func() {
+		ginkgo.It("detects @ at end of input", func() {
+			p, idx := filterAtTrigger("author:@oct", 11)
+			gomega.Expect(p).To(gomega.Equal("oct"))
+			gomega.Expect(idx).To(gomega.Equal(7))
+		})
+
+		ginkgo.It("detects @ after other qualifiers", func() {
+			p, idx := filterAtTrigger("label:bug author:@jet", 21)
+			gomega.Expect(p).To(gomega.Equal("jet"))
+			gomega.Expect(idx).To(gomega.Equal(17))
+		})
+
+		ginkgo.It("returns -1 when no @ in current token", func() {
+			_, idx := filterAtTrigger("sometext", 8)
+			gomega.Expect(idx).To(gomega.Equal(-1))
+		})
+
+		ginkgo.It("detects @ with empty prefix", func() {
+			p, idx := filterAtTrigger("author:@", 8)
+			gomega.Expect(p).To(gomega.Equal(""))
+			gomega.Expect(idx).To(gomega.Equal(7))
+		})
+
+		ginkgo.It("detects @ when cursor is mid-input", func() {
+			p, _ := filterAtTrigger("author:@oct label:bug", 11)
+			gomega.Expect(p).To(gomega.Equal("oct"))
+		})
+
+		ginkgo.It("stops at space boundary", func() {
+			_, idx := filterAtTrigger("label:bug noatsign", 18)
+			gomega.Expect(idx).To(gomega.Equal(-1))
+		})
+	})
+
+	ginkgo.Describe("filter autocomplete", func() {
+		ginkgo.It("shows suggestions when typing @", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1))
+			m, _ = m.Update(MentionableUsersMsg{Users: []review.MentionableUser{
+				{Login: "octocat", Name: "Octo Cat"},
+				{Login: "jethro", Name: "Jethro Kuan"},
+			}})
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: '/'})
+			gomega.Expect(m.editing).To(gomega.BeTrue())
+
+			m.filterInput.SetValue("author:@oct")
+			m.filterInput.SetCursor(11)
+			m.updateFilterAutocomplete()
+
+			gomega.Expect(m.filterAC.IsActive()).To(gomega.BeTrue())
+			gomega.Expect(m.filterAC.Selected().Value).To(gomega.Equal("@octocat"))
+		})
+
+		ginkgo.It("hides autocomplete when no @ in token", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1))
+			m, _ = m.Update(MentionableUsersMsg{Users: []review.MentionableUser{
+				{Login: "octocat", Name: "Octo Cat"},
+			}})
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: '/'})
+			m.filterInput.SetValue("label:bug")
+			m.filterInput.SetCursor(9)
+			m.updateFilterAutocomplete()
+
+			gomega.Expect(m.filterAC.IsActive()).To(gomega.BeFalse())
+		})
+
+		ginkgo.It("completes @prefix on tab", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1))
+			m, _ = m.Update(MentionableUsersMsg{Users: []review.MentionableUser{
+				{Login: "octocat", Name: "Octo Cat"},
+				{Login: "jethro", Name: "Jethro Kuan"},
+			}})
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: '/'})
+			m.filterInput.SetValue("author:@oct")
+			m.filterInput.SetCursor(11)
+			m.updateFilterAutocomplete()
+
+			gomega.Expect(m.filterAC.IsActive()).To(gomega.BeTrue())
+
+			m.completeFilterAutocomplete()
+
+			gomega.Expect(m.filterInput.Value()).To(gomega.Equal("author:@octocat "))
+			gomega.Expect(m.filterAC.IsActive()).To(gomega.BeFalse())
+		})
+
+		ginkgo.It("completes @prefix in middle of input", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1))
+			m, _ = m.Update(MentionableUsersMsg{Users: []review.MentionableUser{
+				{Login: "octocat", Name: "Octo Cat"},
+			}})
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: '/'})
+			m.filterInput.SetValue("author:@oct label:bug")
+			m.filterInput.SetCursor(11)
+			m.updateFilterAutocomplete()
+
+			gomega.Expect(m.filterAC.IsActive()).To(gomega.BeTrue())
+
+			m.completeFilterAutocomplete()
+
+			gomega.Expect(m.filterInput.Value()).To(gomega.Equal("author:@octocat label:bug"))
+		})
+
+		ginkgo.It("works with reviewer: qualifier", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1))
+			m, _ = m.Update(MentionableUsersMsg{Users: []review.MentionableUser{
+				{Login: "octocat", Name: "Octo Cat"},
+			}})
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: '/'})
+			m.filterInput.SetValue("reviewer:@oct")
+			m.filterInput.SetCursor(13)
+			m.updateFilterAutocomplete()
+
+			gomega.Expect(m.filterAC.IsActive()).To(gomega.BeTrue())
+
+			m.completeFilterAutocomplete()
+
+			gomega.Expect(m.filterInput.Value()).To(gomega.Equal("reviewer:@octocat "))
+		})
+
+		ginkgo.It("shows all users with bare @", func() {
+			svc := &reviewtest.MockService{}
+			m := loadModel(svc, samplePRs(1))
+			m, _ = m.Update(MentionableUsersMsg{Users: []review.MentionableUser{
+				{Login: "octocat", Name: "Octo Cat"},
+				{Login: "jethro", Name: "Jethro Kuan"},
+			}})
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: '/'})
+			m.filterInput.SetValue("author:@")
+			m.filterInput.SetCursor(8)
+			m.updateFilterAutocomplete()
+
+			gomega.Expect(m.filterAC.IsActive()).To(gomega.BeTrue())
+		})
+	})
+
 	ginkgo.Describe("activeFilter", func() {
 		ginkgo.It("returns preset filter by default", func() {
 			svc := &reviewtest.MockService{}

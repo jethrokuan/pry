@@ -21,6 +21,7 @@ import (
 	"github.com/jethrokuan/pry/internal/ui/icons"
 	"github.com/jethrokuan/pry/internal/jj"
 	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/components/autocomplete"
 	"github.com/jethrokuan/pry/internal/ui/components/flash"
 	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/ui/components/scrollbar"
@@ -41,6 +42,11 @@ type GoToPRMsg struct {
 
 // FilterChangedMsg is sent when the filter changes.
 type FilterChangedMsg struct{}
+
+// MentionableUsersMsg carries the list of mentionable users for autocomplete.
+type MentionableUsersMsg struct {
+	Users []review.MentionableUser
+}
 
 type prsLoadedMsg struct {
 	tabIdx int
@@ -200,6 +206,9 @@ type Model struct {
 	editing      bool            // true when the qualifier text input is active
 	filterInput  textinput.Model // text input for editing the qualifier
 	customFilter *review.PRFilter // non-nil when a user-edited filter is active
+	filterAC     autocomplete.Model // autocomplete dropdown for filter qualifiers
+	filterACX    int                // X offset of the @ trigger for overlay positioning
+	mentionableUsers []review.MentionableUser // users for author: autocomplete
 
 	// Go-to-PR prompt
 	goToPR      bool            // true when the # prompt is active
@@ -268,6 +277,7 @@ func New(svc review.Service, filters []review.PRFilter) Model {
 		goToPRInput: goToInput,
 		tabBar:      tabbar.New(tabs),
 		preview:     prpreview.New(),
+		filterAC:    autocomplete.New(),
 	}
 }
 
@@ -418,6 +428,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, flash.ShowMsg{ID: "checkout", Text: fmt.Sprintf("Checked out branch %s", msg.branch), Style: flash.StyleSuccess, Expires: 3 * time.Second}.Cmd()
 
+	case MentionableUsersMsg:
+		m.mentionableUsers = msg.Users
+		suggestions := make([]autocomplete.Suggestion, len(msg.Users))
+		for i, u := range msg.Users {
+			s := autocomplete.Suggestion{Value: "@" + u.Login}
+			if u.Name != "" {
+				s.Label = u.Name + " — @" + u.Login
+			}
+			suggestions[i] = s
+		}
+		m.filterAC.SetSuggestions(suggestions)
+		return m, nil
+
 	case spinner.TickMsg:
 		if m.tab().loading || m.hasEnrichmentPending() {
 			var cmd tea.Cmd
@@ -441,11 +464,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		// Filter editing mode: forward keys to the text input
 		if m.editing {
+			// Let autocomplete handle navigation keys first
+			if consumed, selected := m.filterAC.HandleKey(msg.String()); consumed {
+				if selected {
+					m.completeFilterAutocomplete()
+				}
+				return m, nil
+			}
+
 			switch msg.String() {
 			case "enter":
 				qualifier := strings.TrimSpace(m.filterInput.Value())
 				m.editing = false
 				m.filterInput.Blur()
+				m.filterAC.Hide()
 				m.customFilter = &review.PRFilter{
 					Name:      "Custom",
 					Qualifier: qualifier,
@@ -454,10 +486,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			case "esc", "ctrl+c":
 				m.editing = false
 				m.filterInput.Blur()
+				m.filterAC.Hide()
 				return m, nil
 			default:
 				var cmd tea.Cmd
 				m.filterInput, cmd = m.filterInput.Update(msg)
+				m.updateFilterAutocomplete()
 				return m, cmd
 			}
 		}
@@ -802,6 +836,78 @@ func (m Model) hasEnrichmentPending() bool {
 	return len(m.tabs[m.filterIdx].inFlight) > 0
 }
 
+// filterAtTrigger scans backwards from cursor to find an @ trigger.
+// Returns the prefix after @ and the byte offset of @, or ("", -1) if none.
+// For example, in "author:@oct|" it returns ("oct", 8).
+func filterAtTrigger(value string, pos int) (prefix string, atIdx int) {
+	before := value[:pos]
+
+	for i := len(before) - 1; i >= 0; i-- {
+		ch := before[i]
+		if ch == '@' {
+			return before[i+1:], i
+		}
+		// Stop at whitespace — no @ in this token
+		if ch == ' ' || ch == '\t' {
+			return "", -1
+		}
+	}
+	return "", -1
+}
+
+// updateFilterAutocomplete checks for an @ trigger in the filter input
+// and updates the autocomplete dropdown with matching users.
+func (m *Model) updateFilterAutocomplete() {
+	value := m.filterInput.Value()
+	pos := m.filterInput.Position()
+
+	prefix, atIdx := filterAtTrigger(value, pos)
+	if atIdx < 0 {
+		m.filterAC.Hide()
+		return
+	}
+	// Search bar: border(1) + padding(1) + prompt "> "(2) + text before @
+	m.filterACX = 1 + 1 + 2 + atIdx
+	m.filterAC.Show(prefix)
+}
+
+// completeFilterAutocomplete inserts the selected autocomplete suggestion
+// into the filter input, replacing the @prefix at cursor.
+func (m *Model) completeFilterAutocomplete() {
+	if !m.filterAC.IsActive() {
+		return
+	}
+
+	selected := m.filterAC.Selected()
+	value := m.filterInput.Value()
+	pos := m.filterInput.Position()
+
+	_, atIdx := filterAtTrigger(value, pos)
+	if atIdx < 0 {
+		return
+	}
+
+	// Find the end of the current token (stop at space)
+	tokenEnd := pos
+	for tokenEnd < len(value) && value[tokenEnd] != ' ' {
+		tokenEnd++
+	}
+
+	// Replace @prefix with the selected login
+	newValue := value[:atIdx] + selected.Value
+	newPos := len(newValue)
+	if tokenEnd < len(value) {
+		newValue += value[tokenEnd:]
+	} else {
+		newValue += " "
+		newPos++
+	}
+
+	m.filterInput.SetValue(newValue)
+	m.filterInput.SetCursor(newPos)
+	m.filterAC.Hide()
+}
+
 // renderHeader renders the tab bar and separator line.
 func (m Model) renderHeader() string {
 	return m.tabBar.View() + "\n" +
@@ -822,6 +928,12 @@ func (m Model) View() string {
 	content := lipgloss.JoinHorizontal(lipgloss.Top, m.renderLeftPane(m.tableWidth, m.mainHeight), m.preview.View())
 
 	result := header + "\n" + content + "\n" + footer
+	if m.editing {
+		// Position directly below the text cursor line:
+		// header + newline + search bar top border + input line
+		acY := lipgloss.Height(header) + 1 + 2 // border top + input row
+		result = m.filterAC.Overlay(result, tea.Position{X: m.filterACX, Y: acY})
+	}
 	if m.showHelp {
 		popup := helppopup.Render(helpSections(), m.width)
 		result = helppopup.Overlay(result, popup, m.width, m.height)

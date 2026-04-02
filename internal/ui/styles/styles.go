@@ -6,7 +6,6 @@ import "charm.land/lipgloss/v2"
 var (
 	Title    lipgloss.Style
 	Subtitle lipgloss.Style
-	Selected lipgloss.Style
 	StatusBar lipgloss.Style
 	HelpStyle lipgloss.Style
 

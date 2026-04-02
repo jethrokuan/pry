@@ -22,13 +22,11 @@ var (
 // Semantic background colors.
 var (
 	BgCursor     color.Color = lipgloss.BrightBlack
-	BgSelected   color.Color = lipgloss.Color("#3a3a5c") // Bright highlight for selected rows
+	BgSelected   color.Color
 	BgSearch     color.Color = lipgloss.Yellow
-	// Subtle background tints — hardcoded hex since ANSI 16 has no in-between shades.
-	// These are dark enough to work on any dark terminal theme.
-	BgActiveHunk color.Color = lipgloss.Color("#1a1a2e")
-	BgDiffAdd    color.Color = lipgloss.Color("#012800")
-	BgDiffDelete color.Color = lipgloss.Color("#340001")
+	BgActiveHunk color.Color
+	BgDiffAdd    color.Color
+	BgDiffDelete color.Color
 	BgSurface    color.Color = lipgloss.BrightBlack
 	BgOverlay    color.Color = lipgloss.Black
 	BgHunkHeader color.Color = lipgloss.BrightBlack
@@ -36,12 +34,28 @@ var (
 	LabelFg      color.Color = lipgloss.Black
 )
 
+// tintAmount controls how much to darken/lighten base colors for subtle backgrounds.
+const tintAmount = 0.85
+
+// subtleBg produces a subtle background tint from a base ANSI color.
+// On dark themes it darkens; on light themes it lightens.
+func subtleBg(base color.Color, isDark bool, amount float64) color.Color {
+	if isDark {
+		return lipgloss.Darken(base, amount)
+	}
+	return lipgloss.Lighten(base, amount)
+}
+
 // Apply sets up the composed Lipgloss styles from the ANSI palette.
-func Apply() {
+// isDark should be true for dark terminal backgrounds, false for light.
+func Apply(isDark bool) {
+	BgSelected = subtleBg(lipgloss.Blue, isDark, 0.65)
+	BgActiveHunk = subtleBg(lipgloss.Blue, isDark, tintAmount)
+	BgDiffAdd = subtleBg(lipgloss.Green, isDark, tintAmount)
+	BgDiffDelete = subtleBg(lipgloss.Red, isDark, tintAmount)
+
 	Title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Blue)
 	Subtitle = lipgloss.NewStyle().Foreground(lipgloss.BrightBlack)
-	Selected = lipgloss.NewStyle().Bold(true).
-		Foreground(lipgloss.BrightWhite).Background(lipgloss.Blue)
 	StatusBar = lipgloss.NewStyle().
 		Foreground(lipgloss.BrightWhite).Background(lipgloss.BrightBlack).Padding(0, 1)
 	HelpStyle = lipgloss.NewStyle().Foreground(lipgloss.BrightBlack)
@@ -68,5 +82,5 @@ func Apply() {
 }
 
 func init() {
-	Apply()
+	Apply(true) // default to dark; re-applied when terminal background is detected
 }

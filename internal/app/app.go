@@ -17,6 +17,7 @@ import (
 	"github.com/jethrokuan/pry/internal/ui/components/flash"
 	"github.com/jethrokuan/pry/internal/ui/diffview"
 	"github.com/jethrokuan/pry/internal/ui/prlist"
+	"github.com/jethrokuan/pry/internal/ui/styles"
 	"github.com/jethrokuan/pry/internal/ui/submit"
 )
 
@@ -195,6 +196,7 @@ func (m Model) Init() tea.Cmd {
 		prNumber := m.initialPR
 		svc := m.svc
 		return tea.Batch(
+			tea.RequestBackgroundColor,
 			m.diffView.Init(),
 			m.loadUserIdentity(),
 			m.loadMentionableUsers(),
@@ -205,6 +207,7 @@ func (m Model) Init() tea.Cmd {
 		)
 	}
 	return tea.Batch(
+		tea.RequestBackgroundColor,
 		m.prList.Init(),
 		m.loadUserIdentity(),
 		m.loadMentionableUsers(),
@@ -241,6 +244,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case CmdPanicMsg:
 		slog.Error("command panic recovered", "error", msg.Err)
 		return m, flashCmd
+	case tea.BackgroundColorMsg:
+		styles.Apply(msg.IsDark())
+		return m, flashCmd
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -262,12 +268,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mentionableUsersMsg:
 		if msg.err == nil {
 			m.mentionableUsers = msg.users
+			// Forward to prlist (always, for author: autocomplete)
+			var prlistCmd tea.Cmd
+			m.prList, prlistCmd = m.prList.Update(prlist.MentionableUsersMsg{Users: msg.users})
+			cmds := []tea.Cmd{flashCmd, prlistCmd}
 			// Forward to diffview if it's active
 			if m.screen == ScreenDiffView {
 				var cmd tea.Cmd
 				m.diffView, cmd = m.diffView.Update(diffview.MentionableUsersMsg{Users: msg.users})
-				return m, tea.Batch(flashCmd, cmd)
+				cmds = append(cmds, cmd)
 			}
+			return m, tea.Batch(cmds...)
 		}
 		return m, flashCmd
 	}
