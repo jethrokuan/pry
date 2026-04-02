@@ -603,7 +603,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.treeDirty = true
 		m.updateViewports()
 		if m.editor.IsActive() {
-			m.editor.SetWidth(m.inlineTextareaWidth())
+			if m.editor.IsReply() {
+				m.editor.SetWidth(m.inlineReplyTextareaWidth())
+			} else {
+				m.editor.SetWidth(m.inlineTextareaWidth())
+			}
 		}
 		if m.comments.popupActive {
 			// Reopen to resize the popup viewport
@@ -1012,6 +1016,25 @@ func (m *Model) syncViewport() {
 	vpHeight := m.nav.diffViewport.Height()
 	vpTop := m.nav.diffViewport.YOffset()
 	elemBottom := y + height
+
+	// When the inline editor is replying inside a thread, scroll to show the
+	// editor (bottom of the comment block) rather than the diff line at the top.
+	if m.editor.IsReply() {
+		editorH := m.editor.Height()
+		if editorH > 0 {
+			editorTop := elemBottom - editorH
+			margin := vpHeight / 6
+			if margin < 1 {
+				margin = 1
+			}
+			offset := editorTop - margin
+			if offset < 0 {
+				offset = 0
+			}
+			m.nav.diffViewport.SetYOffset(offset)
+			return
+		}
+	}
 
 	// Already fully visible in the top half — no scroll needed
 	if y >= vpTop && elemBottom <= vpTop+vpHeight/2 {

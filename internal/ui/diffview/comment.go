@@ -130,8 +130,12 @@ func (m Model) replyToSelectedThread() (Model, tea.Cmd) {
 	}
 
 	m.nav.cursor = m.nav.cursor.AsLine()
-	m.editor.OpenForReply(t.Path, t.Line, t.StartLine, t.Side, replyToNodeID, m.inlineTextareaWidth())
+	// Ensure the comment block stays expanded so the editor renders inside the thread
+	m.comments.expanded[commentKey(t.Path, t.Line)] = true
+	m.editor.OpenForReply(t.Path, t.Line, t.StartLine, t.Side, replyToNodeID, m.inlineReplyTextareaWidth())
 	m.updateViewports()
+	m.updateDiffContent()
+	m.syncViewport()
 	return m, m.editor.BlinkCmd()
 }
 
@@ -168,6 +172,20 @@ func (m Model) deleteSelectedComment() (Model, tea.Cmd) {
 	m.updateDiffContent()
 
 	return m, m.deleteCommentCmd(commentID)
+}
+
+// isEditorReplyingToThread returns true if the inline editor is replying to the given thread.
+func (m *Model) isEditorReplyingToThread(t review.Thread) bool {
+	nodeID := m.editor.ReplyToNodeID()
+	if nodeID == "" {
+		return false
+	}
+	for _, c := range t.Comments {
+		if c.NodeID == nodeID {
+			return true
+		}
+	}
+	return false
 }
 
 // --- Comment helpers ---
@@ -567,6 +585,14 @@ func (m *Model) closeInlineComment() {
 
 func (m Model) inlineTextareaWidth() int {
 	return m.width - m.treePanelWidth()
+}
+
+// inlineReplyTextareaWidth returns the textarea width for a reply editor
+// rendered inside a thread box. Accounts for thread box border/padding.
+func (m Model) inlineReplyTextareaWidth() int {
+	boxWidth := m.nav.diffViewport.Width() - 4
+	commentBoxWidth := boxWidth - 4
+	return commentBoxWidth
 }
 
 // handleEditorSave processes a save message from the InlineEditor.

@@ -435,8 +435,8 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 				renderSideComments(line.OldNum, "LEFT")
 			}
 
-			// Render inline editor below cursor line's comments
-			if m.editor.IsActive() && lineIdx == m.nav.cursor.LineIdx {
+			// Render inline editor below cursor line's comments (skip for replies — rendered inside thread)
+			if m.editor.IsActive() && !m.editor.IsReply() && lineIdx == m.nav.cursor.LineIdx {
 				editorView := m.editor.View()
 				if editorView != "" {
 					b.WriteString(editorView + "\n")
@@ -625,6 +625,14 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 		threadHeader := lipgloss.NewStyle().Foreground(threadBorderColor).
 			Render(strings.Join(statusParts, "  "))
 		boxContent := threadHeader + "\n" + strings.Join(commentBoxes, "\n")
+
+		// If the inline editor is replying to this thread, render it inside the thread box
+		if m.isEditorReplyingToThread(t) {
+			editorView := m.editor.View()
+			if editorView != "" {
+				boxContent += "\n" + editorView
+			}
+		}
 
 		box := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).

@@ -67,14 +67,13 @@ func newEditorTextarea(width int) textarea.Model {
 	ta.SetWidth(width - 8)
 	ta.SetHeight(5)
 
-	// Match textarea background to the overlay background.
+	// Clear textarea backgrounds so it inherits from the terminal.
 	s := ta.Styles()
-	bg := styles.BgOverlay
-	s.Focused.Base = s.Focused.Base.Background(bg)
-	s.Focused.Text = s.Focused.Text.Background(bg)
-	s.Focused.CursorLine = s.Focused.CursorLine.Background(bg)
-	s.Focused.EndOfBuffer = s.Focused.EndOfBuffer.Background(bg)
-	s.Focused.Prompt = s.Focused.Prompt.Background(bg)
+	s.Focused.Base = s.Focused.Base.UnsetBackground()
+	s.Focused.Text = s.Focused.Text.UnsetBackground()
+	s.Focused.CursorLine = s.Focused.CursorLine.UnsetBackground()
+	s.Focused.EndOfBuffer = s.Focused.EndOfBuffer.UnsetBackground()
+	s.Focused.Prompt = s.Focused.Prompt.UnsetBackground()
 	ta.SetStyles(s)
 
 	return ta
@@ -370,10 +369,19 @@ func (e InlineEditor) View() string {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Primary).
-		Background(styles.BgOverlay).
 		Padding(0, 1).
 		Width(e.width - 4).
 		Render(inner)
+}
+
+// IsReply returns true if the editor is in reply mode.
+func (e InlineEditor) IsReply() bool {
+	return e.active && e.replyToNodeID != ""
+}
+
+// ReplyToNodeID returns the node ID being replied to, or "" if not in reply mode.
+func (e InlineEditor) ReplyToNodeID() string {
+	return e.replyToNodeID
 }
 
 // DropdownView returns the autocomplete dropdown view, or "" if inactive.
