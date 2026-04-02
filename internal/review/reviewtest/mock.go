@@ -22,6 +22,7 @@ type MockService struct {
 	ListPRsFn              func(ctx context.Context, filter review.PRFilter) ([]review.PullRequest, error)
 	GetPRFn                func(ctx context.Context, number int) (*review.PullRequest, error)
 	FetchDiffFilesFn       func(ctx context.Context, number int) ([]diff.DiffFile, error)
+	FetchIssueCommentsFn     func(ctx context.Context, number int) ([]review.IssueComment, error)
 	FetchCommentsAndReviewFn func(ctx context.Context, number int) ([]review.Thread, int, string, error)
 	CreatePendingReviewFn func(ctx context.Context, prNumber int) (int, string, error)
 	AddReviewCommentFn      func(ctx context.Context, prNumber int, reviewNodeID string, path string, line, startLine int, side, body string) (int, string, int, string, error)
@@ -75,6 +76,13 @@ func (m *MockService) GetPR(ctx context.Context, number int) (*review.PullReques
 func (m *MockService) FetchDiffFiles(ctx context.Context, number int) ([]diff.DiffFile, error) {
 	if m.FetchDiffFilesFn != nil {
 		return m.FetchDiffFilesFn(ctx, number)
+	}
+	return nil, nil
+}
+
+func (m *MockService) FetchIssueComments(ctx context.Context, number int) ([]review.IssueComment, error) {
+	if m.FetchIssueCommentsFn != nil {
+		return m.FetchIssueCommentsFn(ctx, number)
 	}
 	return nil, nil
 }

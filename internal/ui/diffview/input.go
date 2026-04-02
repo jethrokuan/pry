@@ -1176,12 +1176,42 @@ func (m Model) handlePRInfoKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case "esc", "i", "ctrl+c":
 		m.prInfoActive = false
 		return m, nil
+	case "n":
+		m.prInfoJumpBlock(1)
+		return m, nil
+	case "N":
+		m.prInfoJumpBlock(-1)
+		return m, nil
 	}
 
 	// Delegate scrolling to the viewport
 	var cmd tea.Cmd
 	m.prInfoViewport, cmd = m.prInfoViewport.Update(msg)
 	return m, cmd
+}
+
+// prInfoJumpBlock scrolls the PR info viewport to the next (dir=1) or
+// previous (dir=-1) block boundary.
+func (m *Model) prInfoJumpBlock(dir int) {
+	if len(m.prInfoBlocks) == 0 {
+		return
+	}
+	current := m.prInfoViewport.YOffset()
+	if dir > 0 {
+		for _, offset := range m.prInfoBlocks {
+			if offset > current {
+				m.prInfoViewport.SetYOffset(offset)
+				return
+			}
+		}
+	} else {
+		for i := len(m.prInfoBlocks) - 1; i >= 0; i-- {
+			if m.prInfoBlocks[i] < current {
+				m.prInfoViewport.SetYOffset(m.prInfoBlocks[i])
+				return
+			}
+		}
+	}
 }
 
 // --- Comment popup key handling ---

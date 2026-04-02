@@ -273,6 +273,9 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Info):
 		m.openPRInfoPopup()
+		if m.issueComments == nil {
+			return m, m.fetchIssueCommentsCmd()
+		}
 		return m, nil
 
 	case key.Matches(msg, keys.NarrowPrefix):

@@ -95,6 +95,11 @@ type markViewedMsg struct {
 	err  error
 }
 
+type issueCommentsMsg struct {
+	comments []review.IssueComment
+	err      error
+}
+
 type editorFinishedMsg struct {
 	content string
 	err     error
@@ -265,6 +270,8 @@ type Model struct {
 	// PR info popup
 	prInfoActive   bool
 	prInfoViewport viewport.Model
+	issueComments  []review.IssueComment // top-level conversation comments
+	prInfoBlocks   []int                 // line offsets of each block (description, comments) for n/N nav
 
 	// AI review assistant panel
 	aiPanel     AIPanel
@@ -549,6 +556,15 @@ func (m Model) editCommentCmd(commentID int, body, oldBody string) tea.Cmd {
 	}
 }
 
+func (m Model) fetchIssueCommentsCmd() tea.Cmd {
+	svc := m.svc
+	prNumber := m.pr.Number
+	return func() tea.Msg {
+		comments, err := svc.FetchIssueComments(context.Background(), prNumber)
+		return issueCommentsMsg{comments: comments, err: err}
+	}
+}
+
 // --- Update ---
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -677,6 +693,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, flash.ShowMsg{ID: "checkout", Text: fmt.Sprintf("Checkout failed: %v", msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
 		}
 		return m, flash.ShowMsg{ID: "checkout", Text: fmt.Sprintf("Checked out branch %s", msg.branch), Style: flash.StyleSuccess, Expires: 3 * time.Second}.Cmd()
+
+	case issueCommentsMsg:
+		if msg.err == nil {
+			m.issueComments = msg.comments
+			if m.prInfoActive {
+				m.openPRInfoPopup()
+			}
+		}
 
 	case markViewedMsg:
 		if msg.err != nil {

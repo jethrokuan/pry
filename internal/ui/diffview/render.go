@@ -582,7 +582,9 @@ func (m *Model) openPRInfoPopup() {
 	m.prInfoViewport = vp
 }
 
-// buildPRInfoContent builds the PR info popup content showing metadata and description.
+// buildPRInfoContent builds the PR info popup content showing metadata,
+// description, issue comments, and review comments. It also records
+// block line offsets in m.prInfoBlocks for n/N navigation.
 func (m *Model) buildPRInfoContent(width int) string {
 	authorStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
 	labelStyle := lipgloss.NewStyle().Foreground(styles.Muted)
@@ -590,6 +592,11 @@ func (m *Model) buildPRInfoContent(width int) string {
 	separator := sepStyle.Render(strings.Repeat("─", width))
 
 	var b strings.Builder
+	lineCount := func() int { return strings.Count(b.String(), "\n") }
+	var blocks []int
+
+	// --- Block: Description ---
+	blocks = append(blocks, 0)
 
 	// Metadata
 	b.WriteString(authorStyle.Render("@"+m.pr.Author) + " → " + m.pr.Base + "\n")
@@ -636,37 +643,23 @@ func (m *Model) buildPRInfoContent(width int) string {
 		b.WriteString(rendered)
 	}
 
-	// Review comments section
-	if len(m.comments.threads) > 0 {
-		totalComments := 0
-		for _, t := range m.comments.threads {
-			totalComments += len(t.Comments)
-		}
+	// --- Blocks: Issue comments (top-level conversation) ---
+	if len(m.issueComments) > 0 {
 		b.WriteString("\n\n" + separator + "\n")
 		commentHeader := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
-		b.WriteString(commentHeader.Render(fmt.Sprintf("Review Comments (%d)", totalComments)) + "\n\n")
+		b.WriteString(commentHeader.Render(fmt.Sprintf("Comments (%d)", len(m.issueComments))) + "\n\n")
 
-		bodyStyle := lipgloss.NewStyle().Width(width)
 		innerSep := sepStyle.Render(strings.Repeat("─", width/2))
-
-		for _, t := range m.comments.threads {
-			for _, c := range t.Comments {
-				icon := "💬"
-				if c.IsPending {
-					icon = "📝"
-				}
-				b.WriteString(icon + " " + authorStyle.Render("@"+c.Author))
-				if t.Path != "" {
-					b.WriteString("  " + labelStyle.Render(fmt.Sprintf("%s:%d", t.Path, t.Line)))
-				}
-				b.WriteString("\n")
-				rendered := m.renderMarkdown(c.Body, width)
-				b.WriteString(bodyStyle.Render(rendered) + "\n")
-				b.WriteString(innerSep + "\n\n")
-			}
+		for _, c := range m.issueComments {
+			blocks = append(blocks, lineCount())
+			b.WriteString("💬 " + authorStyle.Render("@"+c.Author) + "\n")
+			rendered := m.renderMarkdown(c.Body, width)
+			b.WriteString(rendered + "\n")
+			b.WriteString(innerSep + "\n\n")
 		}
 	}
 
+	m.prInfoBlocks = blocks
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -681,7 +674,7 @@ func (m Model) renderPRInfoPopup() string {
 		scrollPct = lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf(" (%d%%)", pct))
 	}
 
-	help := styles.HelpStyle.Render("  j/k scroll  i/esc close") + scrollPct
+	help := styles.HelpStyle.Render("  j/k scroll  n/N next/prev block  i/esc close") + scrollPct
 
 	content := title + "\n" + m.prInfoViewport.View() + "\n" + help
 

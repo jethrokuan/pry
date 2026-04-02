@@ -145,6 +145,15 @@ type Comment struct {
 	IsPending bool // true if part of a PENDING (draft) review
 }
 
+// IssueComment represents a top-level conversation comment on a PR
+// (as opposed to an inline review comment anchored to a diff line).
+type IssueComment struct {
+	ID        int
+	Author    string
+	Body      string
+	CreatedAt string
+}
+
 // PendingReview tracks the state of an in-progress review.
 // Threads are stored on PullRequest.Threads (the single source of truth);
 // PendingReview only tracks the review envelope (ID, event, body, viewed files).

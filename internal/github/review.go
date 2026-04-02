@@ -225,6 +225,85 @@ func (c *Client) FetchCommentsAndReview(_ context.Context, prNumber int) ([]revi
 	return threads, pendingReviewID, pendingNodeID, nil
 }
 
+// FetchIssueComments fetches top-level conversation comments on a PR via GraphQL.
+func (c *Client) FetchIssueComments(_ context.Context, prNumber int) ([]review.IssueComment, error) {
+	query := `
+	query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+		repository(owner: $owner, name: $repo) {
+			pullRequest(number: $number) {
+				comments(first: 100, after: $cursor) {
+					nodes {
+						databaseId
+						author { login }
+						body
+						createdAt
+					}
+					pageInfo {
+						hasNextPage
+						endCursor
+					}
+				}
+			}
+		}
+	}`
+
+	type gqlNode struct {
+		DatabaseId int    `json:"databaseId"`
+		Author     struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		Body      string `json:"body"`
+		CreatedAt string `json:"createdAt"`
+	}
+
+	type gqlResp struct {
+		Repository struct {
+			PullRequest struct {
+				Comments struct {
+					Nodes    []gqlNode `json:"nodes"`
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
+				} `json:"comments"`
+			} `json:"pullRequest"`
+		} `json:"repository"`
+	}
+
+	var all []review.IssueComment
+	var cursor *string
+
+	for {
+		vars := map[string]interface{}{
+			"owner":  c.owner,
+			"repo":   c.repo,
+			"number": prNumber,
+			"cursor": cursor,
+		}
+
+		var resp gqlResp
+		if err := c.graphql.Do(query, vars, &resp); err != nil {
+			return nil, fmt.Errorf("failed to fetch issue comments: %w", err)
+		}
+
+		for _, n := range resp.Repository.PullRequest.Comments.Nodes {
+			all = append(all, review.IssueComment{
+				ID:        n.DatabaseId,
+				Author:    n.Author.Login,
+				Body:      n.Body,
+				CreatedAt: n.CreatedAt,
+			})
+		}
+
+		if !resp.Repository.PullRequest.Comments.PageInfo.HasNextPage {
+			break
+		}
+		cursor = &resp.Repository.PullRequest.Comments.PageInfo.EndCursor
+	}
+
+	return all, nil
+}
+
 // CreatePendingReview creates a new PENDING review on GitHub (no event = pending).
 // Returns the review ID and the GraphQL node ID.
 func (c *Client) CreatePendingReview(_ context.Context, prNumber int) (int, string, error) {

@@ -31,6 +31,9 @@ func (s *stubService) GetPR(_ context.Context, _ int) (*review.PullRequest, erro
 func (s *stubService) FetchDiffFiles(_ context.Context, _ int) ([]diff.DiffFile, error) {
 	return nil, nil
 }
+func (s *stubService) FetchIssueComments(_ context.Context, _ int) ([]review.IssueComment, error) {
+	return nil, nil
+}
 func (s *stubService) FetchCommentsAndReview(_ context.Context, _ int) ([]review.Thread, int, string, error) {
 	return nil, 0, "", nil
 }

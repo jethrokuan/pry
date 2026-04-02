@@ -45,6 +45,9 @@ type Service interface {
 	// FetchDiffFiles fetches and parses the changed files for a PR.
 	FetchDiffFiles(ctx context.Context, number int) ([]diff.DiffFile, error)
 
+	// FetchIssueComments fetches top-level conversation comments on a PR.
+	FetchIssueComments(ctx context.Context, number int) ([]IssueComment, error)
+
 	// FetchCommentsAndReview fetches all review threads on a PR and the user's
 	// pending review in a single query. Comments have IsPending set correctly.
 	// Returns (threads, pendingReviewID, pendingReviewNodeID, error).
