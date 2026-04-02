@@ -48,6 +48,10 @@ type Service interface {
 	// FetchCommits fetches individual commits for a PR (lazy-loaded).
 	FetchCommits(ctx context.Context, number int) ([]Commit, error)
 
+	// FetchCommitDiff fetches the diff between two commits using the compare API.
+	// For a single commit, pass parentSHA as baseSHA and the commit SHA as headSHA.
+	FetchCommitDiff(ctx context.Context, baseSHA, headSHA string) ([]diff.DiffFile, error)
+
 	// FetchIssueComments fetches top-level conversation comments on a PR.
 	FetchIssueComments(ctx context.Context, number int) ([]IssueComment, error)
 

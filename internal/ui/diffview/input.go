@@ -344,6 +344,9 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	// Context-dependent Enter: enter comment select on commented line, create comment on empty line
 	case key.Matches(msg, keys.Enter):
+		if m.isCommitView() {
+			return m, flash.ShowMsg{ID: "diffview", Text: "Comments disabled in commit view", Expires: 2 * time.Second}.Cmd()
+		}
 		if len(m.files) > 0 && m.nav.cursor.LineIdx < len(m.nav.diffLines) {
 			path := m.files[m.nav.cursor.FileIdx].Path
 			dl := m.nav.diffLines[m.nav.cursor.LineIdx]
@@ -364,6 +367,9 @@ func (m Model) handleDiffKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m, m.startComment(commentModeComment)
 
 	case key.Matches(msg, keys.Suggest):
+		if m.isCommitView() {
+			return m, flash.ShowMsg{ID: "diffview", Text: "Comments disabled in commit view", Expires: 2 * time.Second}.Cmd()
+		}
 		return m, m.startComment(commentModeSuggestion)
 
 	// Dedicated navigation keys

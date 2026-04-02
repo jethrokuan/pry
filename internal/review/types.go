@@ -98,6 +98,7 @@ type PullRequest struct {
 	Body         string
 	URL       string
 	HeadSHA   string
+	BaseSHA   string
 
 	// CI status
 	ChecksPass    *bool

@@ -105,6 +105,16 @@ type editorFinishedMsg struct {
 	err     error
 }
 
+type commitsLoadedMsg struct {
+	commits []review.Commit
+	err     error
+}
+
+type commitDiffLoadedMsg struct {
+	files []diff.DiffFile
+	err   error
+}
+
 
 // MentionableUsersMsg carries mentionable users from the app layer.
 type MentionableUsersMsg struct {
@@ -177,6 +187,7 @@ type KeyMap struct {
 	Suggest       key.Binding
 	Checkout      key.Binding
 	Refresh       key.Binding
+	CommitPicker  key.Binding
 	AIAsk         key.Binding
 }
 
@@ -220,6 +231,7 @@ var keys = KeyMap{
 	Suggest:       key.NewBinding(key.WithKeys("shift+enter"), key.WithHelp("S-enter", "suggest")),
 	Checkout:      key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "checkout PR")),
 	Refresh:       key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
+	CommitPicker:  key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "select commit")),
 	AIAsk:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "AI assistant")),
 }
 
@@ -272,6 +284,15 @@ type Model struct {
 	prInfoViewport viewport.Model
 	issueComments  []review.IssueComment // top-level conversation comments
 	prInfoBlocks   []int                 // line offsets of each block (description, comments) for n/N nav
+
+	// Commit-level diff viewing
+	commits            []review.Commit // all PR commits (loaded lazily)
+	commitsLoaded      bool            // true after first fetch
+	commitStart        int             // start index into commits (-1 = no selection)
+	commitEnd          int             // end index into commits (-1 = no selection, same as start = single commit)
+	commitPickerActive bool            // overlay visible
+	commitPickerCursor int             // cursor position in picker
+	commitPickerAnchor int             // range anchor index (-1 = no anchor)
 
 	// AI review assistant panel
 	aiPanel     AIPanel
@@ -381,7 +402,10 @@ func New(svc review.Service, pr *review.PullRequest, opts ...Option) Model {
 		comments: CommentPanel{
 			expanded: make(map[string]bool),
 		},
-		aiPanel: initAIPanel(),
+		commitStart:        -1,
+		commitEnd:          -1,
+		commitPickerAnchor: -1,
+		aiPanel:            initAIPanel(),
 	}
 
 	for _, opt := range opts {
@@ -687,6 +711,37 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.updateViewports()
 		m.updateDiffContent()
 		return m, flash.ShowMsg{ID: "refresh", Text: "Refreshed", Style: flash.StyleSuccess, Expires: 2 * time.Second}.Cmd()
+
+	case commitsLoadedMsg:
+		if msg.err != nil {
+			m.commitPickerActive = false
+			return m, flash.ShowMsg{ID: "diffview", Text: "Failed to load commits: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
+		}
+		m.commits = msg.commits
+		m.commitsLoaded = true
+
+	case commitDiffLoadedMsg:
+		m.loading = false
+		if msg.err != nil {
+			// Revert selection on failure
+			m.commitStart = -1
+			m.commitEnd = -1
+			return m, flash.ShowMsg{ID: "diffview", Text: "Failed to load commit diff: " + msg.err.Error(), Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
+		}
+		m.files = msg.files
+		m.filter.recompute(m.files)
+		m.nav.cachedTree = buildTree(m.files, m.filter.includedFiles)
+		m.nav.rebuildTreeRows()
+		m.nav.cursor = CursorTarget{Kind: CursorLine, FileIdx: 0}
+		m.nav.buildDiffLines(m.files)
+		m.treeDirty = true
+		m.updateViewports()
+		m.updateDiffContent()
+		label := "Full PR diff"
+		if m.isCommitView() {
+			label = m.commitViewLabel()
+		}
+		return m, flash.ShowMsg{ID: "diffview", Text: label, Style: flash.StyleSuccess, Expires: 2 * time.Second}.Cmd()
 
 	case checkoutMsg:
 		if msg.err != nil {
@@ -1320,7 +1375,13 @@ func (m Model) View() string {
 			Render(fmt.Sprintf("  [syncing %d...]", n))
 	}
 
-	b.WriteString(header + pendingCount + viewedLabel + syncLabel + "\n")
+	commitLabel := ""
+	if m.isCommitView() {
+		commitLabel = lipgloss.NewStyle().Foreground(styles.Info).
+			Render(fmt.Sprintf("  [%s]", m.commitViewLabel()))
+	}
+
+	b.WriteString(header + pendingCount + viewedLabel + syncLabel + commitLabel + "\n")
 
 	if m.loading {
 		b.WriteString(m.spinner.View() + " Loading diff...\n")
@@ -1419,6 +1480,7 @@ func (m Model) View() string {
 			helpParts = append(helpParts, "c/C comment")
 			helpParts = append(helpParts, "/ search")
 			helpParts = append(helpParts, "x filter")
+			helpParts = append(helpParts, "l commits")
 			helpParts = append(helpParts, "enter comment")
 			helpParts = append(helpParts, "b tree")
 			helpParts = append(helpParts, "m viewed")
@@ -1472,6 +1534,9 @@ func (m Model) View() string {
 	}
 	if m.prInfoActive {
 		result = m.overlayPRInfoPopup(result)
+	}
+	if m.commitPickerActive {
+		result = m.overlayGeneric(result, m.renderCommitPicker())
 	}
 	if m.aiPanel.IsOpen() {
 		dropdown := m.renderAIContextDropdown()
@@ -1590,7 +1655,7 @@ func (m Model) helpSections() []helppopup.Section {
 		))
 	}
 	sections = append(sections, helppopup.Bind("Other",
-		keys.ToggleTree, keys.Info, keys.Refresh, keys.OpenInBrowser, keys.CopyLink,
+		keys.ToggleTree, keys.Info, keys.CommitPicker, keys.Refresh, keys.OpenInBrowser, keys.CopyLink,
 		keys.Checkout, keys.Editor, keys.Help, keys.Back, keys.Quit,
 	))
 	return sections

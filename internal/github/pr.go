@@ -28,6 +28,7 @@ type graphqlPRNode struct {
 	HeadRefName    string    `json:"headRefName"`
 	BaseRefName    string    `json:"baseRefName"`
 	HeadRefOid     string    `json:"headRefOid"`
+	BaseRefOid     string    `json:"baseRefOid"`
 	ReviewDecision   string `json:"reviewDecision"`
 	MergeStateStatus string `json:"mergeStateStatus"`
 	Mergeable        string `json:"mergeable"`
@@ -371,6 +372,7 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		Body:           node.Body,
 		URL:            node.URL,
 		HeadSHA:        node.HeadRefOid,
+		BaseSHA:        node.BaseRefOid,
 		ChecksPass:     checksPass,
 		CheckRuns:      checkRuns,
 		ChecksTotal:    checksTotal,
@@ -539,6 +541,7 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 				headRefName
 				baseRefName
 				headRefOid
+				baseRefOid
 				reviewDecision
 				mergeStateStatus
 				mergeable

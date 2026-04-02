@@ -25,6 +25,7 @@ const (
 	modeCommentSelect
 	modeAIInput
 	modeAIPanel
+	modeCommitPicker
 )
 
 // activeMode returns the current input mode based on model state.
@@ -46,6 +47,8 @@ func (m Model) activeMode() inputMode {
 		return modeNarrowRegex
 	case m.narrowPrefixActive:
 		return modeNarrowPrefix
+	case m.commitPickerActive:
+		return modeCommitPicker
 	case m.showHelp:
 		return modeHelp
 	case m.prInfoActive:
@@ -72,6 +75,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.handleNarrowRegexKey(msg)
 	case modeNarrowPrefix:
 		return m.handleNarrowPrefixKey(msg)
+	case modeCommitPicker:
+		return m.handleCommitPickerKey(msg)
 	case modeHelp:
 		m.showHelp = false
 		return m, nil
@@ -296,10 +301,16 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.refreshing = true
+		m.commitStart = -1 // refresh resets to full PR diff
+		m.commitEnd = -1
 		return m, tea.Batch(
 			flash.ShowMsg{ID: "refresh", Text: "Refreshing…", Style: flash.StyleSpinner}.Cmd(),
 			m.refreshCmd(),
 		)
+
+	// Commit picker
+	case key.Matches(msg, keys.CommitPicker):
+		return m.openCommitPicker()
 
 	// AI assistant
 	case key.Matches(msg, keys.AIAsk):
