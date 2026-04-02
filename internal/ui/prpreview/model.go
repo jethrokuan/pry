@@ -329,6 +329,11 @@ func (m *Model) renderCommitsTab(b *strings.Builder, pr *review.PullRequest) {
 		return
 	}
 
+	contentWidth := m.sidebarWidth - 6
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+
 	for _, c := range m.cachedCommits {
 		// Check status icon
 		var checkIcon string
@@ -341,15 +346,23 @@ func (m *Model) renderCommitsTab(b *strings.Builder, pr *review.PullRequest) {
 			checkIcon = lipgloss.NewStyle().Foreground(styles.Danger).Render("✗")
 		}
 
-		// Commit message (truncated) + short SHA right-aligned
-		msg := c.Message
-		if len(msg) > 50 {
-			msg = msg[:47] + "..."
-		}
+		// First line: "✓ <message>              <sha>"
+		// Use lipgloss to truncate message and right-align SHA.
 		sha := muted.Render(c.ShortSHA)
-		b.WriteString(checkIcon + " " + msg + "  " + sha + "\n")
+		shaWidth := lipgloss.Width(sha)
+		iconWidth := lipgloss.Width(checkIcon) + 1 // icon + space
+		msgWidth := contentWidth - iconWidth - shaWidth - 2
+		if msgWidth < 10 {
+			msgWidth = 10
+		}
+		msg := lipgloss.NewStyle().
+			Width(msgWidth).MaxWidth(msgWidth).
+			Height(1).MaxHeight(1).
+			Render(c.Message)
+		row := checkIcon + " " + msg + "  " + sha
+		b.WriteString(lipgloss.PlaceHorizontal(contentWidth, lipgloss.Left, row) + "\n")
 
-		// Author + time + additions/deletions
+		// Second line: "  @author 2h ago · ✓ 451/22"
 		add := lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("%d", c.Additions))
 		del := lipgloss.NewStyle().Foreground(styles.Danger).Render(fmt.Sprintf("%d", c.Deletions))
 		b.WriteString(muted.Render(fmt.Sprintf("  @%s %s · ", c.Author, timeAgo(c.CommittedAt))) + checkIcon + " " + add + "/" + del + "\n\n")
