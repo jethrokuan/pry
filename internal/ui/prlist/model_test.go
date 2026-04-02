@@ -32,12 +32,12 @@ func samplePRs(n int) []review.PullRequest {
 	return prs
 }
 
-// loadModel creates a model, sends prsLoadedMsg and userTeamsLoadedMsg,
+// loadModel creates a model, sends prsLoadedMsg and UserIdentityMsg,
 // and returns the model in a ready (non-loading) state.
 func loadModel(svc *reviewtest.MockService, prs []review.PullRequest, filters ...review.PRFilter) Model {
 	m := newTestModel(svc, filters...)
 	m, _ = m.Update(prsLoadedMsg{tabIdx: 0, prs: prs})
-	m, _ = m.Update(userTeamsLoadedMsg{teams: nil})
+	m, _ = m.Update(UserIdentityMsg{Identity: &review.UserIdentity{Login: "testuser", Teams: nil}})
 	return m
 }
 
@@ -97,12 +97,15 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 	})
 
-	ginkgo.Describe("userTeamsLoadedMsg", func() {
-		ginkgo.It("populates userTeams map", func() {
+	ginkgo.Describe("UserIdentityMsg", func() {
+		ginkgo.It("populates userTeams map from identity", func() {
 			svc := &reviewtest.MockService{}
 			m := newTestModel(svc)
 
-			m, _ = m.Update(userTeamsLoadedMsg{teams: []string{"org/team-a", "org/team-b"}})
+			m, _ = m.Update(UserIdentityMsg{Identity: &review.UserIdentity{
+				Login: "user",
+				Teams: []string{"org/team-a", "org/team-b"},
+			}})
 
 			gomega.Expect(m.userTeams).To(gomega.HaveLen(2))
 			gomega.Expect(m.userTeams["org/team-a"]).To(gomega.BeTrue())
@@ -113,7 +116,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			svc := &reviewtest.MockService{}
 			m := newTestModel(svc)
 
-			m, _ = m.Update(userTeamsLoadedMsg{teams: nil})
+			m, _ = m.Update(UserIdentityMsg{Identity: &review.UserIdentity{Login: "user", Teams: nil}})
 
 			gomega.Expect(m.userTeams).NotTo(gomega.BeNil())
 			gomega.Expect(m.userTeams).To(gomega.BeEmpty())

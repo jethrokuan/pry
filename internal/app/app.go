@@ -311,6 +311,22 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return prBodyLoadedMsg{pr: full, err: err}
 			}),
 		)
+	case prlist.GoToPRMsg:
+		pr := &review.PullRequest{Number: msg.Number}
+		pr.StartReview()
+		m.selectedPR = pr
+		m.diffView = diffview.New(m.svc, pr, m.diffviewOpts()...)
+		m.screen = ScreenDiffView
+		prNumber := msg.Number
+		svc := m.svc
+		return m, tea.Batch(
+			m.diffView.Init(),
+			m.windowSizeCmd(),
+			safeCmd(func() tea.Msg {
+				full, err := svc.GetPR(context.Background(), prNumber)
+				return prBodyLoadedMsg{pr: full, err: err}
+			}),
+		)
 	}
 
 	var cmd tea.Cmd

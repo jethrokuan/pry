@@ -34,17 +34,19 @@ type PRSelectedMsg struct {
 	PR *review.PullRequest
 }
 
+// GoToPRMsg is sent when the user enters a PR number via the # prompt.
+type GoToPRMsg struct {
+	Number int
+}
+
 // FilterChangedMsg is sent when the filter changes.
 type FilterChangedMsg struct{}
 
 type prsLoadedMsg struct {
-	tabIdx int
-	prs    []review.PullRequest
-	err    error
-}
-
-type userTeamsLoadedMsg struct {
-	teams []string
+	tabIdx              int
+	prs                 []review.PullRequest
+	err                 error
+	needsMyTeamApproval bool // apply client-side team filter on arrival
 }
 
 
@@ -87,6 +89,9 @@ type KeyMap struct {
 	Quit         key.Binding
 	Help         key.Binding
 
+	// Navigation
+	GoToPR key.Binding
+
 	// PR actions
 	Assign         key.Binding
 	Unassign       key.Binding
@@ -122,6 +127,7 @@ var keys = KeyMap{
 	Merge:          key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "merge PR")),
 	ReadyForReview: key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "ready for review")),
 	Checkout:       key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "checkout PR")),
+	GoToPR:         key.NewBinding(key.WithKeys("#"), key.WithHelp("#", "go to PR number")),
 }
 
 // confirmAction tracks which destructive action is pending confirmation.
@@ -195,6 +201,10 @@ type Model struct {
 	filterInput  textinput.Model // text input for editing the qualifier
 	customFilter *review.PRFilter // non-nil when a user-edited filter is active
 
+	// Go-to-PR prompt
+	goToPR      bool            // true when the # prompt is active
+	goToPRInput textinput.Model // text input for entering a PR number
+
 	// Help overlay
 	showHelp bool
 
@@ -233,6 +243,10 @@ func New(svc review.Service, filters []review.PRFilter) Model {
 	ti.Placeholder = "e.g. review-requested:@me label:bug author:octocat"
 	ti.CharLimit = 256
 
+	goToInput := textinput.New()
+	goToInput.Placeholder = "e.g. 158897"
+	goToInput.CharLimit = 10
+
 	tabs := make([]tabbar.Tab, len(filters))
 	for i, f := range filters {
 		tabs[i] = tabbar.Tab{Label: f.Name, Count: -1}
@@ -251,6 +265,7 @@ func New(svc review.Service, filters []review.PRFilter) Model {
 		tabs:        tabStates,
 		spinner:     s,
 		filterInput: ti,
+		goToPRInput: goToInput,
 		tabBar:      tabbar.New(tabs),
 		preview:     prpreview.New(),
 	}
@@ -258,11 +273,15 @@ func New(svc review.Service, filters []review.PRFilter) Model {
 
 // Init starts the initial PR fetch.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		m.fetchPRs(),
-		m.fetchUserTeams(),
-		m.spinner.Tick,
-	)
+	cmds := []tea.Cmd{m.spinner.Tick}
+	// For team-filtered tabs, defer the PR fetch until UserIdentityMsg arrives
+	// so teams are known before we apply the client-side filter.
+	if m.filters[m.filterIdx].NeedsMyTeamApproval {
+		m.tabs[m.filterIdx].loading = true
+	} else {
+		cmds = append(cmds, m.fetchPRs())
+	}
+	return tea.Batch(cmds...)
 }
 
 // recalcLayout recomputes cached layout dimensions by rendering the header
@@ -290,16 +309,6 @@ func (m Model) halfPageSize() int {
 	return half
 }
 
-func (m Model) fetchUserTeams() tea.Cmd {
-	return func() tea.Msg {
-		teams, err := m.svc.UserTeams(context.Background())
-		if err != nil {
-			slog.Warn("failed to fetch user teams", "error", err)
-		}
-		return userTeamsLoadedMsg{teams: teams}
-	}
-}
-
 // activeFilter returns the currently active filter — either a custom
 // user-edited filter or the selected preset filter.
 func (m Model) activeFilter() review.PRFilter {
@@ -312,9 +321,10 @@ func (m Model) activeFilter() review.PRFilter {
 func (m Model) fetchPRs() tea.Cmd {
 	filter := m.activeFilter()
 	tabIdx := m.filterIdx
+	needsTeamFilter := filter.NeedsMyTeamApproval
 	return func() tea.Msg {
 		prs, err := m.svc.ListPRs(context.Background(), filter)
-		return prsLoadedMsg{tabIdx: tabIdx, prs: prs, err: err}
+		return prsLoadedMsg{tabIdx: tabIdx, prs: prs, err: err, needsMyTeamApproval: needsTeamFilter}
 	}
 }
 
@@ -340,7 +350,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			errFlash := flash.ShowMsg{ID: "fetch-error", Text: fmt.Sprintf("Fetch failed: %v", msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
 			return m, tea.Batch(dismissCmd, errFlash)
 		}
-		t.prs = msg.prs
+		if msg.needsMyTeamApproval {
+			t.prs = m.filterForMyTeam(msg.prs)
+		} else {
+			t.prs = msg.prs
+		}
 		if len(t.prs) > 0 {
 			t.setCursor(0)
 		} else {
@@ -352,8 +366,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.tabIdx == m.filterIdx {
 			m.preview.ResetCache()
 			sidebarCmd := m.refreshSidebarPreview()
-			enrichCmd := m.enrichVisible()
-			return m, tea.Batch(dismissCmd, sidebarCmd, enrichCmd)
+			return m, tea.Batch(dismissCmd, sidebarCmd)
 		}
 		return m, dismissCmd
 
@@ -361,12 +374,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if msg.Identity != nil {
 			m.preview.SetUserIdentity(msg.Identity)
 			m.currentUser = msg.Identity.Login
-		}
-
-	case userTeamsLoadedMsg:
-		m.userTeams = make(map[string]bool, len(msg.teams))
-		for _, t := range msg.teams {
-			m.userTeams[t] = true
+			m.userTeams = make(map[string]bool, len(msg.Identity.Teams))
+			for _, t := range msg.Identity.Teams {
+				m.userTeams[t] = true
+			}
+			// Trigger PR fetch for the active tab if it was waiting for team identity.
+			if m.filters[m.filterIdx].NeedsMyTeamApproval && !m.tab().fetched {
+				return m, m.startFetch()
+			}
 		}
 
 	case prEnrichedMsg:
@@ -424,6 +439,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, cmd
 		}
 
+	case tea.PasteMsg:
+		// Forward paste events to the active text input.
+		if m.editing {
+			var cmd tea.Cmd
+			m.filterInput, cmd = m.filterInput.Update(msg)
+			return m, cmd
+		}
+		if m.goToPR {
+			var cmd tea.Cmd
+			m.goToPRInput, cmd = m.goToPRInput.Update(msg)
+			return m, cmd
+		}
+
 	case tea.KeyPressMsg:
 		// Filter editing mode: forward keys to the text input
 		if m.editing {
@@ -444,6 +472,40 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			default:
 				var cmd tea.Cmd
 				m.filterInput, cmd = m.filterInput.Update(msg)
+				return m, cmd
+			}
+		}
+
+		// Go-to-PR mode: forward keys to the text input
+		if m.goToPR {
+			switch msg.String() {
+			case "enter":
+				val := strings.TrimSpace(m.goToPRInput.Value())
+				m.goToPR = false
+				m.goToPRInput.Blur()
+				if val == "" {
+					return m, nil
+				}
+				num := 0
+				for _, c := range val {
+					if c < '0' || c > '9' {
+						return m, flash.ShowMsg{ID: "goto-pr", Text: "Invalid PR number", Expires: 2 * time.Second}.Cmd()
+					}
+					num = num*10 + int(c-'0')
+				}
+				if num == 0 {
+					return m, flash.ShowMsg{ID: "goto-pr", Text: "Invalid PR number", Expires: 2 * time.Second}.Cmd()
+				}
+				return m, func() tea.Msg {
+					return GoToPRMsg{Number: num}
+				}
+			case "esc", "ctrl+c":
+				m.goToPR = false
+				m.goToPRInput.Blur()
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.goToPRInput, cmd = m.goToPRInput.Update(msg)
 				return m, cmd
 			}
 		}
@@ -638,6 +700,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					},
 				)
 			}
+		case key.Matches(msg, keys.GoToPR):
+			m.goToPR = true
+			m.goToPRInput.SetValue("")
+			m.goToPRInput.Focus()
+			return m, nil
 		case key.Matches(msg, keys.Help):
 			m.showHelp = true
 			return m, nil
@@ -731,6 +798,42 @@ func (m *Model) enrichVisible() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// filterForMyTeam returns only PRs where the user's team has a pending review
+// request and approval is still required.
+func (m Model) filterForMyTeam(prs []review.PullRequest) []review.PullRequest {
+	out := make([]review.PullRequest, 0, len(prs))
+	for _, pr := range prs {
+		if m.needsMyTeamApproval(pr) {
+			out = append(out, pr)
+		}
+	}
+	return out
+}
+
+// needsMyTeamApproval reports whether a PR still requires approval from the
+// user's team or the user directly. Returns true if:
+//   - ReviewDecision is not APPROVED (approval still needed), AND
+//   - one of the user's teams has a pending review request, OR
+//   - the user themselves has a pending review request
+func (m Model) needsMyTeamApproval(pr review.PullRequest) bool {
+	if pr.ReviewDecision == "APPROVED" {
+		return false
+	}
+	for _, team := range pr.PendingTeams {
+		if m.userTeams[team] {
+			return true
+		}
+	}
+	if m.currentUser != "" {
+		for _, rv := range pr.Reviewers {
+			if !rv.IsTeam && strings.EqualFold(rv.Login, m.currentUser) && rv.State == "PENDING" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // hasEnrichmentPending returns true if any PR enrichment is in flight
 // for the active tab.
 func (m Model) hasEnrichmentPending() bool {
@@ -780,7 +883,15 @@ func (m Model) renderLeftPane(tableWidth, mainHeight int) string {
 
 	// Search bar (scoped to left pane width)
 	var searchBar string
-	if m.editing {
+	if m.goToPR {
+		goToBorder := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(styles.Primary).
+			Width(tableWidth - 4).
+			Padding(0, 1)
+		prompt := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("Go to PR #") + m.goToPRInput.View()
+		searchBar = goToBorder.Render(prompt) + "\n"
+	} else if m.editing {
 		searchBorder := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(styles.Primary).
@@ -853,7 +964,7 @@ func (m Model) renderFooter() string {
 // helpSections returns the keybinding sections for the help popup.
 func helpSections() []helppopup.Section {
 	return []helppopup.Section{
-		helppopup.Bind("Navigation", keys.Up, keys.Down, keys.HalfPageDown, keys.HalfPageUp, keys.Select),
+		helppopup.Bind("Navigation", keys.Up, keys.Down, keys.HalfPageDown, keys.HalfPageUp, keys.Select, keys.GoToPR),
 		helppopup.Bind("Tabs & Filters", keys.NextTab, keys.PrevTab, keys.EditFilter),
 		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp),
 		helppopup.Bind("PR Actions", keys.Assign, keys.Unassign, keys.Close, keys.Reopen, keys.Merge, keys.ReadyForReview, keys.Checkout),
@@ -878,14 +989,18 @@ func (m *Model) startFetch() tea.Cmd {
 
 // switchTab handles switching to a new tab. If the tab already has cached
 // data, it refreshes the sidebar immediately. Otherwise it triggers a fetch.
+// For team-filtered tabs, defers the fetch until UserIdentityMsg arrives.
 func (m *Model) switchTab() tea.Cmd {
 	t := m.tab()
 	m.preview.ResetCache()
 	if t.fetched {
 		// Tab already has data — just refresh the sidebar.
-		sidebarCmd := m.refreshSidebarPreview()
-		enrichCmd := m.enrichVisible()
-		return tea.Batch(sidebarCmd, enrichCmd)
+		return m.refreshSidebarPreview()
+	}
+	if m.filters[m.filterIdx].NeedsMyTeamApproval && m.userTeams == nil {
+		// Identity not yet loaded; mark loading and wait for UserIdentityMsg.
+		t.loading = true
+		return m.spinner.Tick
 	}
 	return m.startFetch()
 }

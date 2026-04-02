@@ -39,8 +39,15 @@
 # Default filters (used when none are configured):
 #   "My PRs"                    author:@me
 #   "Assigned to Me"            assignee:@me
-#   "Needs My Review"           review-requested:@me draft:false
+#   "Needs My Review"           team-review-requested:@my-teams draft:false -review:approved
 #   "Reviewed, Not Approved"    reviewed-by:@me -review:approved
+#
+# @my-teams expands into one search per team you belong to in the repo's org,
+# then deduplicates results. Use it anywhere you'd use a team slug.
+#
+# needs_my_team_approval = true is a separate client-side filter: only shows
+# PRs where your team has a pending review request and approval is not yet
+# complete. Can be combined with any qualifier.
 #
 # To filter to a specific team instead of all your review requests:
 #   qualifier = "team-review-requested:@org/team-name draft:false"
@@ -55,7 +62,7 @@
 #
 # [[filters]]
 # name      = "Needs My Review"
-# qualifier = "review-requested:@me"
+# qualifier = "team-review-requested:@my-teams draft:false -review:approved"
 
 # ---------------------------------------------------------------------------
 # PR List Columns
