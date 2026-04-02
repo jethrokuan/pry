@@ -25,12 +25,13 @@ type graphqlClient interface {
 
 // Client wraps the go-gh REST and GraphQL clients.
 type Client struct {
-	rest    restClient
-	graphql graphqlClient
-	owner   string
-	repo    string
-	cache   cache.Cache
-	prTTL   time.Duration // TTL for ListPRs/GetPR cache entries
+	rest     restClient
+	graphql  graphqlClient
+	owner    string
+	repo     string
+	cache    cache.Cache
+	prTTL    time.Duration // TTL for ListPRs/GetPR cache entries
+	pageSize int           // Number of PRs to fetch per ListPRs call
 }
 
 // CurrentUser returns the authenticated user's login.
@@ -57,7 +58,7 @@ func (c *Client) CurrentUser(_ context.Context) (string, error) {
 }
 
 // NewClient creates a new GitHub client for the given repository.
-func NewClient(owner, repo string, c cache.Cache, prTTL time.Duration) (*Client, error) {
+func NewClient(owner, repo string, c cache.Cache, prTTL time.Duration, pageSize int) (*Client, error) {
 	rest, err := ghAPI.DefaultRESTClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create REST client (is gh authenticated?): %w", err)
@@ -67,13 +68,21 @@ func NewClient(owner, repo string, c cache.Cache, prTTL time.Duration) (*Client,
 		return nil, fmt.Errorf("failed to create GraphQL client: %w", err)
 	}
 
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 100 {
+		pageSize = 100 // GitHub GraphQL search max
+	}
+
 	return &Client{
-		rest:    rest,
-		graphql: graphql,
-		owner:   owner,
-		repo:    repo,
-		cache:   c,
-		prTTL:   prTTL,
+		rest:     rest,
+		graphql:  graphql,
+		owner:    owner,
+		repo:     repo,
+		cache:    c,
+		prTTL:    prTTL,
+		pageSize: pageSize,
 	}, nil
 }
 

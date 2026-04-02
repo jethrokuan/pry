@@ -143,8 +143,7 @@ func (m *Model) Refresh(pr *review.PullRequest) {
 		m.commitsLoaded = false
 	}
 	m.previewPRNum = pr.Number
-	// If check runs are loaded, the PR has been enriched.
-	m.loading = pr.CheckRuns == nil
+	m.loading = !pr.Enriched
 	m.cachedPR = pr
 	m.cachedBody = pr.Body
 	m.renderContent(pr, pr.Body)

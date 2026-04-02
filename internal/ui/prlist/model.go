@@ -48,16 +48,6 @@ type prsLoadedMsg struct {
 	err    error
 }
 
-
-// enrichState tracks per-PR background enrichment status.
-type enrichState int
-
-const (
-	enrichNone    enrichState = iota // not yet fetched
-	enrichPending                    // GetPR in flight
-	enrichDone                       // full data merged
-)
-
 // prEnrichedMsg carries the result of a background GetPR call.
 type prEnrichedMsg struct {
 	tabIdx   int
@@ -164,11 +154,10 @@ type checkoutMsg struct {
 // tabState holds per-tab state so each filter tab maintains its own PR list,
 // cursor position, and enrichment state independently.
 type tabState struct {
-	prs       []review.PullRequest
-	cursor    *int // nil when no entries; index into prs otherwise
-	loading   bool
-	enrichMap map[int]enrichState
-	fetched   bool // true once at least one successful fetch has completed
+	prs      []review.PullRequest
+	cursor   *int // nil when no entries; index into prs otherwise
+	loading  bool
+	inFlight map[int]bool // PR numbers with GetPR calls currently in flight
 }
 
 // cur returns the cursor value, defaulting to 0 if nil.
@@ -263,7 +252,7 @@ func New(svc review.Service, filters []review.PRFilter) Model {
 
 	tabStates := make([]tabState, len(filters))
 	for i := range tabStates {
-		tabStates[i].enrichMap = make(map[int]enrichState)
+		tabStates[i].inFlight = make(map[int]bool)
 	}
 	// First tab starts loading immediately via Init()
 	tabStates[0].loading = true
@@ -345,7 +334,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		t := &m.tabs[msg.tabIdx]
 		t.loading = false
-		t.fetched = true
 		dismissCmd := flash.DismissMsg{ID: "pr-refresh"}.Cmd()
 		if msg.err != nil {
 			errFlash := flash.ShowMsg{ID: "fetch-error", Text: fmt.Sprintf("Fetch failed: %v", msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
@@ -357,7 +345,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		} else {
 			t.cursor = nil
 		}
-		t.enrichMap = make(map[int]enrichState)
+		t.inFlight = make(map[int]bool)
 		m.tabBar.SetCount(msg.tabIdx, len(t.prs))
 		// Only update sidebar/enrich if this is the active tab.
 		if msg.tabIdx == m.filterIdx {
@@ -387,15 +375,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		t := &m.tabs[msg.tabIdx]
-		if _, tracked := t.enrichMap[msg.PRNumber]; !tracked {
+		if !t.inFlight[msg.PRNumber] {
 			return m, nil
 		}
+		delete(t.inFlight, msg.PRNumber)
 		if msg.Err != nil {
 			slog.Warn("enrichment failed", "pr", msg.PRNumber, "error", msg.Err)
-			delete(t.enrichMap, msg.PRNumber)
 			return m, nil
 		}
-		t.enrichMap[msg.PRNumber] = enrichDone
 		for i := range t.prs {
 			if t.prs[i].Number == msg.PRNumber {
 				t.prs[i].MergeEnriched(msg.FullPR)
@@ -745,8 +732,8 @@ func (m *Model) refreshSidebarPreview() tea.Cmd {
 
 	// Ensure selected PR gets enriched even if outside the initial batch.
 	num := pr.Number
-	if t.enrichMap[num] == enrichNone {
-		t.enrichMap[num] = enrichPending
+	if !pr.Enriched && !t.inFlight[num] {
+		t.inFlight[num] = true
 		svc := m.svc
 		tabIdx := m.filterIdx
 		return tea.Batch(func() tea.Msg {
@@ -773,17 +760,17 @@ func (m *Model) enrichVisible() tea.Cmd {
 	// Build fetch list: cursor PR first, then others up to limit.
 	var toFetch []int
 	if t.hasCursor() && t.cur() < len(t.prs) {
-		num := t.prs[t.cur()].Number
-		if t.enrichMap[num] == enrichNone {
-			toFetch = append(toFetch, num)
-			t.enrichMap[num] = enrichPending
+		pr := &t.prs[t.cur()]
+		if !pr.Enriched && !t.inFlight[pr.Number] {
+			toFetch = append(toFetch, pr.Number)
+			t.inFlight[pr.Number] = true
 		}
 	}
 	for i := 0; i < limit && len(toFetch) < limit; i++ {
-		num := t.prs[i].Number
-		if t.enrichMap[num] == enrichNone {
-			toFetch = append(toFetch, num)
-			t.enrichMap[num] = enrichPending
+		pr := &t.prs[i]
+		if !pr.Enriched && !t.inFlight[pr.Number] {
+			toFetch = append(toFetch, pr.Number)
+			t.inFlight[pr.Number] = true
 		}
 	}
 
@@ -808,12 +795,7 @@ func (m *Model) enrichVisible() tea.Cmd {
 // hasEnrichmentPending returns true if any PR enrichment is in flight
 // for the active tab.
 func (m Model) hasEnrichmentPending() bool {
-	for _, state := range m.tabs[m.filterIdx].enrichMap {
-		if state == enrichPending {
-			return true
-		}
-	}
-	return false
+	return len(m.tabs[m.filterIdx].inFlight) > 0
 }
 
 // renderHeader renders the tab bar and separator line.
@@ -958,7 +940,7 @@ func (m *Model) startFetch() tea.Cmd {
 func (m *Model) switchTab() tea.Cmd {
 	t := m.tab()
 	m.preview.ResetCache()
-	if t.fetched {
+	if len(t.prs) > 0 {
 		// Tab already has data — just refresh the sidebar.
 		return m.refreshSidebarPreview()
 	}
@@ -1050,7 +1032,7 @@ func (m Model) renderTable(width, height int) string {
 		}
 		statsContent += dot +
 			s(lipgloss.BrightMagenta).Render(icons.Updated) + muted.Render(" "+shortTimeAgo(pr.UpdatedAt))
-		if t.enrichMap[pr.Number] == enrichPending {
+		if t.inFlight[pr.Number] {
 			statsContent += dot + muted.Render(m.spinner.View())
 		}
 

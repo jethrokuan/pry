@@ -83,7 +83,6 @@ var _ = ginkgo.Describe("PRList Model", func() {
 			m, _ = m.Update(prsLoadedMsg{tabIdx: 1, prs: prs})
 
 			gomega.Expect(m.tabs[1].prs).To(gomega.HaveLen(2))
-			gomega.Expect(m.tabs[1].fetched).To(gomega.BeTrue())
 			// Tab 0 should still be loading
 			gomega.Expect(m.tabs[0].prs).To(gomega.BeNil())
 		})

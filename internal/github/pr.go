@@ -167,10 +167,10 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 	// Lightweight list query — only fields needed for the table rows.
 	// Heavy nested data (check runs, reviews, review requests) are fetched
 	// lazily via GetPR when the sidebar preview is shown.
-	graphqlQuery := `
+	graphqlQuery := fmt.Sprintf(`
 	query($query: String!) {
 		viewer { login }
-		search(query: $query, type: ISSUE, first: 30) {
+		search(query: $query, type: ISSUE, first: %d) {
 			nodes {
 				... on PullRequest {
 					id
@@ -230,7 +230,7 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 				}
 			}
 		}
-	}`
+	}`, c.pageSize)
 
 	slog.Debug("searching PRs", "query", query)
 	var resp graphqlPRResponse
@@ -626,6 +626,7 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 	}
 
 	pr := nodeToPR(node, "")
+	pr.Enriched = true
 
 	// Best-effort: detect which files have merge conflicts using local git.
 	if pr.Mergeable == "CONFLICTING" {

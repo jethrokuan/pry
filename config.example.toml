@@ -9,7 +9,7 @@
 # Leave empty to use $EDITOR / $VISUAL.
 # editor = ""
 
-# Number of PRs to fetch per page in the PR list.
+# Number of PRs to fetch per filter tab (max 100, GitHub API limit).
 # page_size = 50
 
 # [cache]

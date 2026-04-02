@@ -77,6 +77,7 @@ type Reviewer struct {
 
 // PullRequest represents a pull/merge request in a forge-agnostic way.
 type PullRequest struct {
+	Enriched  bool   // true after GetPR detail data has been merged in
 	Number    int
 	NodeID    string // Forge-specific ID for mutations
 	Title     string
@@ -129,6 +130,7 @@ func (pr *PullRequest) MergeEnriched(enriched *PullRequest) {
 	savedReview := pr.PendingReview
 	savedThreads := pr.Threads
 	*pr = *enriched
+	pr.Enriched = true
 	if savedReview != nil {
 		pr.PendingReview = savedReview
 	}

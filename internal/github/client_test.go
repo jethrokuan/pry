@@ -85,11 +85,12 @@ func (m *mockGraphQL) Do(query string, vars map[string]interface{}, resp interfa
 // newTestClient creates a Client with mock REST and GraphQL clients and a noop cache.
 func newTestClient(rest *mockREST, gql *mockGraphQL) *Client {
 	return &Client{
-		rest:    rest,
-		graphql: gql,
-		owner:   "testowner",
-		repo:    "testrepo",
-		cache:   cache.Noop{},
+		rest:     rest,
+		graphql:  gql,
+		owner:    "testowner",
+		repo:     "testrepo",
+		cache:    cache.Noop{},
+		pageSize: 50,
 	}
 }
 
@@ -691,11 +692,12 @@ var _ = Describe("UserTeams", func() {
 	It("caches results after the first call", func() {
 		dir := GinkgoT().TempDir()
 		c = &Client{
-			rest:    rest,
-			graphql: gql,
-			owner:   "testowner",
-			repo:    "testrepo",
-			cache:   cache.NewDisk(dir),
+			rest:     rest,
+			graphql:  gql,
+			owner:    "testowner",
+			repo:     "testrepo",
+			cache:    cache.NewDisk(dir),
+			pageSize: 50,
 		}
 
 		callCount := 0
