@@ -232,7 +232,8 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 	searchQuery := strings.ToLower(m.search.Query())
 	cursorBg := styles.BgCursor
 	searchBg := styles.BgSearch
-	activeHunkBg := styles.BgActiveHunk
+	hunkBg := styles.BgHunk
+	activeHunkBg := styles.BgSelected
 
 	// Determine which hunk is active (contains the cursor)
 	activeHunkIdx := -1
@@ -252,7 +253,7 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 		if isCollapsed {
 			header += fmt.Sprintf("  ▸ %d lines", len(hunk.Lines))
 		}
-		isActiveHunk := hunkIndex == activeHunkIdx && styles.BgActiveHunk != nil
+		isActiveHunk := hunkIndex == activeHunkIdx && styles.BgSelected != nil
 		hs := hunkStyle
 		if isActiveHunk {
 			hs = hs.Background(activeHunkBg)
@@ -306,6 +307,9 @@ func (m *Model) renderDiffWithCursor(file *diff.DiffFile) string {
 				hasBg = true
 			} else if isActiveHunk {
 				bg = activeHunkBg
+				hasBg = true
+			} else if hunkBg != nil {
+				bg = hunkBg
 				hasBg = true
 			}
 

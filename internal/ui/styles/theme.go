@@ -24,7 +24,7 @@ var (
 	BgCursor     color.Color = lipgloss.BrightBlack
 	BgSelected   color.Color
 	BgSearch     color.Color = lipgloss.Yellow
-	BgActiveHunk color.Color
+	BgHunk       color.Color
 	BgDiffAdd    color.Color
 	BgDiffDelete color.Color
 	BgSurface    color.Color = lipgloss.BrightBlack
@@ -34,12 +34,9 @@ var (
 	LabelFg      color.Color = lipgloss.Black
 )
 
-// tintAmount controls how much to darken/lighten base colors for subtle backgrounds.
-const tintAmount = 0.85
-
-// subtleBg produces a subtle background tint from a base ANSI color.
+// tint produces a subtle background tint from a base ANSI color.
 // On dark themes it darkens; on light themes it lightens.
-func subtleBg(base color.Color, isDark bool, amount float64) color.Color {
+func tint(base color.Color, isDark bool, amount float64) color.Color {
 	if isDark {
 		return lipgloss.Darken(base, amount)
 	}
@@ -48,11 +45,18 @@ func subtleBg(base color.Color, isDark bool, amount float64) color.Color {
 
 // Apply sets up the composed Lipgloss styles from the ANSI palette.
 // isDark should be true for dark terminal backgrounds, false for light.
-func Apply(isDark bool) {
-	BgSelected = subtleBg(lipgloss.Blue, isDark, 0.65)
-	BgActiveHunk = subtleBg(lipgloss.Blue, isDark, tintAmount)
-	BgDiffAdd = subtleBg(lipgloss.Green, isDark, tintAmount)
-	BgDiffDelete = subtleBg(lipgloss.Red, isDark, tintAmount)
+// bg is the detected terminal background color (may be nil).
+func Apply(isDark bool, bg color.Color) {
+	if bg != nil {
+		BgSelected = tint(bg, !isDark, 0.10)
+		BgHunk = tint(bg, !isDark, 0.01)
+		BgOverlay = tint(bg, !isDark, 0.15)
+	} else {
+		BgSelected = tint(lipgloss.Blue, isDark, 0.20)
+		BgHunk = tint(lipgloss.BrightBlack, isDark, 0.20)
+	}
+	BgDiffAdd = tint(lipgloss.Green, isDark, 0.50)
+	BgDiffDelete = tint(lipgloss.Red, isDark, 0.50)
 
 	Title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Blue)
 	Subtitle = lipgloss.NewStyle().Foreground(lipgloss.BrightBlack)
@@ -82,5 +86,5 @@ func Apply(isDark bool) {
 }
 
 func init() {
-	Apply(true) // default to dark; re-applied when terminal background is detected
+	Apply(true, nil) // default to dark; re-applied when terminal background is detected
 }

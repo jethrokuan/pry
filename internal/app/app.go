@@ -245,7 +245,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		slog.Error("command panic recovered", "error", msg.Err)
 		return m, flashCmd
 	case tea.BackgroundColorMsg:
-		styles.Apply(msg.IsDark())
+		styles.Apply(msg.IsDark(), msg)
 		return m, flashCmd
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
