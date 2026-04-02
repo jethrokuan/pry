@@ -187,7 +187,7 @@ func (m Model) View() string {
 		content = lipgloss.JoinHorizontal(lipgloss.Top, content, sb.View())
 	}
 
-	return content
+	return styles.BorderStyle.Render(content)
 }
 
 // Overlay composites the autocomplete dropdown on top of base at the given
@@ -198,10 +198,8 @@ func (m Model) Overlay(base string, pos tea.Position) string {
 		return base
 	}
 
-	popup := styles.BorderStyle.Render(content)
-
 	baseLayer := lipgloss.NewLayer(base)
-	popupLayer := lipgloss.NewLayer(popup).X(pos.X).Y(pos.Y).Z(1)
+	popupLayer := lipgloss.NewLayer(content).X(pos.X).Y(pos.Y).Z(1)
 	return lipgloss.NewCompositor(baseLayer, popupLayer).Render()
 }
 

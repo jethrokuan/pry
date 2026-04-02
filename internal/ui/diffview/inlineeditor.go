@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/components/autocomplete"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
@@ -51,11 +52,7 @@ type InlineEditor struct {
 	width          int
 
 	// @ mention autocomplete
-	mentionActive  bool
-	mentionPrefix  string
-	mentionAll     []review.MentionableUser // all mentionable users
-	mentionMatches []review.MentionableUser // filtered matches for current prefix
-	mentionCursor  int                      // selected index in mentionMatches
+	mentionAC autocomplete.Model
 }
 
 // IsActive returns true if the inline editor is open.
@@ -142,12 +139,23 @@ func (e *InlineEditor) Close() {
 	e.editCommentID = 0
 	e.replyToNodeID = ""
 	e.confirmDiscard = false
-	e.mentionActive = false
+	e.mentionAC.Hide()
 }
 
 // SetMentionUsers sets the list of mentionable users for autocomplete.
 func (e *InlineEditor) SetMentionUsers(users []review.MentionableUser) {
-	e.mentionAll = users
+	e.mentionAC = autocomplete.New()
+	suggestions := make([]autocomplete.Suggestion, len(users))
+	for i, u := range users {
+		s := autocomplete.Suggestion{Value: u.Login}
+		if u.Name != "" {
+			s.Label = u.Name + " — @" + u.Login
+		} else {
+			s.Label = "@" + u.Login
+		}
+		suggestions[i] = s
+	}
+	e.mentionAC.SetSuggestions(suggestions)
 }
 
 // SetWidth updates the editor width.
@@ -181,10 +189,11 @@ func (e InlineEditor) BlinkCmd() tea.Cmd {
 // Returns the updated editor, a tea.Cmd, and an optional outbound message.
 func (e InlineEditor) HandleKey(msg tea.KeyPressMsg) (InlineEditor, tea.Cmd, any) {
 	// When mention autocomplete is active, intercept navigation keys
-	if e.mentionActive {
-		if updated, consumed := e.handleMentionKey(msg); consumed {
-			return updated, nil, nil
+	if consumed, selected := e.mentionAC.HandleKey(msg.String()); consumed {
+		if selected {
+			e.completeMention()
 		}
+		return e, nil, nil
 	}
 
 	switch {
@@ -240,63 +249,21 @@ func (e InlineEditor) HandleKey(msg tea.KeyPressMsg) (InlineEditor, tea.Cmd, any
 // --- Mention autocomplete ---
 
 func (e *InlineEditor) updateMentionState() {
-	if len(e.mentionAll) == 0 {
-		e.mentionActive = false
-		return
-	}
-
 	prefix, atIdx := mentionTrigger(e.ta)
 	if atIdx < 0 {
-		e.mentionActive = false
+		e.mentionAC.Hide()
 		return
 	}
 
-	matches := filterMentionUsers(e.mentionAll, prefix)
-	if len(matches) == 0 {
-		e.mentionActive = false
-		return
-	}
-
-	e.mentionActive = true
-	e.mentionPrefix = prefix
-	e.mentionMatches = matches
-	if e.mentionCursor >= len(matches) {
-		e.mentionCursor = 0
-	}
-}
-
-func (e InlineEditor) handleMentionKey(msg tea.KeyPressMsg) (InlineEditor, bool) {
-	switch msg.String() {
-	case "up":
-		if e.mentionCursor > 0 {
-			e.mentionCursor--
-		} else {
-			e.mentionCursor = len(e.mentionMatches) - 1
-		}
-		return e, true
-	case "down":
-		if e.mentionCursor < len(e.mentionMatches)-1 {
-			e.mentionCursor++
-		} else {
-			e.mentionCursor = 0
-		}
-		return e, true
-	case "tab", "enter":
-		e.completeMention()
-		return e, true
-	case "esc":
-		e.mentionActive = false
-		return e, true
-	}
-	return e, false
+	e.mentionAC.Show(prefix)
 }
 
 func (e *InlineEditor) completeMention() {
-	if !e.mentionActive || len(e.mentionMatches) == 0 {
+	if !e.mentionAC.IsActive() {
 		return
 	}
 
-	login := e.mentionMatches[e.mentionCursor].Login
+	login := e.mentionAC.Selected().Value
 	_, atIdx := mentionTrigger(e.ta)
 	if atIdx < 0 {
 		return
@@ -321,7 +288,7 @@ func (e *InlineEditor) completeMention() {
 
 	e.ta.SetValue(newValue)
 	e.setCursorToOffset(newCursorPos)
-	e.mentionActive = false
+	e.mentionAC.Hide()
 }
 
 func (e *InlineEditor) setCursorToOffset(offset int) {
@@ -390,45 +357,9 @@ func (e InlineEditor) View() string {
 	help := styles.HelpStyle.Render(helpText)
 
 	content := e.ta.View()
-	if e.mentionActive && len(e.mentionMatches) > 0 {
-		content += "\n" + e.renderMentionDropdown()
+	if dropdown := e.mentionAC.View(); dropdown != "" {
+		content += "\n" + dropdown
 	}
 
 	return header + "\n" + boxStyle.Render(content) + "\n" + help
-}
-
-func (e InlineEditor) renderMentionDropdown() string {
-	maxVisible := 5
-	matches := e.mentionMatches
-	if len(matches) > maxVisible {
-		matches = matches[:maxVisible]
-	}
-
-	selected := lipgloss.NewStyle().
-		Background(styles.Primary).
-		Foreground(styles.LabelFg).
-		Padding(0, 1)
-	normal := lipgloss.NewStyle().
-		Padding(0, 1)
-
-	var rows []string
-	for i, u := range matches {
-		label := "@" + u.Login
-		if u.Name != "" {
-			label = fmt.Sprintf("%s — @%s", u.Name, u.Login)
-		}
-		if i == e.mentionCursor {
-			rows = append(rows, selected.Render(label))
-		} else {
-			rows = append(rows, normal.Render(label))
-		}
-	}
-
-	if len(e.mentionMatches) > maxVisible {
-		more := lipgloss.NewStyle().Foreground(styles.Muted).Padding(0, 1).
-			Render(fmt.Sprintf("... and %d more", len(e.mentionMatches)-maxVisible))
-		rows = append(rows, more)
-	}
-
-	return strings.Join(rows, "\n")
 }

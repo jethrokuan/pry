@@ -4,59 +4,12 @@ import (
 	"charm.land/bubbles/v2/textarea"
 
 	"github.com/jethrokuan/pry/internal/review"
+	"github.com/jethrokuan/pry/internal/ui/components/autocomplete"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 )
 
 var _ = ginkgo.Describe("Mention autocomplete", func() {
-	ginkgo.Describe("filterMentionUsers", func() {
-		users := []review.MentionableUser{
-			{Login: "alice", Name: "Alice Smith"},
-			{Login: "bob", Name: ""},
-			{Login: "alicia", Name: "Alicia Keys"},
-			{Login: "Charlie", Name: "Charlie Brown"},
-			{Login: "ALEX", Name: "Alex Johnson"},
-		}
-
-		ginkgo.It("returns all users for empty prefix", func() {
-			matches := filterMentionUsers(users, "")
-			gomega.Expect(matches).To(gomega.Equal(users))
-		})
-
-		ginkgo.It("filters by login prefix case-insensitively", func() {
-			matches := filterMentionUsers(users, "al")
-			gomega.Expect(matches).To(gomega.HaveLen(3))
-			logins := make([]string, len(matches))
-			for i, m := range matches {
-				logins[i] = m.Login
-			}
-			gomega.Expect(logins).To(gomega.ConsistOf("alice", "alicia", "ALEX"))
-		})
-
-		ginkgo.It("filters by display name prefix", func() {
-			matches := filterMentionUsers(users, "char")
-			gomega.Expect(matches).To(gomega.HaveLen(1))
-			gomega.Expect(matches[0].Login).To(gomega.Equal("Charlie"))
-		})
-
-		ginkgo.It("matches login or name, not just login", func() {
-			// "Alex" matches ALEX by login prefix and also by name prefix
-			matches := filterMentionUsers(users, "alex")
-			gomega.Expect(matches).To(gomega.HaveLen(1))
-			gomega.Expect(matches[0].Login).To(gomega.Equal("ALEX"))
-		})
-
-		ginkgo.It("returns nil for no matches", func() {
-			matches := filterMentionUsers(users, "zz")
-			gomega.Expect(matches).To(gomega.BeNil())
-		})
-
-		ginkgo.It("returns nil for nil users", func() {
-			matches := filterMentionUsers(nil, "a")
-			gomega.Expect(matches).To(gomega.BeNil())
-		})
-	})
-
 	ginkgo.Describe("mentionTrigger", func() {
 		newTA := func(value string) textarea.Model {
 			ta := textarea.New()
@@ -102,50 +55,43 @@ var _ = ginkgo.Describe("Mention autocomplete", func() {
 	})
 
 	ginkgo.Describe("updateMentionState", func() {
-		ginkgo.It("activates mention when @ is typed with matching users", func() {
-			e := InlineEditor{
-				mentionAll: []review.MentionableUser{
-					{Login: "alice", Name: "Alice"},
-					{Login: "bob", Name: "Bob"},
-				},
-			}
+		makeEditor := func(users []review.MentionableUser, value string) InlineEditor {
+			e := InlineEditor{}
+			e.SetMentionUsers(users)
 			ta := textarea.New()
 			ta.SetWidth(80)
 			ta.SetHeight(5)
-			ta.SetValue("@al")
+			ta.SetValue(value)
 			e.ta = ta
+			return e
+		}
+
+		ginkgo.It("activates mention when @ is typed with matching users", func() {
+			e := makeEditor([]review.MentionableUser{
+				{Login: "alice", Name: "Alice"},
+				{Login: "bob", Name: "Bob"},
+			}, "@al")
 
 			e.updateMentionState()
 
-			gomega.Expect(e.mentionActive).To(gomega.BeTrue())
-			gomega.Expect(e.mentionMatches).To(gomega.HaveLen(1))
-			gomega.Expect(e.mentionMatches[0].Login).To(gomega.Equal("alice"))
-			gomega.Expect(e.mentionCursor).To(gomega.Equal(0))
+			gomega.Expect(e.mentionAC.IsActive()).To(gomega.BeTrue())
+			gomega.Expect(e.mentionAC.Selected().Value).To(gomega.Equal("alice"))
 		})
 
 		ginkgo.It("deactivates when no users match", func() {
-			e := InlineEditor{
-				mentionAll: []review.MentionableUser{
-					{Login: "alice", Name: "Alice"},
-					{Login: "bob", Name: "Bob"},
-				},
-				mentionActive: true,
-			}
-			ta := textarea.New()
-			ta.SetWidth(80)
-			ta.SetHeight(5)
-			ta.SetValue("@zzz")
-			e.ta = ta
+			e := makeEditor([]review.MentionableUser{
+				{Login: "alice", Name: "Alice"},
+				{Login: "bob", Name: "Bob"},
+			}, "@zzz")
 
 			e.updateMentionState()
 
-			gomega.Expect(e.mentionActive).To(gomega.BeFalse())
+			gomega.Expect(e.mentionAC.IsActive()).To(gomega.BeFalse())
 		})
 
 		ginkgo.It("deactivates when mentionAll is empty", func() {
-			e := InlineEditor{
-				mentionActive: true,
-			}
+			e := InlineEditor{}
+			e.mentionAC = autocomplete.New()
 			ta := textarea.New()
 			ta.SetWidth(80)
 			ta.SetHeight(5)
@@ -154,28 +100,7 @@ var _ = ginkgo.Describe("Mention autocomplete", func() {
 
 			e.updateMentionState()
 
-			gomega.Expect(e.mentionActive).To(gomega.BeFalse())
-		})
-
-		ginkgo.It("resets cursor when matches shrink", func() {
-			e := InlineEditor{
-				mentionAll: []review.MentionableUser{
-					{Login: "alice", Name: "Alice"},
-					{Login: "alicia", Name: "Alicia"},
-				},
-				mentionCursor: 1,
-			}
-			ta := textarea.New()
-			ta.SetWidth(80)
-			ta.SetHeight(5)
-			ta.SetValue("@alice")
-			e.ta = ta
-
-			e.updateMentionState()
-
-			gomega.Expect(e.mentionActive).To(gomega.BeTrue())
-			gomega.Expect(e.mentionMatches).To(gomega.HaveLen(1))
-			gomega.Expect(e.mentionCursor).To(gomega.Equal(0))
+			gomega.Expect(e.mentionAC.IsActive()).To(gomega.BeFalse())
 		})
 	})
 })
