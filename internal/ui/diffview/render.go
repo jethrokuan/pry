@@ -472,59 +472,53 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 		contentWidth = 20
 	}
 
-	// Build all comment lines into a buffer for potential capping
-	var allLines []string
+	borderChar := lipgloss.NewStyle().Foreground(styles.Muted).Render("│")
+	selectedBorder := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▌")
 
-	buildComment := func(header, bodyText string, selected bool) {
-		borderChar := lipgloss.NewStyle().Foreground(styles.Muted).Render("│")
-		selectedBorder := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).Render("▌")
+	// Per-comment body budget: each comment gets its own height cap and
+	// its own "… N more lines" hint when truncated.
+	maxBodyLines := m.maxCommentBlockHeight()
+
+	for idx, c := range comments {
 		border := borderChar
-		if selected {
+		if idx == selectedIdx {
 			border = selectedBorder
 		}
 
-		// Header line with border
-		allLines = append(allLines, gutterBase+" "+border+" "+header)
-		// Body lines — render markdown, prefix each with border
-		rendered := m.renderMarkdown(bodyText, contentWidth-4)
-		for _, bodyLine := range strings.Split(rendered, "\n") {
-			allLines = append(allLines, gutterBase+" "+border+" "+bodyLine)
-		}
-		// Blank separator
-		allLines = append(allLines, gutterBase)
-	}
-
-	for idx, c := range comments {
 		label := "💬"
 		if c.IsPending {
 			label = "📝 (draft)"
 		}
 		header := fmt.Sprintf("%s %s:", label,
 			styles.CommentAuthor.Render("@"+c.Author))
-		buildComment(header, c.Body, idx == selectedIdx)
-	}
 
-	// Check if capping is needed
-	maxH := m.maxCommentBlockHeight()
-	if len(allLines) <= maxH {
-		for _, l := range allLines {
-			b.WriteString(l + "\n")
+		// Header line
+		b.WriteString(gutterBase + " " + border + " " + header + "\n")
+
+		// Body lines
+		rendered := m.renderMarkdown(c.Body, contentWidth-4)
+		bodyLines := strings.Split(rendered, "\n")
+
+		if len(bodyLines) <= maxBodyLines {
+			for _, bodyLine := range bodyLines {
+				b.WriteString(gutterBase + " " + border + " " + bodyLine + "\n")
+			}
+		} else {
+			for j := 0; j < maxBodyLines; j++ {
+				b.WriteString(gutterBase + " " + border + " " + bodyLines[j] + "\n")
+			}
+			hidden := len(bodyLines) - maxBodyLines
+			truncText :=
+				lipgloss.NewStyle().Foreground(styles.Warning).Render(fmt.Sprintf("  … %d more lines", hidden)) +
+				" " + lipgloss.NewStyle().Foreground(styles.Muted).Render("[") +
+				lipgloss.NewStyle().Foreground(styles.Info).Bold(true).Render(keys.ViewComment.Help().Key) +
+				lipgloss.NewStyle().Foreground(styles.Muted).Render(" to expand]")
+			b.WriteString(gutterBase + " " + border + " " + truncText + "\n")
 		}
-		return totalCount
-	}
 
-	// Truncate: show first (maxH-1) lines + a "truncated" hint
-	for i := 0; i < maxH-1 && i < len(allLines); i++ {
-		b.WriteString(allLines[i] + "\n")
+		// Blank separator between comments
+		b.WriteString(gutterBase + "\n")
 	}
-	hidden := len(allLines) - (maxH - 1)
-	truncText :=
-		lipgloss.NewStyle().Foreground(styles.Warning).Render(fmt.Sprintf("  … %d more lines", hidden)) +
-		" " + lipgloss.NewStyle().Foreground(styles.Muted).Render("[") +
-		lipgloss.NewStyle().Foreground(styles.Info).Bold(true).Render(keys.ViewComment.Help().Key) +
-		lipgloss.NewStyle().Foreground(styles.Muted).Render(" to expand]")
-	truncLine := gutterBase + truncText
-	b.WriteString(truncLine + "\n")
 
 	return totalCount
 }

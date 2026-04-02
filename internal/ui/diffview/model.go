@@ -1011,20 +1011,23 @@ func (m *Model) commentRenderedLines(path string, lineNum int, side string) int 
 		return 1 // folded summary line
 	}
 
-	// Expanded: each comment = header(1) + rendered body lines + separator(1)
+	// Expanded: each comment = header(1) + min(bodyLines, maxBody) + hint?(1) + separator(1)
 	contentWidth := m.nav.diffViewport.Width() - 8
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
+	maxBody := m.maxCommentBlockHeight()
 	lines := 0
 	for _, c := range comments {
 		rendered := m.renderMarkdown(c.Body, contentWidth-2)
-		lines += 1 + len(strings.Split(rendered, "\n")) + 1
-	}
-
-	// Cap to max comment block height
-	if maxH := m.maxCommentBlockHeight(); lines > maxH {
-		return maxH
+		bodyLines := len(strings.Split(rendered, "\n"))
+		lines += 1 // header
+		if bodyLines <= maxBody {
+			lines += bodyLines
+		} else {
+			lines += maxBody + 1 // capped body + hint line
+		}
+		lines += 1 // separator
 	}
 	return lines
 }
