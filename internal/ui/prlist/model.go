@@ -75,10 +75,11 @@ type KeyMap struct {
 	PrevTab     key.Binding
 	EditFilter  key.Binding
 	Refresh     key.Binding
-	SidebarDown    key.Binding
-	SidebarUp      key.Binding
-	SidebarNextTab key.Binding
-	SidebarPrevTab key.Binding
+	SidebarDown       key.Binding
+	SidebarUp         key.Binding
+	SidebarNextTab    key.Binding
+	SidebarPrevTab    key.Binding
+	SidebarExpandAll  key.Binding
 	OpenInBrowser key.Binding
 	CopyNumber   key.Binding
 	CopyURL      key.Binding
@@ -110,8 +111,9 @@ var keys = KeyMap{
 	Refresh:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
 	SidebarDown:    key.NewBinding(key.WithKeys("J"), key.WithHelp("J", "scroll preview down")),
 	SidebarUp:      key.NewBinding(key.WithKeys("K"), key.WithHelp("K", "scroll preview up")),
-	SidebarNextTab: key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next section")),
-	SidebarPrevTab: key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev section")),
+	SidebarNextTab:   key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next section")),
+	SidebarPrevTab:   key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev section")),
+	SidebarExpandAll: key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "expand/collapse checks")),
 	OpenInBrowser: key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "open in browser")),
 	CopyNumber:   key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy PR number")),
 	CopyURL:      key.NewBinding(key.WithKeys("Y"), key.WithHelp("Y", "copy PR URL")),
@@ -598,6 +600,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if cmd := m.fetchCommitsIfNeeded(); cmd != nil {
 				return m, cmd
 			}
+		case key.Matches(msg, keys.SidebarExpandAll):
+			m.preview.ToggleExpanded()
 		case key.Matches(msg, keys.OpenInBrowser):
 			if t.hasCursor() {
 				return m, openBrowser(t.prs[t.cur()].URL)
@@ -914,7 +918,7 @@ func helpSections() []helppopup.Section {
 	return []helppopup.Section{
 		helppopup.Bind("Navigation", keys.Up, keys.Down, keys.HalfPageDown, keys.HalfPageUp, keys.Select, keys.GoToPR),
 		helppopup.Bind("Tabs & Filters", keys.NextTab, keys.PrevTab, keys.EditFilter),
-		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp, keys.SidebarNextTab, keys.SidebarPrevTab),
+		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp, keys.SidebarNextTab, keys.SidebarPrevTab, keys.SidebarExpandAll),
 		helppopup.Bind("PR Actions", keys.Assign, keys.Unassign, keys.Close, keys.Reopen, keys.Merge, keys.ReadyForReview, keys.Checkout),
 		helppopup.Bind("Copy", keys.CopyNumber, keys.CopyURL),
 		helppopup.Bind("Other", keys.OpenInBrowser, keys.Refresh, keys.Help, keys.Quit),

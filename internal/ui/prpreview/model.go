@@ -2,7 +2,6 @@ package prpreview
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -20,8 +19,8 @@ import (
 // Sidebar tab indices.
 const (
 	tabOverview = iota
-	tabCommits
 	tabChecks
+	tabCommits
 )
 
 // CommitsLoadedMsg carries the result of an async commits fetch.
@@ -45,6 +44,9 @@ type Model struct {
 	cachedBody    string
 	cachedCommits []review.Commit
 	commitsLoaded bool // true once commits have been fetched for current PR
+
+	summaryExpanded bool // when true, show full summary without truncation
+	checksExpanded  bool // when true, show all checks individually instead of collapsing passed/skipped
 }
 
 // New creates a new PR preview model.
@@ -54,8 +56,8 @@ func New() Model {
 		sidebarWidth: 50,
 		tabs: tabbar.New([]tabbar.Tab{
 			{Label: icons.Overview + " Overview", Count: -1},
-			{Label: icons.GitCommit + " Commits", Count: -1},
 			{Label: icons.Checklist + " Checks", Count: -1},
+			{Label: icons.GitCommit + " Commits", Count: -1},
 		}),
 	}
 }
@@ -108,6 +110,18 @@ func (m *Model) PrevSection() {
 	if m.tabs.Prev() {
 		m.rerender()
 	}
+}
+
+// ToggleExpanded toggles the expand state for the current tab's collapsible content.
+// On Overview tab: toggles summary truncation. On Checks tab: toggles check list grouping.
+func (m *Model) ToggleExpanded() {
+	switch m.tabs.Active() {
+	case tabOverview:
+		m.summaryExpanded = !m.summaryExpanded
+	case tabChecks:
+		m.checksExpanded = !m.checksExpanded
+	}
+	m.rerender()
 }
 
 // rerender re-renders using cached PR data for the current tab.
@@ -286,15 +300,21 @@ func (m *Model) renderOverview(b *strings.Builder, pr *review.PullRequest, body 
 			glamour.WithStylePath("dark"),
 			glamour.WithWordWrap(sidebarContentWidth),
 		)
+		maybeTruncate := func(s string) string {
+			if m.summaryExpanded {
+				return s
+			}
+			return truncateLines(s, 15)
+		}
 		if err == nil {
 			rendered, err := renderer.Render(mdutil.ReplaceImages(body))
 			if err == nil {
-				b.WriteString(truncateLines(rendered, 15))
+				b.WriteString(maybeTruncate(rendered))
 			} else {
-				b.WriteString(truncateLines(body, 15))
+				b.WriteString(maybeTruncate(body))
 			}
 		} else {
-			b.WriteString(truncateLines(body, 15))
+			b.WriteString(maybeTruncate(body))
 		}
 	} else if m.loading {
 		b.WriteString(sectionHeader.Render("≡ Summary") + "\n")
@@ -411,28 +431,71 @@ func (m *Model) renderChecksTab(b *strings.Builder, pr *review.PullRequest) {
 		b.WriteString("\n")
 	}
 
-	// All Checks list (sorted: failures first, then pending, then skipped, then success)
+	// All Checks list grouped by status category.
+	// Failing and pending checks are shown individually (actionable).
+	// Skipped and successful checks are collapsed into summary counts.
 	if len(pr.CheckRuns) > 0 {
-		sorted := make([]review.CheckRun, len(pr.CheckRuns))
-		copy(sorted, pr.CheckRuns)
-		sort.Slice(sorted, func(i, j int) bool {
-			return checkRunSortOrder(sorted[i]) < checkRunSortOrder(sorted[j])
-		})
-
-		b.WriteString(sectionHeader.Render(icons.Checklist+" All Checks") + "\n\n")
-		for _, cr := range sorted {
-			var checkIcon string
-			switch {
-			case cr.Status == review.CheckRunCompleted && cr.Conclusion == review.ConclusionSuccess:
-				checkIcon = lipgloss.NewStyle().Foreground(styles.Success).Render("✓")
-			case cr.Status == review.CheckRunCompleted && (cr.Conclusion == review.ConclusionFailure || cr.Conclusion == review.ConclusionTimedOut || cr.Conclusion == review.ConclusionStartupFailure || cr.Conclusion == review.ConclusionActionRequired):
-				checkIcon = lipgloss.NewStyle().Foreground(styles.Danger).Render("✗")
-			case cr.Status == review.CheckRunCompleted && (cr.Conclusion == review.ConclusionSkipped || cr.Conclusion == review.ConclusionNeutral || cr.Conclusion == review.ConclusionCancelled):
-				checkIcon = muted.Render("○")
+		var failing, pending, skipped, successful []review.CheckRun
+		for _, cr := range pr.CheckRuns {
+			switch checkRunSortOrder(cr) {
+			case 0:
+				failing = append(failing, cr)
+			case 1:
+				pending = append(pending, cr)
+			case 2:
+				skipped = append(skipped, cr)
 			default:
-				checkIcon = lipgloss.NewStyle().Foreground(styles.Warning).Render("◑")
+				successful = append(successful, cr)
 			}
-			b.WriteString("  " + checkIcon + " " + cr.Name + "\n")
+		}
+
+		dangerIcon := lipgloss.NewStyle().Foreground(styles.Danger).Render("✗")
+		warnIcon := lipgloss.NewStyle().Foreground(styles.Warning).Render("◑")
+		skipIcon := muted.Render("○")
+		passIcon := lipgloss.NewStyle().Foreground(styles.Success).Render("✓")
+
+		if len(failing) > 0 {
+			b.WriteString(sectionHeader.Render("✗ Failing") + "\n\n")
+			for _, cr := range failing {
+				b.WriteString("  " + dangerIcon + " " + cr.Name + "\n")
+			}
+			b.WriteString("\n")
+		}
+		if len(pending) > 0 {
+			b.WriteString(sectionHeader.Render("◑ Pending") + "\n\n")
+			for _, cr := range pending {
+				b.WriteString("  " + warnIcon + " " + cr.Name + "\n")
+			}
+			b.WriteString("\n")
+		}
+		if len(skipped) > 0 {
+			if m.checksExpanded {
+				b.WriteString(sectionHeader.Render("○ Skipped") + "\n\n")
+				for _, cr := range skipped {
+					b.WriteString("  " + skipIcon + " " + muted.Render(cr.Name) + "\n")
+				}
+				b.WriteString("\n")
+			} else {
+				b.WriteString("  " + skipIcon + " " + muted.Render(fmt.Sprintf("%d skipped", len(skipped))) + "\n")
+			}
+		}
+		if len(successful) > 0 {
+			if m.checksExpanded {
+				b.WriteString(sectionHeader.Render("✓ Successful") + "\n\n")
+				for _, cr := range successful {
+					b.WriteString("  " + passIcon + " " + cr.Name + "\n")
+				}
+				b.WriteString("\n")
+			} else {
+				b.WriteString("  " + passIcon + " " + lipgloss.NewStyle().Foreground(styles.Success).Render(fmt.Sprintf("%d successful", len(successful))) + "\n")
+			}
+		}
+
+		// Hint to toggle expanded view
+		if m.checksExpanded {
+			b.WriteString("\n" + muted.Render("Press e to collapse") + "\n")
+		} else if len(skipped)+len(successful) > 0 {
+			b.WriteString("\n" + muted.Render("Press e to expand all") + "\n")
 		}
 	} else if m.loading {
 		b.WriteString(muted.Render("Loading checks...") + "\n")
@@ -656,8 +719,9 @@ func truncateLines(s string, max int) string {
 		return s
 	}
 	remaining := len(lines) - max
-	label := fmt.Sprintf("  ⋯ %d more lines", remaining)
-	return strings.Join(lines[:max], "\n") + "\n" + lipgloss.NewStyle().Foreground(styles.Muted).Italic(true).Render(label) + "\n"
+	muted := lipgloss.NewStyle().Foreground(styles.Muted).Italic(true)
+	label := fmt.Sprintf("  ⋯ %d more lines · press e to expand", remaining)
+	return strings.Join(lines[:max], "\n") + "\n" + muted.Render(label) + "\n"
 }
 
 // renderChecksProgressBar renders a proportional progress bar using ▃ characters.
