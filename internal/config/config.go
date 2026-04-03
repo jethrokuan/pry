@@ -104,7 +104,7 @@ func (c Config) PRColumns() []string {
 }
 
 var defaults = confmap.Provider(map[string]interface{}{
-	"page_size":             50,
+	"page_size":             30,
 	"pr_list.sidebar_width": 50,
 	"cache.enabled":         true,
 }, ".")

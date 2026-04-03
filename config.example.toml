@@ -10,7 +10,7 @@
 # editor = ""
 
 # Number of PRs to fetch per filter tab (max 100, GitHub API limit).
-# page_size = 50
+# page_size = 30
 
 # Timeout for each GitHub API request. Go duration format (e.g. "30s", "1m").
 # Increase if you see 502 errors or timeouts on large repos. Default: no timeout.
