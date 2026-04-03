@@ -20,7 +20,6 @@ var _ = ginkgo.Describe("Comment CRUD state management", func() {
 			pendingReview: pendingReview,
 			currentUser:   "testuser",
 			inflight:      make(map[int]bool),
-			mdCache:       make(map[mdCacheKey]string),
 			comments: CommentPanel{
 				expanded:        make(map[string]bool),
 				threadIndex:     make(map[string][]review.Thread),

@@ -2,9 +2,8 @@ package diffview
 
 import (
 	"fmt"
-	"strings"
-
 	"image/color"
+	"strings"
 
 	"charm.land/glamour/v2"
 	"charm.land/glamour/v2/ansi"
@@ -12,43 +11,21 @@ import (
 
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
-	"github.com/jethrokuan/pry/internal/ui/mdutil"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
-// mdCacheKey is the cache key for rendered markdown output.
-type mdCacheKey struct {
-	body  string
-	width int
-}
-
-// renderMarkdown renders a markdown string using Glamour with caching.
+// renderMarkdown renders a markdown string using Glamour.
 // Falls back to the raw text on any error. The result is trimmed of
-// leading/trailing whitespace. An optional bgColor sets the background
-// on all Glamour style elements so it matches the surrounding container.
-func (m *Model) renderMarkdown(body string, width int, bgColor ...color.Color) string {
+// leading/trailing whitespace.
+func renderMarkdown(body string, width int) string {
 	if width < 10 {
 		width = 10
 	}
 
-	body = mdutil.ReplaceImages(body)
-
-	key := mdCacheKey{body: body, width: width}
-	if cached, ok := m.mdCache[key]; ok {
-		return cached
-	}
-
-	sc := mdStyleConfig()
-	if len(bgColor) > 0 && bgColor[0] != nil {
-		applyBackground(&sc, colorToANSIString(bgColor[0]))
-	}
-
-	opts := []glamour.TermRendererOption{
+	renderer, err := glamour.NewTermRenderer(
 		glamour.WithWordWrap(width),
-		glamour.WithStyles(sc),
-	}
-
-	renderer, err := glamour.NewTermRenderer(opts...)
+		glamour.WithStyles(mdStyleConfig()),
+	)
 	if err != nil {
 		return body
 	}
@@ -56,54 +33,12 @@ func (m *Model) renderMarkdown(body string, width int, bgColor ...color.Color) s
 	if err != nil {
 		return body
 	}
-	result := strings.TrimRight(rendered, "\n")
-	m.mdCache[key] = result
-	return result
+	return strings.TrimRight(rendered, "\n")
 }
 
 func stringPtr(s string) *string { return &s }
 func boolPtr(b bool) *bool    { return &b }
 func uintPtr(u uint) *uint    { return &u }
-
-// colorToANSIString converts a color.Color to a Glamour-compatible color
-// string, preserving ANSI color indices so they match the terminal theme.
-func colorToANSIString(c color.Color) string {
-	switch v := c.(type) {
-	case lipgloss.ANSIColor:
-		return fmt.Sprintf("%d", v)
-	default:
-		r, g, b, _ := v.RGBA()
-		return fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
-	}
-}
-
-// applyBackground sets the background color on all Glamour style elements.
-func applyBackground(sc *ansi.StyleConfig, bg string) {
-	bgp := &bg
-	sc.Document.BackgroundColor = bgp
-	sc.Document.StylePrimitive.BackgroundColor = bgp
-	sc.Text.BackgroundColor = bgp
-	sc.Paragraph.StylePrimitive.BackgroundColor = bgp
-	sc.Heading.StylePrimitive.BackgroundColor = bgp
-	sc.H1.StylePrimitive.BackgroundColor = bgp
-	sc.H2.StylePrimitive.BackgroundColor = bgp
-	sc.H3.StylePrimitive.BackgroundColor = bgp
-	sc.H4.StylePrimitive.BackgroundColor = bgp
-	sc.H5.StylePrimitive.BackgroundColor = bgp
-	sc.H6.StylePrimitive.BackgroundColor = bgp
-	sc.Strikethrough.BackgroundColor = bgp
-	sc.Emph.BackgroundColor = bgp
-	sc.Strong.BackgroundColor = bgp
-	sc.HorizontalRule.BackgroundColor = bgp
-	sc.Item.BackgroundColor = bgp
-	sc.Enumeration.BackgroundColor = bgp
-	sc.Link.BackgroundColor = bgp
-	sc.LinkText.BackgroundColor = bgp
-	sc.ImageText.BackgroundColor = bgp
-	sc.Code.StylePrimitive.BackgroundColor = bgp
-	sc.CodeBlock.StyleBlock.StylePrimitive.BackgroundColor = bgp
-	sc.BlockQuote.StylePrimitive.BackgroundColor = bgp
-}
 
 // mdStyleConfig returns a glamour style that uses ANSI 0-15 colors.
 // No 256-color or hex backgrounds — everything adapts to the terminal theme.
@@ -562,7 +497,7 @@ func (m *Model) renderLineComments(b *strings.Builder, path string, line int, si
 				styles.CommentAuthor.Render("@"+c.Author))
 
 			// Body
-			rendered := m.renderMarkdown(c.Body, commentContentWidth)
+			rendered := renderMarkdown(c.Body, commentContentWidth)
 			bodyLines := strings.Split(rendered, "\n")
 
 			var body string
@@ -714,7 +649,7 @@ func (m Model) renderCommentPopup() string {
 func (m *Model) openPRInfoPopup() {
 	m.prInfo.pr = m.pr
 	m.prInfo.renderMD = func(body string, width int) string {
-		return m.renderMarkdown(body, width)
+		return renderMarkdown(body, width)
 	}
 	m.prInfo.Open(m.width, m.height)
 }

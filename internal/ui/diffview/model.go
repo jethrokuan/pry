@@ -299,8 +299,7 @@ type Model struct {
 	aiCheckedOut bool // true after PR branch has been checked out for AI
 
 	// Caches
-	mdCache  map[mdCacheKey]string // rendered markdown cache
-	treeDirty bool                 // true when file tree needs re-rendering
+	treeDirty bool // true when file tree needs re-rendering
 }
 
 type diffLineInfo struct {
@@ -388,7 +387,6 @@ func New(pr *review.PullRequest, opts ...Option) Model {
 		inflight:          make(map[int]bool),
 		loading: true,
 		spinner: s,
-		mdCache: make(map[mdCacheKey]string),
 		treeDirty:         true,
 		nav: DiffNav{
 			showTree:       true,
@@ -584,7 +582,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.mdCache = make(map[mdCacheKey]string)
 		m.treeDirty = true
 		m.updateViewports()
 		if m.editor.IsActive() {

@@ -13,7 +13,7 @@ import (
 
 	"github.com/jethrokuan/pry/internal/data"
 	"github.com/jethrokuan/pry/internal/review"
-	"github.com/jethrokuan/pry/internal/ui/mdutil"
+
 )
 
 // --- Comment selection ---
@@ -234,7 +234,7 @@ func (m *Model) buildCommentPopupContent(c *review.Comment, width int) string {
 	if width < 10 {
 		width = 10
 	}
-	body := mdutil.ReplaceImages(c.Body)
+	body := c.Body
 	sc := glamourstyles.DarkStyleConfig
 	sc.Document.Margin = uintPtr(0)
 	// Clear all background colors — the popup border handles the background

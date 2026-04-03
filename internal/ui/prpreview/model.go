@@ -12,7 +12,6 @@ import (
 	"github.com/jethrokuan/pry/internal/ui/components/sidebar"
 	"github.com/jethrokuan/pry/internal/ui/components/tabbar"
 	"github.com/jethrokuan/pry/internal/ui/icons"
-	"github.com/jethrokuan/pry/internal/ui/mdutil"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
 
@@ -307,7 +306,7 @@ func (m *Model) renderOverview(b *strings.Builder, pr *review.PullRequest, body 
 			return truncateLines(s, 15)
 		}
 		if err == nil {
-			rendered, err := renderer.Render(mdutil.ReplaceImages(body))
+			rendered, err := renderer.Render(body)
 			if err == nil {
 				b.WriteString(maybeTruncate(rendered))
 			} else {
