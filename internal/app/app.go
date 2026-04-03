@@ -361,18 +361,10 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = ScreenPRList
 		return m, m.windowSizeCmd()
 	case prBodyLoadedMsg:
-		if msg.err == nil && msg.pr != nil {
-			// Update the shared PR in-place so diffview sees the change.
-			// Preserve review state that the new PR data doesn't carry.
-			pendingReview := m.selectedPR.PendingReview
-			threads := m.selectedPR.Threads
-			*m.selectedPR = *msg.pr
-			m.selectedPR.PendingReview = pendingReview
-			m.selectedPR.Threads = threads
-		}
-		// Forward to diffview as PRBodyLoadedMsg
+		// Forward to diffview — it owns the merge via MergeEnriched.
+		// app.go sees the result through the shared pointer.
 		var dvCmd tea.Cmd
-		m.diffView, dvCmd = m.diffView.Update(diffview.PRBodyLoadedMsg{PR: m.selectedPR, Err: msg.err})
+		m.diffView, dvCmd = m.diffView.Update(diffview.PRBodyLoadedMsg{PR: msg.pr, Err: msg.err})
 		return m, dvCmd
 	}
 

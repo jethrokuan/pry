@@ -797,12 +797,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case PRBodyLoadedMsg:
 		if msg.Err == nil && msg.PR != nil {
-			// Preserve review state when updating PR metadata
-			pendingReview := m.pendingReview
-			threads := m.pr.Threads
-			*m.pr = *msg.PR
-			m.pendingReview = pendingReview
-			m.pr.Threads = threads
+			m.pr.MergeEnriched(msg.PR)
 			if m.prInfo.active {
 				m.openPRInfoPopup()
 			}
