@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/jethrokuan/pry/internal/ai"
 	"github.com/jethrokuan/pry/internal/config"
+	"github.com/jethrokuan/pry/internal/data"
 	"github.com/jethrokuan/pry/internal/jj"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/flash"
@@ -32,7 +32,6 @@ const (
 
 // Model is the top-level application model.
 type Model struct {
-	svc              review.Service
 	cfg              config.Config
 	filters          []review.PRFilter
 	screen           Screen
@@ -57,12 +56,11 @@ type Model struct {
 }
 
 // New creates the application model.
-func New(svc review.Service, cfg config.Config, filters []review.PRFilter) Model {
+func New(cfg config.Config, filters []review.PRFilter) Model {
 	useJJ := jj.IsRepo()
-	pl := prlist.New(svc, filters)
+	pl := prlist.New(filters)
 	pl.SetJujutsu(useJJ)
 	return Model{
-		svc:     svc,
 		cfg:     cfg,
 		filters: filters,
 		screen:  ScreenPRList,
@@ -74,14 +72,13 @@ func New(svc review.Service, cfg config.Config, filters []review.PRFilter) Model
 }
 
 // NewWithPR creates the application model starting at a specific PR.
-func NewWithPR(svc review.Service, cfg config.Config, prNumber int, filters []review.PRFilter) Model {
+func NewWithPR(cfg config.Config, prNumber int, filters []review.PRFilter) Model {
 	pr := &review.PullRequest{Number: prNumber}
 	pr.StartReview()
 	useJJ := jj.IsRepo()
-	pl := prlist.New(svc, filters)
+	pl := prlist.New(filters)
 	pl.SetJujutsu(useJJ)
 	m := Model{
-		svc:        svc,
 		cfg:        cfg,
 		useJJ:      useJJ,
 		filters:    filters,
@@ -92,7 +89,7 @@ func NewWithPR(svc review.Service, cfg config.Config, prNumber int, filters []re
 		initialPR:  prNumber,
 		aiAgent:    createAIAgent(cfg),
 	}
-	m.diffView = diffview.New(svc, pr, m.diffviewOpts()...)
+	m.diffView = diffview.New(pr, m.diffviewOpts()...)
 	return m
 }
 
@@ -161,14 +158,12 @@ type mentionableUsersMsg struct {
 
 // loadUserIdentity fetches the current user's login and teams.
 func (m Model) loadUserIdentity() tea.Cmd {
-	svc := m.svc
 	return safeCmd(func() tea.Msg {
-		ctx := context.Background()
-		login, err := svc.CurrentUser(ctx)
+		login, err := data.CurrentUser()
 		if err != nil {
 			return userIdentityMsg{err: err}
 		}
-		teams, err := svc.UserTeams(ctx)
+		teams, err := data.UserTeams()
 		if err != nil {
 			return userIdentityMsg{err: err}
 		}
@@ -183,9 +178,8 @@ func (m Model) loadUserIdentity() tea.Cmd {
 
 // loadMentionableUsers fetches @-mentionable usernames in the background at startup.
 func (m Model) loadMentionableUsers() tea.Cmd {
-	svc := m.svc
 	return safeCmd(func() tea.Msg {
-		users, err := svc.ListMentionableUsers(context.Background())
+		users, err := data.ListMentionableUsers()
 		return mentionableUsersMsg{users: users, err: err}
 	})
 }
@@ -194,14 +188,13 @@ func (m Model) loadMentionableUsers() tea.Cmd {
 func (m Model) Init() tea.Cmd {
 	if m.initialPR > 0 {
 		prNumber := m.initialPR
-		svc := m.svc
 		return tea.Batch(
 			tea.RequestBackgroundColor,
 			m.diffView.Init(),
 			m.loadUserIdentity(),
 			m.loadMentionableUsers(),
 			safeCmd(func() tea.Msg {
-				full, err := svc.GetPR(context.Background(), prNumber)
+				full, err := data.FetchPR(prNumber)
 				return prBodyLoadedMsg{pr: full, err: err}
 			}),
 		)
@@ -310,15 +303,14 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		pr := msg.PR
 		m.selectedPR = pr
 		pr.StartReview()
-		m.diffView = diffview.New(m.svc, pr, m.diffviewOpts()...)
+		m.diffView = diffview.New(pr, m.diffviewOpts()...)
 		m.screen = ScreenDiffView
 		prNumber := pr.Number
-		svc := m.svc
 		return m, tea.Batch(
 			m.diffView.Init(),
 			m.windowSizeCmd(),
 			safeCmd(func() tea.Msg {
-				full, err := svc.GetPR(context.Background(), prNumber)
+				full, err := data.FetchPR(prNumber)
 				return prBodyLoadedMsg{pr: full, err: err}
 			}),
 		)
@@ -326,15 +318,14 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 		pr := &review.PullRequest{Number: msg.Number}
 		pr.StartReview()
 		m.selectedPR = pr
-		m.diffView = diffview.New(m.svc, pr, m.diffviewOpts()...)
+		m.diffView = diffview.New(pr, m.diffviewOpts()...)
 		m.screen = ScreenDiffView
 		prNumber := msg.Number
-		svc := m.svc
 		return m, tea.Batch(
 			m.diffView.Init(),
 			m.windowSizeCmd(),
 			safeCmd(func() tea.Msg {
-				full, err := svc.GetPR(context.Background(), prNumber)
+				full, err := data.FetchPR(prNumber)
 				return prBodyLoadedMsg{pr: full, err: err}
 			}),
 		)
@@ -353,7 +344,7 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.userIdentity != nil {
 			currentUser = m.userIdentity.Login
 		}
-		m.submit = submit.New(m.svc, m.selectedPR, currentUser)
+		m.submit = submit.New(m.selectedPR, currentUser)
 		m.screen = ScreenSubmit
 		return m, tea.Batch(m.submit.Init(), m.windowSizeCmd())
 	case diffview.BackMsg:
@@ -378,7 +369,7 @@ func (m Model) updateSubmit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case submit.SubmittedMsg:
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		m.prList = prlist.New(m.svc, m.filters)
+		m.prList = prlist.New(m.filters)
 		return m, tea.Batch(m.prList.Init(), m.windowSizeCmd())
 	case submit.CancelledMsg:
 		m.screen = ScreenDiffView

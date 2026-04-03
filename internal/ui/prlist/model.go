@@ -1,7 +1,6 @@
 package prlist
 
 import (
-	"context"
 	"fmt"
 	"image/color"
 	"log/slog"
@@ -17,8 +16,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jethrokuan/pry/internal/clipboard"
+	"github.com/jethrokuan/pry/internal/data"
 	"github.com/jethrokuan/pry/internal/git"
-	"github.com/jethrokuan/pry/internal/ui/icons"
 	"github.com/jethrokuan/pry/internal/jj"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/components/autocomplete"
@@ -26,6 +25,7 @@ import (
 	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/ui/components/scrollbar"
 	"github.com/jethrokuan/pry/internal/ui/components/tabbar"
+	"github.com/jethrokuan/pry/internal/ui/icons"
 	"github.com/jethrokuan/pry/internal/ui/prpreview"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
@@ -186,7 +186,6 @@ func (t *tabState) hasCursor() bool {
 
 // Model is the Bubble Tea model for the PR list screen.
 type Model struct {
-	svc       review.Service
 	filters   []review.PRFilter
 	filterIdx int
 	tabs      []tabState          // per-tab state, indexed parallel to filters
@@ -242,7 +241,7 @@ type UserIdentityMsg struct {
 }
 
 // New creates a new PR list model.
-func New(svc review.Service, filters []review.PRFilter) Model {
+func New(filters []review.PRFilter) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
@@ -267,7 +266,6 @@ func New(svc review.Service, filters []review.PRFilter) Model {
 	tabStates[0].loading = true
 
 	return Model{
-		svc:         svc,
 		filters:     filters,
 		tabs:        tabStates,
 		spinner:     s,
@@ -323,7 +321,7 @@ func (m Model) fetchPRs() tea.Cmd {
 	filter := m.activeFilter()
 	tabIdx := m.filterIdx
 	return func() tea.Msg {
-		prs, err := m.svc.ListPRs(context.Background(), filter)
+		prs, err := data.FetchPullRequests(filter)
 		return prsLoadedMsg{tabIdx: tabIdx, prs: prs, err: err}
 	}
 }
@@ -414,9 +412,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, flash.ShowMsg{ID: "pr-action", Text: fmt.Sprintf("%s failed: %v", msg.action, msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
 		}
 		// Invalidate cache and refresh to reflect the change.
-		if inv, ok := m.svc.(review.CacheInvalidator); ok {
-			inv.InvalidateListPRs()
-		}
+		data.InvalidateListPRs()
 		flashCmd := flash.ShowMsg{ID: "pr-action", Text: fmt.Sprintf("%s #%d", msg.action, msg.prNumber), Expires: 3 * time.Second}.Cmd()
 		return m, tea.Batch(flashCmd, m.startFetch())
 
@@ -542,16 +538,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				t := m.tab()
 				if t.hasCursor() {
 					pr := t.prs[t.cur()]
-					svc := m.svc
 					switch action {
 					case confirmClose:
 						return m, func() tea.Msg {
-							err := svc.ClosePR(context.Background(), pr.Number)
+							err := data.ClosePR(pr.Number)
 							return prActionMsg{action: "Closed", prNumber: pr.Number, err: err}
 						}
 					case confirmMerge:
 						return m, func() tea.Msg {
-							err := svc.MergePR(context.Background(), pr.Number)
+							err := data.MergePR(pr.Number)
 							return prActionMsg{action: "Merged", prNumber: pr.Number, err: err}
 						}
 					}
@@ -639,9 +634,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				return m, openBrowser(t.prs[t.cur()].URL)
 			}
 		case key.Matches(msg, keys.Refresh):
-			if inv, ok := m.svc.(review.CacheInvalidator); ok {
-				inv.InvalidateListPRs()
-			}
+			data.InvalidateListPRs()
 			return m, m.startFetch()
 		case key.Matches(msg, keys.CopyNumber):
 			if t.hasCursor() {
@@ -663,20 +656,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.Assign):
 			if t.hasCursor() && m.currentUser != "" {
 				pr := t.prs[t.cur()]
-				svc := m.svc
 				login := m.currentUser
 				return m, func() tea.Msg {
-					err := svc.AssignPR(context.Background(), pr.Number, login)
+					err := data.AssignPR(pr.Number, login)
 					return prActionMsg{action: "Assigned " + login + " to", prNumber: pr.Number, err: err}
 				}
 			}
 		case key.Matches(msg, keys.Unassign):
 			if t.hasCursor() && m.currentUser != "" {
 				pr := t.prs[t.cur()]
-				svc := m.svc
 				login := m.currentUser
 				return m, func() tea.Msg {
-					err := svc.UnassignPR(context.Background(), pr.Number, login)
+					err := data.UnassignPR(pr.Number, login)
 					return prActionMsg{action: "Unassigned " + login + " from", prNumber: pr.Number, err: err}
 				}
 			}
@@ -688,9 +679,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, keys.Reopen):
 			if t.hasCursor() {
 				pr := t.prs[t.cur()]
-				svc := m.svc
 				return m, func() tea.Msg {
-					err := svc.ReopenPR(context.Background(), pr.Number)
+					err := data.ReopenPR(pr.Number)
 					return prActionMsg{action: "Reopened", prNumber: pr.Number, err: err}
 				}
 			}
@@ -705,10 +695,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				if !pr.Draft {
 					return m, flash.ShowMsg{ID: "pr-action", Text: "PR is not a draft", Expires: 2 * time.Second}.Cmd()
 				}
-				svc := m.svc
 				nodeID := pr.NodeID
 				return m, func() tea.Msg {
-					err := svc.MarkReadyForReview(context.Background(), nodeID)
+					err := data.MarkReadyForReview(nodeID)
 					return prActionMsg{action: "Marked ready for review", prNumber: pr.Number, err: err}
 				}
 			}
@@ -770,10 +759,9 @@ func (m *Model) refreshSidebarPreview() tea.Cmd {
 	num := pr.Number
 	if !pr.Enriched && !t.inFlight[num] {
 		t.inFlight[num] = true
-		svc := m.svc
 		tabIdx := m.filterIdx
 		return tea.Batch(func() tea.Msg {
-			full, err := svc.GetPR(context.Background(), num)
+			full, err := data.FetchPR(num)
 			return prEnrichedMsg{tabIdx: tabIdx, PRNumber: num, FullPR: full, Err: err}
 		}, m.spinner.Tick)
 	}
@@ -965,7 +953,7 @@ func (m Model) renderLeftPane(tableWidth, mainHeight int) string {
 
 // renderFooter renders the bottom bar with help text and repo label.
 func (m Model) renderFooter() string {
-	repoLabel := fmt.Sprintf("%s/%s", m.svc.RepoOwner(), m.svc.RepoName())
+	repoLabel := fmt.Sprintf("%s/%s", data.RepoOwner(), data.RepoName())
 	repo := lipgloss.NewStyle().Foreground(styles.Primary).Render(repoLabel)
 
 	footerLeft := styles.HelpStyle.Render("↑/k up  ↓/j down  enter select  tab switch  / search  y copy #  Y copy URL  ? help")
@@ -1208,9 +1196,8 @@ func (m Model) fetchCommitsIfNeeded() tea.Cmd {
 	if !needed {
 		return nil
 	}
-	svc := m.svc
 	return func() tea.Msg {
-		commits, err := svc.FetchCommits(context.Background(), prNum)
+		commits, err := data.FetchCommits(prNum)
 		return commitsLoadedMsg{PRNumber: prNum, Commits: commits, Err: err}
 	}
 }

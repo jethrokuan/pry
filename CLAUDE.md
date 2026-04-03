@@ -61,29 +61,27 @@ Each screen is a Bubble Tea `Model` in its own package under `internal/ui/`. Scr
 
 ### Key packages
 
-- **`internal/review`** — Domain types (`PullRequest`, `InlineComment`, `PendingReview`, etc.) and `Service` interface. All UI code depends on this package, never on a forge-specific package directly.
-- **`internal/github`** — GitHub API layer using `go-gh` (reuses `gh` CLI auth). The `Adapter` type implements `review.Service`. Uses both REST and GraphQL.
+- **`internal/review`** — Domain types (`PullRequest`, `InlineComment`, `PendingReview`, etc.)
+- **`internal/data`** — GitHub API layer using `go-gh` (reuses `gh` CLI auth). Package-level functions (e.g. `data.FetchPullRequests()`, `data.FetchPR()`). Initialized once via `data.Init()` in `cmd/root.go`. Uses both REST and GraphQL.
 - **`internal/app`** — Top-level model, screen routing, state management (selected PR, pending review)
 - **`internal/diff`** — Unified diff parser, data types (`DiffFile`, `Hunk`, `DiffLine`), ANSI renderer
 - **`internal/ui/*`** — Individual screen models (prlist, prdetail, diffview, comment, submit)
 - **`internal/git`** — Local git operations (checkout, repo detection)
 
-### Domain service pattern
+### Data layer pattern
 
-UI packages depend on the `review.Service` interface, not the concrete GitHub client. This enables:
-- Testing with mock implementations
-- Adding new forge backends (GitLab, Gitea, etc.) without changing UI code
+UI packages call `data.*` functions directly — no interfaces or dependency injection. The `data` package holds module-level GitHub clients initialized once at startup.
 
 ```
-internal/review/   ← domain types + Service interface
-internal/github/   ← implements review.Service via Adapter
-internal/ui/*      ← imports review, never github
-internal/app/      ← wires review.Service to screens
+internal/review/   ← domain types
+internal/data/     ← GitHub API (package-level functions)
+internal/ui/*      ← imports review + data
+internal/app/      ← screen routing, calls data directly
 ```
 
 ### Review state
 
-`review.PendingReview` (created in `app.go` when entering review) accumulates `InlineComment`s as the user comments. On submit, all pending comments are sent with the review via the `Service` interface.
+`review.PendingReview` (created in `app.go` when entering review) accumulates `InlineComment`s as the user comments. On submit, all pending comments are sent with the review via `data.SubmitReview()`.
 
 ## Configuration
 

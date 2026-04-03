@@ -1,7 +1,6 @@
 package diffview
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +11,7 @@ import (
 	"charm.land/glamour/v2"
 	glamourstyles "charm.land/glamour/v2/styles"
 
+	"github.com/jethrokuan/pry/internal/data"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/mdutil"
 )
@@ -475,7 +475,7 @@ func (m Model) markCurrentFileViewed() (Model, tea.Cmd) {
 		m.nav.treeViewport.SetContent(m.renderFileTree())
 		m.updateDiffContent()
 		return m, func() tea.Msg {
-			err := m.svc.UnmarkFileAsViewed(context.Background(), prNodeID, path)
+			err := data.UnmarkFileAsViewed( prNodeID, path)
 			return markViewedMsg{path: "", err: err}
 		}
 	}
@@ -489,7 +489,7 @@ func (m Model) markCurrentFileViewed() (Model, tea.Cmd) {
 	m.nav.treeViewport.SetContent(m.renderFileTree())
 	m.updateDiffContent()
 	return m, func() tea.Msg {
-		err := m.svc.MarkFileAsViewed(context.Background(), prNodeID, path)
+		err := data.MarkFileAsViewed( prNodeID, path)
 		return markViewedMsg{path: path, err: err}
 	}
 }
@@ -558,7 +558,7 @@ func (m Model) markTreeItemViewed() (Model, tea.Cmd) {
 				delete(m.pendingReview.ViewedFiles, path)
 				p := path // capture for closure
 				cmds = append(cmds, func() tea.Msg {
-					err := m.svc.UnmarkFileAsViewed(context.Background(), prNodeID, p)
+					err := data.UnmarkFileAsViewed( prNodeID, p)
 					return markViewedMsg{path: "", err: err}
 				})
 			}
@@ -572,7 +572,7 @@ func (m Model) markTreeItemViewed() (Model, tea.Cmd) {
 					m.pendingReview.ViewedFiles[path] = true
 					p := path // capture for closure
 					cmds = append(cmds, func() tea.Msg {
-						err := m.svc.MarkFileAsViewed(context.Background(), prNodeID, p)
+						err := data.MarkFileAsViewed( prNodeID, p)
 						return markViewedMsg{path: p, err: err}
 					})
 				}

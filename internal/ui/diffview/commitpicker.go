@@ -1,7 +1,6 @@
 package diffview
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -9,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/jethrokuan/pry/internal/data"
 	"github.com/jethrokuan/pry/internal/ui/components/flash"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
@@ -24,10 +24,9 @@ func (m Model) openCommitPicker() (Model, tea.Cmd) {
 }
 
 func (m Model) fetchCommitsCmd() tea.Cmd {
-	svc := m.svc
 	prNumber := m.pr.Number
 	return func() tea.Msg {
-		commits, err := svc.FetchCommits(context.Background(), prNumber)
+		commits, err := data.FetchCommits(prNumber)
 		return commitsLoadedMsg{commits: commits, err: err}
 	}
 }
@@ -43,7 +42,6 @@ func (m Model) commitBaseSHA(idx int) string {
 
 // fetchRangeDiffCmd fetches the diff for commits[startIdx..endIdx] (inclusive).
 func (m Model) fetchRangeDiffCmd(startIdx, endIdx int) tea.Cmd {
-	svc := m.svc
 	baseSHA := m.commitBaseSHA(startIdx)
 	headSHA := m.commits[endIdx].SHA
 
@@ -54,16 +52,15 @@ func (m Model) fetchRangeDiffCmd(startIdx, endIdx int) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		files, err := svc.FetchCommitDiff(context.Background(), baseSHA, headSHA)
+		files, err := data.FetchCommitDiff(baseSHA, headSHA)
 		return commitDiffLoadedMsg{files: files, err: err}
 	}
 }
 
 func (m Model) fetchFullDiffCmd() tea.Cmd {
-	svc := m.svc
 	prNumber := m.pr.Number
 	return func() tea.Msg {
-		files, err := svc.FetchDiffFiles(context.Background(), prNumber)
+		files, err := data.FetchDiffFiles(prNumber)
 		return commitDiffLoadedMsg{files: files, err: err}
 	}
 }

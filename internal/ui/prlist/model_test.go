@@ -8,16 +8,15 @@ import (
 	"github.com/onsi/gomega"
 
 	"github.com/jethrokuan/pry/internal/review"
-	"github.com/jethrokuan/pry/internal/review/reviewtest"
 )
 
-func newTestModel(svc *reviewtest.MockService, filters ...review.PRFilter) Model {
+func newTestModel(filters ...review.PRFilter) Model {
 	if len(filters) == 0 {
 		filters = []review.PRFilter{
 			{Name: "Default", Qualifier: "is:open"},
 		}
 	}
-	return New(svc, filters)
+	return New(filters)
 }
 
 func samplePRs(n int) []review.PullRequest {
@@ -34,8 +33,8 @@ func samplePRs(n int) []review.PullRequest {
 
 // loadModel creates a model, sends prsLoadedMsg and UserIdentityMsg,
 // and returns the model in a ready (non-loading) state.
-func loadModel(svc *reviewtest.MockService, prs []review.PullRequest, filters ...review.PRFilter) Model {
-	m := newTestModel(svc, filters...)
+func loadModel(prs []review.PullRequest, filters ...review.PRFilter) Model {
+	m := newTestModel(filters...)
 	m, _ = m.Update(prsLoadedMsg{tabIdx: 0, prs: prs})
 	m, _ = m.Update(UserIdentityMsg{Identity: &review.UserIdentity{Login: "testuser", Teams: nil}})
 	return m
@@ -45,8 +44,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 
 	ginkgo.Describe("prsLoadedMsg", func() {
 		ginkgo.It("stores PRs and resets cursor", func() {
-			svc := &reviewtest.MockService{}
-			m := newTestModel(svc)
+			m := newTestModel()
 			gomega.Expect(m.tabs[0].loading).To(gomega.BeTrue())
 
 			prs := samplePRs(3)
@@ -59,8 +57,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("emits flash on failure", func() {
-			svc := &reviewtest.MockService{}
-			m := newTestModel(svc)
+			m := newTestModel()
 
 			m, cmd := m.Update(prsLoadedMsg{tabIdx: 0, err: fmt.Errorf("API failure")})
 
@@ -71,12 +68,11 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("routes response to correct tab", func() {
-			svc := &reviewtest.MockService{}
 			filters := []review.PRFilter{
 				{Name: "Open", Qualifier: "is:open"},
 				{Name: "Mine", Qualifier: "author:@me"},
 			}
-			m := newTestModel(svc, filters...)
+			m := newTestModel(filters...)
 
 			// Load tab 1 while tab 0 is active
 			prs := samplePRs(2)
@@ -88,8 +84,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("ignores out-of-range tab index", func() {
-			svc := &reviewtest.MockService{}
-			m := newTestModel(svc)
+			m := newTestModel()
 
 			m, _ = m.Update(prsLoadedMsg{tabIdx: 99, prs: samplePRs(1)})
 			gomega.Expect(m.tabs[0].prs).To(gomega.BeNil())
@@ -98,8 +93,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 
 	ginkgo.Describe("keyboard navigation", func() {
 		ginkgo.It("moves cursor down with j", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(5))
+			m := loadModel(samplePRs(5))
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
 			gomega.Expect(m.tabs[0].cur()).To(gomega.Equal(1))
@@ -109,8 +103,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("moves cursor up with k", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(5))
+			m := loadModel(samplePRs(5))
 			m.tabs[0].setCursor(3)
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
@@ -118,8 +111,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("clamps cursor at top", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(5))
+			m := loadModel(samplePRs(5))
 			gomega.Expect(m.tabs[0].cur()).To(gomega.Equal(0))
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'k'})
@@ -127,8 +119,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("clamps cursor at bottom", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(3))
+			m := loadModel(samplePRs(3))
 			m.tabs[0].setCursor(2)
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
@@ -136,8 +127,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("ignores navigation while loading", func() {
-			svc := &reviewtest.MockService{}
-			m := newTestModel(svc) // loading=true, cursor is nil
+			m := newTestModel() // loading=true, cursor is nil
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
 			gomega.Expect(m.tabs[0].cursor).To(gomega.BeNil())
@@ -146,9 +136,8 @@ var _ = ginkgo.Describe("PRList Model", func() {
 
 	ginkgo.Describe("PR selection", func() {
 		ginkgo.It("emits PRSelectedMsg on enter", func() {
-			svc := &reviewtest.MockService{}
 			prs := samplePRs(3)
-			m := loadModel(svc, prs)
+			m := loadModel(prs)
 			m.tabs[0].setCursor(1)
 
 			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -160,8 +149,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("does nothing on enter with empty list", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, nil)
+			m := loadModel(nil)
 
 			_, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			gomega.Expect(cmd).To(gomega.BeNil())
@@ -180,8 +168,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("switches to next tab with tab key", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1), filters...)
+			m := loadModel(samplePRs(1), filters...)
 
 			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(1))
@@ -191,8 +178,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("switches to prev tab with shift+tab", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1), filters...)
+			m := loadModel(samplePRs(1), filters...)
 			m.tabBar.SetActive(2)
 			m.filterIdx = 2
 
@@ -204,8 +190,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("does not go past last tab", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1), filters...)
+			m := loadModel(samplePRs(1), filters...)
 			m.tabBar.SetActive(2)
 			m.filterIdx = 2
 
@@ -215,8 +200,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("does not go before first tab", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1), filters...)
+			m := loadModel(samplePRs(1), filters...)
 
 			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(0))
@@ -224,8 +208,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("switches tab by number key", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1), filters...)
+			m := loadModel(samplePRs(1), filters...)
 
 			m, cmd := m.Update(tea.KeyPressMsg{Code: '2'})
 			gomega.Expect(m.filterIdx).To(gomega.Equal(1))
@@ -235,12 +218,11 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("returns cached data instantly when switching back", func() {
-			svc := &reviewtest.MockService{}
 			filters := []review.PRFilter{
 				{Name: "Open", Qualifier: "is:open"},
 				{Name: "Mine", Qualifier: "author:@me"},
 			}
-			m := loadModel(svc, samplePRs(3), filters...)
+			m := loadModel(samplePRs(3), filters...)
 			// Tab 0 is loaded with 3 PRs, move cursor
 			m.tabs[0].setCursor(2)
 
@@ -259,8 +241,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 
 	ginkgo.Describe("filter editing", func() {
 		ginkgo.It("enters edit mode with /", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1))
+			m := loadModel(samplePRs(1))
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: '/'})
 			gomega.Expect(m.editing).To(gomega.BeTrue())
@@ -268,8 +249,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("exits edit mode with esc", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1))
+			m := loadModel(samplePRs(1))
 			m.editing = true
 
 			m, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -278,8 +258,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("submits custom filter on enter", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1))
+			m := loadModel(samplePRs(1))
 			m.editing = true
 			m.filterInput.SetValue("author:octocat")
 
@@ -295,8 +274,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 
 	ginkgo.Describe("refresh", func() {
 		ginkgo.It("triggers reload on r", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1))
+			m := loadModel(samplePRs(1))
 
 			m, cmd := m.Update(tea.KeyPressMsg{Code: 'r'})
 			gomega.Expect(m.tabs[0].loading).To(gomega.BeFalse()) // non-blocking refresh
@@ -306,8 +284,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 
 	ginkgo.Describe("window size", func() {
 		ginkgo.It("stores dimensions from WindowSizeMsg", func() {
-			svc := &reviewtest.MockService{}
-			m := newTestModel(svc)
+			m := newTestModel()
 
 			m, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 			gomega.Expect(m.width).To(gomega.Equal(120))
@@ -352,8 +329,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 
 	ginkgo.Describe("filter autocomplete", func() {
 		ginkgo.It("shows suggestions when typing @", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1))
+			m := loadModel(samplePRs(1))
 			m, _ = m.Update(MentionableUsersMsg{Users: []review.MentionableUser{
 				{Login: "octocat", Name: "Octo Cat"},
 				{Login: "jethro", Name: "Jethro Kuan"},
@@ -371,8 +347,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("hides autocomplete when no @ in token", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1))
+			m := loadModel(samplePRs(1))
 			m, _ = m.Update(MentionableUsersMsg{Users: []review.MentionableUser{
 				{Login: "octocat", Name: "Octo Cat"},
 			}})
@@ -386,8 +361,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("completes @prefix on tab", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1))
+			m := loadModel(samplePRs(1))
 			m, _ = m.Update(MentionableUsersMsg{Users: []review.MentionableUser{
 				{Login: "octocat", Name: "Octo Cat"},
 				{Login: "jethro", Name: "Jethro Kuan"},
@@ -407,8 +381,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("completes @prefix in middle of input", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1))
+			m := loadModel(samplePRs(1))
 			m, _ = m.Update(MentionableUsersMsg{Users: []review.MentionableUser{
 				{Login: "octocat", Name: "Octo Cat"},
 			}})
@@ -426,8 +399,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("works with reviewer: qualifier", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1))
+			m := loadModel(samplePRs(1))
 			m, _ = m.Update(MentionableUsersMsg{Users: []review.MentionableUser{
 				{Login: "octocat", Name: "Octo Cat"},
 			}})
@@ -445,8 +417,7 @@ var _ = ginkgo.Describe("PRList Model", func() {
 		})
 
 		ginkgo.It("shows all users with bare @", func() {
-			svc := &reviewtest.MockService{}
-			m := loadModel(svc, samplePRs(1))
+			m := loadModel(samplePRs(1))
 			m, _ = m.Update(MentionableUsersMsg{Users: []review.MentionableUser{
 				{Login: "octocat", Name: "Octo Cat"},
 				{Login: "jethro", Name: "Jethro Kuan"},
@@ -463,20 +434,18 @@ var _ = ginkgo.Describe("PRList Model", func() {
 
 	ginkgo.Describe("activeFilter", func() {
 		ginkgo.It("returns preset filter by default", func() {
-			svc := &reviewtest.MockService{}
 			filters := []review.PRFilter{
 				{Name: "Open", Qualifier: "is:open"},
 				{Name: "Mine", Qualifier: "author:@me"},
 			}
-			m := newTestModel(svc, filters...)
+			m := newTestModel(filters...)
 			m.filterIdx = 1
 
 			gomega.Expect(m.activeFilter().Name).To(gomega.Equal("Mine"))
 		})
 
 		ginkgo.It("returns custom filter when set", func() {
-			svc := &reviewtest.MockService{}
-			m := newTestModel(svc)
+			m := newTestModel()
 			m.customFilter = &review.PRFilter{Name: "Custom", Qualifier: "label:bug"}
 
 			gomega.Expect(m.activeFilter().Name).To(gomega.Equal("Custom"))

@@ -27,7 +27,7 @@ var _ = ginkgo.Describe("PR Info Popup Scrolling", func() {
 		}
 
 		pr.StartReview()
-		m := New(nil, pr)
+		m := New(pr)
 		m.loading = false
 
 		// Set window size

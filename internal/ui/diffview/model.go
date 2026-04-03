@@ -1,7 +1,6 @@
 package diffview
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/jethrokuan/pry/internal/ai"
 	"github.com/jethrokuan/pry/internal/clipboard"
+	"github.com/jethrokuan/pry/internal/data"
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/git"
 	"github.com/jethrokuan/pry/internal/jj"
@@ -249,7 +249,6 @@ var inlineKeys = struct {
 // --- Model ---
 
 type Model struct {
-	svc           review.Service
 	pr            *review.PullRequest
 	pendingReview *review.PendingReview
 	files         []diff.DiffFile
@@ -379,12 +378,11 @@ func WithAI(agent *ai.Agent) Option {
 	}
 }
 
-func New(svc review.Service, pr *review.PullRequest, opts ...Option) Model {
+func New(pr *review.PullRequest, opts ...Option) Model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 
 	m := Model{
-		svc:               svc,
 		pr:                pr,
 		pendingReview:     pr.PendingReview,
 		inflight:          make(map[int]bool),
@@ -438,21 +436,21 @@ func (m Model) loadViewedFiles() tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		viewed, err := m.svc.FetchViewedFiles(context.Background(), m.pr.NodeID)
+		viewed, err := data.FetchViewedFiles(m.pr.NodeID)
 		return viewedFilesMsg{viewed: viewed, err: err}
 	}
 }
 
 func (m Model) loadFiles() tea.Cmd {
 	return func() tea.Msg {
-		files, err := m.svc.FetchDiffFiles(context.Background(), m.pr.Number)
+		files, err := data.FetchDiffFiles(m.pr.Number)
 		return filesLoadedMsg{files: files, err: err}
 	}
 }
 
 func (m Model) loadCommentsAndReview() tea.Cmd {
 	return func() tea.Msg {
-		threads, reviewID, nodeID, err := m.svc.FetchCommentsAndReview(context.Background(), m.pr.Number)
+		threads, reviewID, nodeID, err := data.FetchCommentsAndReview(m.pr.Number)
 		return commentsAndReviewMsg{threads: threads, reviewID: reviewID, reviewNodeID: nodeID, err: err}
 	}
 }
@@ -460,23 +458,19 @@ func (m Model) loadCommentsAndReview() tea.Cmd {
 // refreshCmd fetches diff files, comments+review, and viewed files,
 // returning a single refreshDoneMsg when all complete.
 func (m Model) refreshCmd() tea.Cmd {
-	svc := m.svc
 	prNumber := m.pr.Number
 	prNodeID := m.pr.NodeID
 	return func() tea.Msg {
-		ctx := context.Background()
 		var result refreshDoneMsg
 
-		// Fetch files
-		files, err := svc.FetchDiffFiles(ctx, prNumber)
+		files, err := data.FetchDiffFiles(prNumber)
 		if err != nil {
 			result.err = fmt.Errorf("diff: %w", err)
 			return result
 		}
 		result.files = files
 
-		// Fetch threads and pending review atomically
-		threads, reviewID, nodeID, err := svc.FetchCommentsAndReview(ctx, prNumber)
+		threads, reviewID, nodeID, err := data.FetchCommentsAndReview(prNumber)
 		if err != nil {
 			result.err = fmt.Errorf("comments: %w", err)
 			return result
@@ -485,9 +479,8 @@ func (m Model) refreshCmd() tea.Cmd {
 		result.reviewID = reviewID
 		result.reviewNodeID = nodeID
 
-		// Fetch viewed files
 		if prNodeID != "" {
-			viewed, err := svc.FetchViewedFiles(ctx, prNodeID)
+			viewed, err := data.FetchViewedFiles(prNodeID)
 			if err != nil {
 				result.err = fmt.Errorf("viewed: %w", err)
 				return result
@@ -503,13 +496,12 @@ func (m Model) refreshCmd() tea.Cmd {
 // reviewNodeID is passed as a fast-path hint; the service falls back to
 // fetch-or-create if the hint is empty or stale.
 func (m Model) addReviewCommentCmd(tempID int, path string, line, startLine int, side, body string) tea.Cmd {
-	svc := m.svc
 	currentUser := m.currentUser
 	prNumber := m.pr.Number
 	cachedNodeID := m.pendingReview.ReviewNodeID
 
 	return func() tea.Msg {
-		forgeID, forgeNodeID, reviewID, reviewNodeID, err := svc.AddReviewComment(context.Background(), prNumber, cachedNodeID, path, line, startLine, side, body)
+		forgeID, forgeNodeID, reviewID, reviewNodeID, err := data.AddReviewComment(prNumber, cachedNodeID, path, line, startLine, side, body)
 		if err != nil {
 			return commentAddedMsg{tempID: tempID, reviewID: reviewID, reviewNodeID: reviewNodeID, err: err}
 		}
@@ -531,13 +523,12 @@ func (m Model) addReviewCommentCmd(tempID int, path string, line, startLine int,
 
 // replyToReviewCommentCmd adds a reply to an existing thread via the service.
 func (m Model) replyToReviewCommentCmd(tempID int, commentNodeID, body string) tea.Cmd {
-	svc := m.svc
 	currentUser := m.currentUser
 	prNumber := m.pr.Number
 	cachedNodeID := m.pendingReview.ReviewNodeID
 
 	return func() tea.Msg {
-		forgeID, nodeID, _, reviewNodeID, err := svc.ReplyToReviewComment(context.Background(), prNumber, cachedNodeID, commentNodeID, body)
+		forgeID, nodeID, _, reviewNodeID, err := data.ReplyToReviewComment(prNumber, cachedNodeID, commentNodeID, body)
 		if err != nil {
 			return commentAddedMsg{tempID: tempID, reviewNodeID: reviewNodeID, err: err}
 		}
@@ -560,10 +551,9 @@ func (m Model) deleteCommentCmd(commentID int) tea.Cmd {
 	if commentID <= 0 {
 		return nil // temp/optimistic comment, nothing to delete on server
 	}
-	svc := m.svc
 	prNumber := m.pr.Number
 	return func() tea.Msg {
-		err := svc.DeleteReviewComment(context.Background(), prNumber, commentID)
+		err := data.DeleteReviewComment(prNumber, commentID)
 		return commentDeletedMsg{commentID: commentID, err: err}
 	}
 }
@@ -572,19 +562,17 @@ func (m Model) editCommentCmd(commentID int, body, oldBody string) tea.Cmd {
 	if commentID <= 0 {
 		return nil
 	}
-	svc := m.svc
 	prNumber := m.pr.Number
 	return func() tea.Msg {
-		err := svc.EditReviewComment(context.Background(), prNumber, commentID, body)
+		err := data.EditReviewComment(prNumber, commentID, body)
 		return commentEditedMsg{commentID: commentID, body: body, oldBody: oldBody, err: err}
 	}
 }
 
 func (m Model) fetchIssueCommentsCmd() tea.Cmd {
-	svc := m.svc
 	prNumber := m.pr.Number
 	return func() tea.Msg {
-		comments, err := svc.FetchIssueComments(context.Background(), prNumber)
+		comments, err := data.FetchIssueComments(prNumber)
 		return issueCommentsMsg{comments: comments, err: err}
 	}
 }
@@ -1150,8 +1138,8 @@ func (m *Model) copyForgeLink() tea.Cmd {
 
 	file := m.files[m.nav.cursor.FileIdx]
 	sha := m.pr.HeadSHA
-	owner := m.svc.RepoOwner()
-	repo := m.svc.RepoName()
+	owner := data.RepoOwner()
+	repo := data.RepoName()
 
 	// Build base blob URL
 	url := fmt.Sprintf("https://github.com/%s/%s/blob/%s/%s", owner, repo, sha, file.Path)

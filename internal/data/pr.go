@@ -1,7 +1,6 @@
-package github
+package data
 
 import (
-	"context"
 	"crypto/sha256"
 	"fmt"
 	"log/slog"
@@ -82,43 +81,35 @@ type graphqlPRNode struct {
 	} `json:"commits"`
 }
 
-// graphqlCountByState represents a count + state pair from checkRunCountsByState / statusContextCountsByState.
 type graphqlCountByState struct {
 	Count int    `json:"count"`
 	State string `json:"state"`
 }
 
-// graphqlCheckContext represents a union of CheckRun | StatusContext from the API.
 type graphqlCheckContext struct {
-	TypeName string `json:"__typename"`
-	// CheckRun fields
+	TypeName    string     `json:"__typename"`
 	Name        string     `json:"name"`
 	Status      string     `json:"status"`
 	Conclusion  string     `json:"conclusion"`
 	StartedAt   *time.Time `json:"startedAt"`
 	CompletedAt *time.Time `json:"completedAt"`
 	DetailsURL  string     `json:"detailsUrl"`
-	// StatusContext fields
-	Context   string     `json:"context"`
-	State     string     `json:"state"`
-	TargetURL string     `json:"targetUrl"`
-	CreatedAt *time.Time `json:"createdAt"`
+	Context     string     `json:"context"`
+	State       string     `json:"state"`
+	TargetURL   string     `json:"targetUrl"`
+	CreatedAt   *time.Time `json:"createdAt"`
 }
 
-// graphqlPageInfo holds cursor-based pagination state from GraphQL connections.
 type graphqlPageInfo struct {
 	HasNextPage bool   `json:"hasNextPage"`
 	EndCursor   string `json:"endCursor"`
 }
 
-// graphqlReviewer handles the union type (User | Team) in requestedReviewer.
 type graphqlReviewer struct {
-	// Team fields
 	Slug         string `json:"slug"`
 	Organization struct {
 		Login string `json:"login"`
 	} `json:"organization"`
-	// User fields (login is present on both User and Team via typename)
 	Login string `json:"login"`
 }
 
@@ -135,39 +126,34 @@ type graphqlPRResponse struct {
 	} `json:"search"`
 }
 
-// listPRsCacheKey returns the cache key for a ListPRs qualifier.
 func listPRsCacheKey(qualifier string) string {
 	h := sha256.Sum256([]byte(qualifier))
 	return fmt.Sprintf("listprs__%x", h[:8])
 }
 
-// ListPRs fetches PRs based on the given filter.
-func (c *Client) ListPRs(_ context.Context, filter review.PRFilter) ([]review.PullRequest, error) {
+// FetchPullRequests fetches PRs based on the given filter.
+func FetchPullRequests(filter review.PRFilter) ([]review.PullRequest, error) {
 	key := listPRsCacheKey(filter.Qualifier)
 	var cached []review.PullRequest
-	if c.cache.Get(key, &cached) {
-		slog.Debug("ListPRs: cache hit", "qualifier", filter.Qualifier, "count", len(cached))
+	if repoCache.Get(key, &cached) {
+		slog.Debug("FetchPullRequests: cache hit", "qualifier", filter.Qualifier, "count", len(cached))
 		return cached, nil
 	}
 
-	slog.Debug("ListPRs: cache miss, fetching", "qualifier", filter.Qualifier)
-	prs, err := c.searchPRs(filter.Qualifier)
+	slog.Debug("FetchPullRequests: cache miss, fetching", "qualifier", filter.Qualifier)
+	prs, err := searchPRs(filter.Qualifier)
 	if err != nil {
 		return nil, err
 	}
 
-	c.cache.Set(key, prs, c.prTTL)
-	slog.Debug("ListPRs: fetched and cached", "qualifier", filter.Qualifier, "count", len(prs))
+	repoCache.Set(key, prs, prTTL)
+	slog.Debug("FetchPullRequests: fetched and cached", "qualifier", filter.Qualifier, "count", len(prs))
 	return prs, nil
 }
 
-// searchPRs runs a single GitHub search query and returns matching PRs.
-func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
-	query := fmt.Sprintf("is:pr repo:%s/%s %s sort:updated-desc", c.owner, c.repo, qualifier)
+func searchPRs(qualifier string) ([]review.PullRequest, error) {
+	query := fmt.Sprintf("is:pr repo:%s/%s %s sort:updated-desc", owner, repo, qualifier)
 
-	// Lightweight list query — scalar fields only for the table rows.
-	// Nested data (check runs, reviews, review requests) are fetched
-	// lazily via GetPR when a PR is selected.
 	graphqlQuery := fmt.Sprintf(`
 	query($query: String!) {
 		viewer { login }
@@ -195,11 +181,11 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 				}
 			}
 		}
-	}`, c.pageSize)
+	}`, pageSize)
 
 	slog.Debug("searching PRs", "query", query)
 	var resp graphqlPRResponse
-	err := c.graphql.Do(graphqlQuery, map[string]interface{}{
+	err := graphql.Do(graphqlQuery, map[string]any{
 		"query": query,
 	}, &resp)
 	if err != nil {
@@ -220,9 +206,6 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 	return prs, nil
 }
 
-// nodeToPR converts a GraphQL node to a domain PullRequest.
-// viewer is the authenticated user's login (used to extract their review state);
-// pass "" if unknown.
 func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 	labels := make([]string, 0, len(node.Labels.Nodes))
 	for _, l := range node.Labels.Nodes {
@@ -242,8 +225,6 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		}
 	}
 
-	// Build per-reviewer statuses.
-	// Start with completed reviews (latestReviews), then add pending requests.
 	reviewerMap := make(map[string]review.Reviewer)
 	var myReviewState string
 	for _, rv := range node.LatestReviews.Nodes {
@@ -259,7 +240,6 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 			myReviewState = rv.State
 		}
 	}
-	// Add pending user reviewers (requested but haven't reviewed yet)
 	for _, rr := range node.ReviewRequests.Nodes {
 		r := rr.RequestedReviewer
 		if r.Login != "" {
@@ -284,7 +264,6 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		reviewers = append(reviewers, r)
 	}
 
-	// Extract CI status from the last commit's status check rollup
 	var checksPass *bool
 	var checkRuns []review.CheckRun
 	var checksTotal int
@@ -349,7 +328,6 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 		MyReviewState:  myReviewState,
 	}
 
-	// Log all merge-status-related fields for debugging.
 	slog.Debug("nodeToPR: merge status",
 		"number", pr.Number,
 		"title", pr.Title,
@@ -391,7 +369,6 @@ func nodeToPR(node graphqlPRNode, viewer string) review.PullRequest {
 	return pr
 }
 
-// graphqlContextToCheckRun converts a GraphQL check context (CheckRun or StatusContext) to a domain CheckRun.
 func graphqlContextToCheckRun(ctx graphqlCheckContext) review.CheckRun {
 	slog.Debug("graphqlContextToCheckRun: raw context",
 		"typename", ctx.TypeName,
@@ -415,13 +392,11 @@ func graphqlContextToCheckRun(ctx graphqlCheckContext) review.CheckRun {
 			cr.CompletedAt = *ctx.CompletedAt
 		}
 	} else {
-		// StatusContext
 		cr.Name = ctx.Context
 		cr.DetailsURL = ctx.TargetURL
 		if ctx.CreatedAt != nil {
 			cr.StartedAt = *ctx.CreatedAt
 		}
-		// Map StatusContext states to CheckRun equivalents
 		switch ctx.State {
 		case "SUCCESS":
 			cr.Status = review.CheckRunCompleted
@@ -437,8 +412,6 @@ func graphqlContextToCheckRun(ctx graphqlCheckContext) review.CheckRun {
 	return cr
 }
 
-// aggregateCountsByState combines checkRunCountsByState and statusContextCountsByState
-// into a single CheckCounts summary.
 func aggregateCountsByState(crCounts, scCounts []graphqlCountByState, total int) review.CheckCounts {
 	cc := review.CheckCounts{Total: total}
 	for _, c := range crCounts {
@@ -466,12 +439,12 @@ func aggregateCountsByState(crCounts, scCounts []graphqlCountByState, total int)
 	return cc
 }
 
-// GetPR fetches a single PR by number, including the full body.
-func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, error) {
+// FetchPR fetches a single PR by number with full details.
+func FetchPR(number int) (*review.PullRequest, error) {
 	key := fmt.Sprintf("pr__%d", number)
 	var cached review.PullRequest
-	if c.cache.Get(key, &cached) {
-		slog.Debug("GetPR: cache hit",
+	if repoCache.Get(key, &cached) {
+		slog.Debug("FetchPR: cache hit",
 			"number", number,
 			"mergeState", cached.MergeState,
 			"mergeable", cached.Mergeable,
@@ -566,10 +539,10 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 		}
 	}`
 
-	slog.Debug("fetching PR", "owner", c.owner, "repo", c.repo, "number", number)
-	err := c.graphql.Do(query, map[string]interface{}{
-		"owner":  c.owner,
-		"repo":   c.repo,
+	slog.Debug("fetching PR", "owner", owner, "repo", repo, "number", number)
+	err := graphql.Do(query, map[string]any{
+		"owner":  owner,
+		"repo":   repo,
 		"number": number,
 	}, &resp)
 	if err != nil {
@@ -577,12 +550,11 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 		return nil, fmt.Errorf("failed to fetch PR #%d: %w", number, err)
 	}
 
-	// Paginate remaining check contexts if there are more than the first page.
 	node := resp.Repository.PullRequest
 	if len(node.Commits.Nodes) > 0 {
 		rollup := node.Commits.Nodes[len(node.Commits.Nodes)-1].Commit.StatusCheckRollup
 		if rollup.Contexts.PageInfo.HasNextPage {
-			extra, err := c.fetchRemainingCheckContexts(number, rollup.Contexts.PageInfo.EndCursor)
+			extra, err := fetchRemainingCheckContexts(number, rollup.Contexts.PageInfo.EndCursor)
 			if err != nil {
 				slog.Warn("failed to paginate check contexts", "number", number, "error", err)
 			} else {
@@ -595,10 +567,9 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 	pr := nodeToPR(node, "")
 	pr.Enriched = true
 
-	// Best-effort: detect which files have merge conflicts using local git.
 	if pr.Mergeable == "CONFLICTING" {
 		pr.ConflictFiles = git.MergeConflictFiles("origin/"+pr.Base, pr.HeadSHA)
-		slog.Debug("GetPR: conflict files",
+		slog.Debug("FetchPR: conflict files",
 			"number", number,
 			"base", "origin/"+pr.Base,
 			"headSHA", pr.HeadSHA,
@@ -606,15 +577,13 @@ func (c *Client) GetPR(_ context.Context, number int) (*review.PullRequest, erro
 		)
 	}
 
-	c.cache.Set(key, pr, c.prTTL)
-	slog.Debug("GetPR: cached result", "number", number)
+	repoCache.Set(key, pr, prTTL)
+	slog.Debug("FetchPR: cached result", "number", number)
 	return &pr, nil
 }
 
-// fetchRemainingCheckContexts paginates through all remaining check contexts
-// for a PR's last commit, starting after the given cursor.
-func (c *Client) fetchRemainingCheckContexts(number int, after string) ([]graphqlCheckContext, error) {
-	const pageSize = 100
+func fetchRemainingCheckContexts(number int, after string) ([]graphqlCheckContext, error) {
+	const ctxPageSize = 100
 	var all []graphqlCheckContext
 	cursor := after
 
@@ -673,9 +642,9 @@ func (c *Client) fetchRemainingCheckContexts(number int, after string) ([]graphq
 			}
 		}`
 
-		err := c.graphql.Do(query, map[string]interface{}{
-			"owner":  c.owner,
-			"repo":   c.repo,
+		err := graphql.Do(query, map[string]any{
+			"owner":  owner,
+			"repo":   repo,
 			"number": number,
 			"after":  cursor,
 		}, &resp)
@@ -705,10 +674,10 @@ func (c *Client) fetchRemainingCheckContexts(number int, after string) ([]graphq
 }
 
 // FetchCommits fetches individual commits for a PR.
-func (c *Client) FetchCommits(_ context.Context, number int) ([]review.Commit, error) {
+func FetchCommits(number int) ([]review.Commit, error) {
 	key := fmt.Sprintf("commits__%d", number)
 	var cached []review.Commit
-	if c.cache.Get(key, &cached) {
+	if repoCache.Get(key, &cached) {
 		return cached, nil
 	}
 
@@ -775,9 +744,9 @@ func (c *Client) FetchCommits(_ context.Context, number int) ([]review.Commit, e
 		} `json:"repository"`
 	}
 
-	err := c.graphql.Do(query, map[string]interface{}{
-		"owner":  c.owner,
-		"repo":   c.repo,
+	err := graphql.Do(query, map[string]any{
+		"owner":  owner,
+		"repo":   repo,
 		"number": number,
 	}, &resp)
 	if err != nil {
@@ -815,6 +784,6 @@ func (c *Client) FetchCommits(_ context.Context, number int) ([]review.Commit, e
 		})
 	}
 
-	c.cache.Set(key, commits, c.prTTL)
+	repoCache.Set(key, commits, prTTL)
 	return commits, nil
 }

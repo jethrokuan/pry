@@ -1,7 +1,6 @@
-package github
+package data
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 
@@ -12,7 +11,7 @@ import (
 type prFile struct {
 	SHA              string `json:"sha"`
 	Filename         string `json:"filename"`
-	Status           string `json:"status"` // added, removed, modified, renamed
+	Status           string `json:"status"`
 	Additions        int    `json:"additions"`
 	Deletions        int    `json:"deletions"`
 	Changes          int    `json:"changes"`
@@ -21,13 +20,12 @@ type prFile struct {
 }
 
 // FetchDiffFiles fetches and parses the changed files for a PR.
-// Paginates automatically to retrieve all files.
-func (c *Client) FetchDiffFiles(_ context.Context, number int) ([]diff.DiffFile, error) {
+func FetchDiffFiles(number int) ([]diff.DiffFile, error) {
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/files?per_page=100&page=%%d",
-		c.owner, c.repo, number)
+		owner, repo, number)
 
 	slog.Debug("fetching diff files", "prNumber", number, "endpoint", endpoint)
-	allFiles, err := paginateREST[prFile](c.rest, endpoint)
+	allFiles, err := paginateREST[prFile](endpoint)
 	if err != nil {
 		slog.Error("failed to fetch PR files", "prNumber", number, "error", err)
 		return nil, fmt.Errorf("failed to fetch PR files: %w", err)
@@ -43,14 +41,14 @@ type compareResponse struct {
 }
 
 // FetchCommitDiff fetches the diff between two commits using the compare API.
-func (c *Client) FetchCommitDiff(_ context.Context, baseSHA, headSHA string) ([]diff.DiffFile, error) {
+func FetchCommitDiff(baseSHA, headSHA string) ([]diff.DiffFile, error) {
 	endpoint := fmt.Sprintf("repos/%s/%s/compare/%s...%s?per_page=100",
-		c.owner, c.repo, baseSHA, headSHA)
+		owner, repo, baseSHA, headSHA)
 
 	slog.Debug("fetching commit diff", "base", baseSHA, "head", headSHA)
 
 	var resp compareResponse
-	if err := c.rest.Get(endpoint, &resp); err != nil {
+	if err := rest.Get(endpoint, &resp); err != nil {
 		slog.Error("failed to fetch commit diff", "base", baseSHA, "head", headSHA, "error", err)
 		return nil, fmt.Errorf("failed to fetch commit diff: %w", err)
 	}
@@ -59,7 +57,6 @@ func (c *Client) FetchCommitDiff(_ context.Context, baseSHA, headSHA string) ([]
 	return filesToDiffFiles(resp.Files), nil
 }
 
-// filesToDiffFiles converts API file responses to parsed DiffFiles.
 func filesToDiffFiles(files []prFile) []diff.DiffFile {
 	patches := make([]diff.FilePatch, len(files))
 	for i, f := range files {

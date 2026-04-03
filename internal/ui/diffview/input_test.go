@@ -79,7 +79,7 @@ func newInputTestModel() Model {
 		Base:   "main",
 	}
 	pr.StartReview()
-	m := New(nil, pr)
+	m := New(pr)
 	m.loading = false
 
 	// Inject test files

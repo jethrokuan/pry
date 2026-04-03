@@ -15,10 +15,9 @@ import (
 	"github.com/jethrokuan/pry/internal/app"
 	"github.com/jethrokuan/pry/internal/cache"
 	"github.com/jethrokuan/pry/internal/config"
+	"github.com/jethrokuan/pry/internal/data"
 	gitpkg "github.com/jethrokuan/pry/internal/git"
-	gh "github.com/jethrokuan/pry/internal/github"
 	"github.com/jethrokuan/pry/internal/logging"
-	"github.com/jethrokuan/pry/internal/review"
 )
 
 // version is set by GoReleaser via ldflags.
@@ -77,14 +76,11 @@ func main() {
 		c = cache.Noop{}
 	}
 
-	// Create GitHub client (implements review.Service directly)
-	ghClient, err := gh.NewClient(owner, repo, c, prTTL, cfg.PageSize, cfg.APITimeoutDuration())
-	if err != nil {
+	// Initialize the GitHub data layer.
+	if err := data.Init(owner, repo, c, prTTL, cfg.PageSize, cfg.APITimeoutDuration()); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-
-	var svc review.Service = ghClient
 
 	// Load filters and columns from config (falls back to defaults)
 	filters := cfg.PRFilters()
@@ -92,9 +88,9 @@ func main() {
 	// Create the app — optionally jump to a specific PR
 	var model app.Model
 	if cli.PRNumber > 0 {
-		model = app.NewWithPR(svc, cfg, cli.PRNumber, filters)
+		model = app.NewWithPR(cfg, cli.PRNumber, filters)
 	} else {
-		model = app.New(svc, cfg, filters)
+		model = app.New(cfg, filters)
 	}
 
 	p := tea.NewProgram(model)

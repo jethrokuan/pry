@@ -9,77 +9,17 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/jethrokuan/pry/internal/config"
-	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/diffview"
 	"github.com/jethrokuan/pry/internal/ui/prlist"
 	"github.com/jethrokuan/pry/internal/ui/submit"
 )
 
-// stubService is a minimal review.Service for testing app routing.
-type stubService struct{}
-
-func (s *stubService) RepoOwner() string                           { return "owner" }
-func (s *stubService) RepoName() string                            { return "repo" }
-func (s *stubService) CurrentUser(context.Context) (string, error) { return "testuser", nil }
-func (s *stubService) UserTeams(context.Context) ([]string, error) { return nil, nil }
-func (s *stubService) ListPRs(_ context.Context, _ review.PRFilter) ([]review.PullRequest, error) {
-	return nil, nil
-}
-func (s *stubService) GetPR(_ context.Context, _ int) (*review.PullRequest, error) {
-	return nil, nil
-}
-func (s *stubService) FetchDiffFiles(_ context.Context, _ int) ([]diff.DiffFile, error) {
-	return nil, nil
-}
-func (s *stubService) FetchIssueComments(_ context.Context, _ int) ([]review.IssueComment, error) {
-	return nil, nil
-}
-func (s *stubService) FetchCommits(_ context.Context, _ int) ([]review.Commit, error) {
-	return nil, nil
-}
-func (s *stubService) FetchCommitDiff(_ context.Context, _, _ string) ([]diff.DiffFile, error) {
-	return nil, nil
-}
-func (s *stubService) FetchCommentsAndReview(_ context.Context, _ int) ([]review.Thread, int, string, error) {
-	return nil, 0, "", nil
-}
-func (s *stubService) CreatePendingReview(_ context.Context, _ int) (int, string, error) {
-	return 0, "", nil
-}
-func (s *stubService) AddReviewComment(_ context.Context, _ int, _ string, _ string, _, _ int, _, _ string) (int, string, int, string, error) {
-	return 0, "", 0, "", nil
-}
-func (s *stubService) ReplyToReviewComment(_ context.Context, _ int, _ string, _, _ string) (int, string, int, string, error) {
-	return 0, "", 0, "", nil
-}
-func (s *stubService) DeleteReviewComment(_ context.Context, _, _ int) error { return nil }
-func (s *stubService) EditReviewComment(_ context.Context, _, _ int, _ string) error {
-	return nil
-}
-func (s *stubService) SubmitReview(_ context.Context, _ *review.PullRequest, _ *review.PendingReview) error {
-	return nil
-}
-func (s *stubService) FetchViewedFiles(_ context.Context, _ string) (map[string]bool, error) {
-	return nil, nil
-}
-func (s *stubService) MarkFileAsViewed(_ context.Context, _, _ string) error   { return nil }
-func (s *stubService) UnmarkFileAsViewed(_ context.Context, _, _ string) error { return nil }
-func (s *stubService) ListMentionableUsers(_ context.Context) ([]review.MentionableUser, error) {
-	return nil, nil
-}
-func (s *stubService) ClosePR(_ context.Context, _ int) error               { return nil }
-func (s *stubService) ReopenPR(_ context.Context, _ int) error              { return nil }
-func (s *stubService) MergePR(_ context.Context, _ int) error               { return nil }
-func (s *stubService) MarkReadyForReview(_ context.Context, _ string) error { return nil }
-func (s *stubService) AssignPR(_ context.Context, _ int, _ string) error    { return nil }
-func (s *stubService) UnassignPR(_ context.Context, _ int, _ string) error  { return nil }
-
 // defaultFilters provides a minimal filter set so prlist.Init() doesn't panic.
 var defaultFilters = []review.PRFilter{{Name: "Default", Qualifier: "is:open"}}
 
 func newTestModel() Model {
-	return New(&stubService{}, config.Config{}, defaultFilters)
+	return New(config.Config{}, defaultFilters)
 }
 
 func testPR() *review.PullRequest {
@@ -240,7 +180,7 @@ var _ = Describe("App message routing", func() {
 
 	Describe("NewWithPR", func() {
 		It("starts on the diff view screen", func() {
-			m := NewWithPR(&stubService{}, config.Config{}, 99, defaultFilters)
+			m := NewWithPR(config.Config{}, 99, defaultFilters)
 
 			Expect(m.screen).To(Equal(ScreenDiffView))
 			Expect(m.initialPR).To(Equal(99))
@@ -277,11 +217,9 @@ var _ = Describe("App message routing", func() {
 		})
 
 		It("preserves PendingReview when enriching PR", func() {
-			// The pending review was created during PRSelectedMsg
 			originalReview := m.selectedPR.PendingReview
 			Expect(originalReview).NotTo(BeNil())
 
-			// Simulate enriched PR arriving (without PendingReview)
 			enriched := &review.PullRequest{
 				Number: 42,
 				Title:  "Enriched Title",
@@ -295,7 +233,6 @@ var _ = Describe("App message routing", func() {
 		})
 
 		It("preserves Threads when enriching PR", func() {
-			// Set up threads on selected PR before enrichment
 			m.selectedPR.Threads = []review.Thread{
 				{Path: "main.go", Line: 10, Comments: []review.Comment{{Body: "fix this"}}},
 			}
@@ -313,7 +250,6 @@ var _ = Describe("App message routing", func() {
 		It("does not update PR when error occurs", func() {
 			m = update(m, prBodyLoadedMsg{err: fmt.Errorf("network error")})
 
-			// Original PR data should be unchanged
 			Expect(m.selectedPR.Number).To(Equal(42))
 			Expect(m.selectedPR.Title).To(Equal("Test PR"))
 		})
@@ -351,7 +287,6 @@ var _ = Describe("App message routing", func() {
 			users := []review.MentionableUser{{Login: "alice"}}
 			m = update(m, mentionableUsersMsg{users: users})
 
-			// Verify users are stored on the model
 			Expect(m.mentionableUsers).To(HaveLen(1))
 		})
 	})
@@ -372,7 +307,6 @@ var _ = Describe("App message routing", func() {
 			enriched := &review.PullRequest{Number: 42, Title: "Should be ignored"}
 			m = update(m, prBodyLoadedMsg{pr: enriched})
 
-			// Should not set selectedPR since we're on the wrong screen
 			Expect(m.selectedPR).To(BeNil())
 		})
 	})
@@ -385,21 +319,18 @@ var _ = Describe("App message routing", func() {
 
 			m = update(m, diffview.SubmitReviewMsg{})
 			Expect(m.screen).To(Equal(ScreenSubmit))
-			// The PendingReview should still be present on the selected PR
 			Expect(m.selectedPR.PendingReview).NotTo(BeNil())
 		})
 	})
 
 	Describe("SubmittedMsg resets PR list", func() {
 		It("creates a fresh PR list after submission", func() {
-			// Navigate to submit screen
 			m = update(m, prlist.PRSelectedMsg{PR: testPR()})
 			m = update(m, diffview.SubmitReviewMsg{})
 			Expect(m.screen).To(Equal(ScreenSubmit))
 
 			m = update(m, submit.SubmittedMsg{})
 			Expect(m.screen).To(Equal(ScreenPRList))
-			// The PR list should be in a fresh state (no selected PR)
 			Expect(m.selectedPR).To(BeNil())
 		})
 	})
@@ -416,7 +347,6 @@ var _ = Describe("App message routing", func() {
 			cmd := m.windowSizeCmd()
 			Expect(cmd).NotTo(BeNil())
 
-			// Execute the cmd and verify it produces a WindowSizeMsg
 			msg := cmd()
 			wsm, ok := msg.(tea.WindowSizeMsg)
 			Expect(ok).To(BeTrue())
@@ -432,7 +362,6 @@ var _ = Describe("App message routing", func() {
 				Teams: []string{"org/team1"},
 			}
 			opts := m.diffviewOpts()
-			// WithUserIdentity and WithCurrentUser are added
 			Expect(len(opts)).To(BeNumerically(">=", 2))
 		})
 
@@ -443,10 +372,8 @@ var _ = Describe("App message routing", func() {
 		})
 
 		It("returns no identity or mentionable options by default", func() {
-			// AI agent may or may not be present depending on env, so just
-			// check that no identity/mentionable/ownerFilter options are added.
-			m.aiAgent = nil // isolate from env
-			m.useJJ = false // isolate from env (jj detection)
+			m.aiAgent = nil
+			m.useJJ = false
 			opts := m.diffviewOpts()
 			Expect(opts).To(BeEmpty())
 		})
@@ -485,7 +412,6 @@ var _ = Describe("App message routing", func() {
 
 	Describe("screen routing falls through to sub-model", func() {
 		It("forwards unhandled messages to prlist on PR list screen", func() {
-			// WindowSizeMsg goes through global handler and then to prlist
 			m = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 			Expect(m.screen).To(Equal(ScreenPRList))
 		})
@@ -494,7 +420,6 @@ var _ = Describe("App message routing", func() {
 			m = update(m, prlist.PRSelectedMsg{PR: testPR()})
 			Expect(m.screen).To(Equal(ScreenDiffView))
 
-			// An unrelated message should not change the screen
 			m = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 			Expect(m.screen).To(Equal(ScreenDiffView))
 		})
@@ -504,7 +429,6 @@ var _ = Describe("App message routing", func() {
 			m = update(m, diffview.SubmitReviewMsg{})
 			Expect(m.screen).To(Equal(ScreenSubmit))
 
-			// An unrelated message should not change the screen
 			m = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 			Expect(m.screen).To(Equal(ScreenSubmit))
 		})

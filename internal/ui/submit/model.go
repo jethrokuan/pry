@@ -1,7 +1,6 @@
 package submit
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/jethrokuan/pry/internal/data"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/styles"
 )
@@ -43,7 +43,6 @@ var keys = KeyMap{
 
 // Model is the submit review screen.
 type Model struct {
-	svc           review.Service
 	pr            *review.PullRequest
 	pendingReview *review.PendingReview
 	currentUser   string
@@ -58,7 +57,7 @@ type Model struct {
 }
 
 // New creates a submit model.
-func New(svc review.Service, pr *review.PullRequest, currentUser string) Model {
+func New(pr *review.PullRequest, currentUser string) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Review summary (optional)..."
 	ta.CharLimit = 0
@@ -67,7 +66,6 @@ func New(svc review.Service, pr *review.PullRequest, currentUser string) Model {
 	s.Spinner = spinner.Dot
 
 	return Model{
-		svc:           svc,
 		pr:            pr,
 		pendingReview: pr.PendingReview,
 		currentUser:   currentUser,
@@ -151,10 +149,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m *Model) submitReview() tea.Cmd {
 	m.pendingReview.Body = m.textarea.Value()
 	m.submitting = true
+	pr := m.pr
+	rev := m.pendingReview
 	return tea.Batch(
 		m.spinner.Tick,
 		func() tea.Msg {
-			err := m.svc.SubmitReview(context.Background(), m.pr, m.pendingReview)
+			err := data.SubmitReview(pr, rev)
 			return submitResultMsg{err: err}
 		},
 	)

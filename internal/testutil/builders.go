@@ -93,43 +93,42 @@ func SimpleDiffFile(path string, addedLines ...string) diff.DiffFile {
 
 // --- Model factories ---
 
-// NewDiffViewModel creates a diffview.Model with a mock service and test PR.
+// NewDiffViewModel creates a diffview.Model with a test PR.
 // The returned model is in its initial loading state.
-func NewDiffViewModel(svc review.Service, opts ...diffview.Option) diffview.Model {
+func NewDiffViewModel(opts ...diffview.Option) diffview.Model {
 	pr := NewPR().BuildPtr()
 	pr.StartReview()
-	return diffview.New(svc, pr, opts...)
+	return diffview.New(pr, opts...)
 }
 
 // NewDiffViewModelWithPR creates a diffview.Model with a specific PR.
-func NewDiffViewModelWithPR(svc review.Service, pr *review.PullRequest, opts ...diffview.Option) diffview.Model {
+func NewDiffViewModelWithPR(pr *review.PullRequest, opts ...diffview.Option) diffview.Model {
 	if pr.PendingReview == nil {
 		pr.StartReview()
 	}
-	return diffview.New(svc, pr, opts...)
+	return diffview.New(pr, opts...)
 }
 
 // NewDiffViewModelWithReview creates a diffview.Model with a specific PR and pending review.
-// Deprecated: Use NewDiffViewModelWithPR instead. The review is now owned by the PR.
-func NewDiffViewModelWithReview(svc review.Service, pr *review.PullRequest, rev *review.PendingReview, opts ...diffview.Option) diffview.Model {
+func NewDiffViewModelWithReview(pr *review.PullRequest, rev *review.PendingReview, opts ...diffview.Option) diffview.Model {
 	pr.PendingReview = rev
-	return diffview.New(svc, pr, opts...)
+	return diffview.New(pr, opts...)
 }
 
-// NewPRListModel creates a prlist.Model with a mock service and optional filters.
-func NewPRListModel(svc review.Service, filters ...review.PRFilter) prlist.Model {
+// NewPRListModel creates a prlist.Model with optional filters.
+func NewPRListModel(filters ...review.PRFilter) prlist.Model {
 	if len(filters) == 0 {
 		filters = []review.PRFilter{
 			{Name: "Default", Qualifier: "is:open"},
 		}
 	}
-	return prlist.New(svc, filters)
+	return prlist.New(filters)
 }
 
-// NewSubmitModel creates a submit.Model with a mock service and PR.
-func NewSubmitModel(svc review.Service, pr *review.PullRequest) submit.Model {
+// NewSubmitModel creates a submit.Model with a PR.
+func NewSubmitModel(pr *review.PullRequest) submit.Model {
 	if pr.PendingReview == nil {
 		pr.StartReview()
 	}
-	return submit.New(svc, pr, "test-user")
+	return submit.New(pr, "test-user")
 }

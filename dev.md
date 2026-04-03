@@ -4,7 +4,7 @@
 
 ### PullRequest
 
-The central domain type. Represents a forge-agnostic pull/merge request.
+The central domain type. Represents a GitHub pull request.
 
 ```
 PullRequest
@@ -27,7 +27,7 @@ Models GitHub's pending/draft review — at most one per user per PR. Created vi
 
 ```
 PendingReview
-├── ReviewID int          ← forge review ID (0 if not yet created on forge)
+├── ReviewID int          ← GitHub review ID (0 if not yet created)
 ├── ReviewNodeID string   ← GraphQL ID for mutations
 ├── Comments []InlineComment
 ├── Body string           ← review summary
@@ -35,7 +35,7 @@ PendingReview
 └── ViewedFiles map[string]bool
 ```
 
-The review is created lazily on the forge — `ReviewID` starts at 0 and gets populated when the first comment triggers `CreatePendingReview`. Comments are synced individually via `AddReviewComment` and tracked by `SyncStatus`.
+The review is created lazily on GitHub — `ReviewID` starts at 0 and gets populated when the first comment triggers `data.CreatePendingReview()`. Comments are synced individually via `data.AddReviewComment()` and tracked by `SyncStatus`.
 
 ### InlineComment
 
@@ -45,7 +45,7 @@ A pending comment with async sync tracking.
 InlineComment
 ├── Path, Line, StartLine, Side, Body   ← content
 ├── LocalID int       ← monotonic ID assigned locally
-├── ForgeID int       ← forge ID once synced (0 until then)
+├── ForgeID int       ← GitHub ID once synced (0 until then)
 ├── SyncStatus        ← Pending → InFlight → Complete | Failed
 └── SyncError error
 ```
@@ -54,7 +54,7 @@ InlineComment
 
 ### ExistingComment
 
-Read-only comment already submitted to the forge. Displayed alongside pending comments in the diff view.
+Read-only comment already submitted to GitHub. Displayed alongside pending comments in the diff view.
 
 ### UserIdentity
 
@@ -66,30 +66,18 @@ The authenticated user's login and team memberships. Loaded asynchronously at ap
 
 Every screen is a Bubble Tea `Model` with `Init()`, `Update(msg) (Model, Cmd)`, and `View()`. The top-level `app.Model` routes messages to the active screen.
 
-### AppContext
+### Data Layer
 
-Shared state passed to screens that need forge access:
+The `internal/data` package provides package-level functions for all GitHub API calls. Initialized once via `data.Init()` in `cmd/root.go`. UI screens call `data.*` directly — no interfaces or dependency injection.
 
-```go
-type Context struct {
-    Svc          review.Service
-    UserIdentity *review.UserIdentity  // nil until async load completes
-}
-```
-
-Allocated once in `app.New()`, passed by pointer. When `UserIdentity` loads asynchronously, it's set on the context and all screens see it.
-
-### Service Interface
-
-All UI code depends on `review.Service`, never on the GitHub adapter directly. The interface covers:
-
-- **Repo info**: `RepoOwner`, `RepoName`
-- **Auth**: `CurrentUser`, `UserTeams`
-- **PR operations**: `ListPRs`, `GetPR`, `FetchDiffFiles`
-- **Comments & review**: `FetchCommentsAndReview`, `AddReviewComment`, `DeleteReviewComment`, `EditReviewComment`
-- **Review lifecycle**: `CreatePendingReview`, `SubmitReview`
-- **Viewed files**: `FetchViewedFiles`, `MarkFileAsViewed`, `UnmarkFileAsViewed`
-- **Misc**: `ListMentionableUsers`, `UploadImage`
+Key functions:
+- **Repo info**: `data.RepoOwner()`, `data.RepoName()`
+- **Auth**: `data.CurrentUser()`, `data.UserTeams()`
+- **PR operations**: `data.FetchPullRequests()`, `data.FetchPR()`, `data.FetchDiffFiles()`
+- **Comments & review**: `data.FetchCommentsAndReview()`, `data.AddReviewComment()`, `data.DeleteReviewComment()`, `data.EditReviewComment()`
+- **Review lifecycle**: `data.CreatePendingReview()`, `data.SubmitReview()`
+- **Viewed files**: `data.FetchViewedFiles()`, `data.MarkFileAsViewed()`, `data.UnmarkFileAsViewed()`
+- **Misc**: `data.ListMentionableUsers()`
 
 ### Screen Flow
 
@@ -107,14 +95,13 @@ An alternative path goes through PRDetail before DiffView (via `StartReviewMsg`)
 
 ```
 app.Model
-├── ctx *appctx.Context         ← shared: Svc + UserIdentity
 ├── selectedPR *PullRequest     ← the active PR (nil on PR list)
 │   ├── PendingReview           ← created by pr.StartReview()
 │   └── ExistingComments        ← fetched in diffview, stored on PR
-├── prList prlist.Model         ← takes svc, filters, columns, cfg.PRList
+├── prList prlist.Model         ← takes filters; calls data.* directly
 │   ├── tabBar tabbar.Model    ← horizontal filter tab carousel
 │   └── sidebar sidebar.Model  ← toggleable PR preview pane
-├── diffView diffview.Model     ← takes ctx + pr (reads pr.PendingReview)
+├── diffView diffview.Model     ← takes pr (reads pr.PendingReview); calls data.*
 └── submit submit.Model         ← takes ctx + pr (reads pr.PendingReview)
 ```
 
@@ -150,13 +137,11 @@ This preserves review state while updating metadata (title, body, SHA, etc.).
 internal/
 ├── appctx/       AppContext (shared Svc + UserIdentity)
 ├── review/       Domain types + Service interface
-│   └── reviewtest/  Mock Service for tests
-├── github/       GitHub adapter (implements review.Service)
+├── data/         GitHub API (package-level functions, initialized via Init())
 ├── app/          Top-level model, screen routing
 ├── ui/
 │   ├── diffview/ Diff review screen (largest screen)
 │   ├── prlist/   PR list + tab bar + sidebar preview
-│   ├── prdetail/ PR metadata view
 │   ├── submit/   Review submission
 │   ├── components/tabbar/   Reusable horizontal tab carousel
 │   ├── components/sidebar/  Reusable toggleable sidebar viewport
@@ -164,6 +149,6 @@ internal/
 ├── diff/         Unified diff parser
 ├── config/       User configuration (TOML)
 ├── git/          Local git operations
-├── testutil/     Test builders + mock service
+├── testutil/     Test builders
 └── ...
 ```

@@ -1,9 +1,6 @@
 package testutil_test
 
 import (
-	"context"
-	"errors"
-
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
@@ -11,46 +8,6 @@ import (
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/testutil"
 )
-
-var _ = ginkgo.Describe("MockService", func() {
-	ginkgo.It("implements review.Service", func() {
-		var svc review.Service = &testutil.MockService{}
-		gomega.Expect(svc).NotTo(gomega.BeNil())
-	})
-
-	ginkgo.It("returns defaults when no functions are set", func() {
-		svc := &testutil.MockService{}
-		gomega.Expect(svc.RepoOwner()).To(gomega.Equal("test-owner"))
-		gomega.Expect(svc.RepoName()).To(gomega.Equal("test-repo"))
-
-		user, err := svc.CurrentUser(context.Background())
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		gomega.Expect(user).To(gomega.Equal("test-user"))
-
-		files, err := svc.FetchDiffFiles(context.Background(), 1)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		gomega.Expect(files).To(gomega.BeNil())
-	})
-
-	ginkgo.It("delegates to custom functions when set", func() {
-		expectedFiles := []diff.DiffFile{{Path: "foo.go"}}
-		svc := &testutil.MockService{
-			FetchDiffFilesFn: func(_ context.Context, number int) ([]diff.DiffFile, error) {
-				if number == 42 {
-					return expectedFiles, nil
-				}
-				return nil, errors.New("not found")
-			},
-		}
-
-		files, err := svc.FetchDiffFiles(context.Background(), 42)
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		gomega.Expect(files).To(gomega.Equal(expectedFiles))
-
-		_, err = svc.FetchDiffFiles(context.Background(), 99)
-		gomega.Expect(err).To(gomega.MatchError("not found"))
-	})
-})
 
 var _ = ginkgo.Describe("PRBuilder", func() {
 	ginkgo.It("builds a PR with defaults", func() {
@@ -101,20 +58,14 @@ var _ = ginkgo.Describe("SimpleDiffFile", func() {
 })
 
 var _ = ginkgo.Describe("Model factories", func() {
-	var svc *testutil.MockService
-
-	ginkgo.BeforeEach(func() {
-		svc = &testutil.MockService{}
-	})
-
 	ginkgo.It("NewDiffViewModel creates a model with default PR", func() {
-		m := testutil.NewDiffViewModel(svc)
+		m := testutil.NewDiffViewModel()
 		_ = m.View()
 	})
 
 	ginkgo.It("NewDiffViewModelWithPR uses the provided PR", func() {
 		pr := testutil.NewPR().BuildPtr()
-		m := testutil.NewDiffViewModelWithPR(svc, pr)
+		m := testutil.NewDiffViewModelWithPR(pr)
 		_ = m.View()
 	})
 
@@ -127,12 +78,12 @@ var _ = ginkgo.Describe("Model factories", func() {
 				{ID: -1, Body: "looks good", IsPending: true},
 			},
 		})
-		m := testutil.NewDiffViewModelWithReview(svc, pr, rev)
+		m := testutil.NewDiffViewModelWithReview(pr, rev)
 		_ = m.View()
 	})
 
 	ginkgo.It("NewPRListModel creates a model with default filter", func() {
-		m := testutil.NewPRListModel(svc)
+		m := testutil.NewPRListModel()
 		_ = m.View()
 	})
 
@@ -140,14 +91,14 @@ var _ = ginkgo.Describe("Model factories", func() {
 		filters := []review.PRFilter{
 			{Name: "Mine", Qualifier: "author:@me"},
 		}
-		m := testutil.NewPRListModel(svc, filters...)
+		m := testutil.NewPRListModel(filters...)
 		_ = m.View()
 	})
 
 	ginkgo.It("NewSubmitModel creates a model with review", func() {
 		pr := testutil.NewPR().BuildPtr()
 		pr.StartReview()
-		m := testutil.NewSubmitModel(svc, pr)
+		m := testutil.NewSubmitModel(pr)
 		_ = m.View()
 	})
 })
