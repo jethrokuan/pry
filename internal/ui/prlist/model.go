@@ -69,8 +69,6 @@ type commitsLoadedMsg struct {
 	Err      error
 }
 
-// maxEnrichPRs is the number of PRs to background-enrich after list load.
-const maxEnrichPRs = 10
 
 // KeyMap defines the key bindings for the PR list.
 type KeyMap struct {
@@ -782,53 +780,6 @@ func (m *Model) refreshSidebarPreview() tea.Cmd {
 	return nil
 }
 
-// enrichVisible kicks off background GetPR fetches for the first N PRs,
-// prioritizing the cursor PR. Returns a batched command or nil.
-func (m *Model) enrichVisible() tea.Cmd {
-	t := m.tab()
-	if len(t.prs) == 0 {
-		return nil
-	}
-
-	limit := maxEnrichPRs
-	if limit > len(t.prs) {
-		limit = len(t.prs)
-	}
-
-	// Build fetch list: cursor PR first, then others up to limit.
-	var toFetch []int
-	if t.hasCursor() && t.cur() < len(t.prs) {
-		pr := &t.prs[t.cur()]
-		if !pr.Enriched && !t.inFlight[pr.Number] {
-			toFetch = append(toFetch, pr.Number)
-			t.inFlight[pr.Number] = true
-		}
-	}
-	for i := 0; i < limit && len(toFetch) < limit; i++ {
-		pr := &t.prs[i]
-		if !pr.Enriched && !t.inFlight[pr.Number] {
-			toFetch = append(toFetch, pr.Number)
-			t.inFlight[pr.Number] = true
-		}
-	}
-
-	if len(toFetch) == 0 {
-		return nil
-	}
-
-	svc := m.svc
-	tabIdx := m.filterIdx
-	cmds := make([]tea.Cmd, 0, len(toFetch)+1)
-	for _, num := range toFetch {
-		n := num
-		cmds = append(cmds, func() tea.Msg {
-			full, err := svc.GetPR(context.Background(), n)
-			return prEnrichedMsg{tabIdx: tabIdx, PRNumber: n, FullPR: full, Err: err}
-		})
-	}
-	cmds = append(cmds, m.spinner.Tick)
-	return tea.Batch(cmds...)
-}
 
 // hasEnrichmentPending returns true if any PR enrichment is in flight
 // for the active tab.

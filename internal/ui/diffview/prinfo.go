@@ -15,6 +15,9 @@ import (
 
 // PRInfoPanel manages the PR info popup state, including scrollable content,
 // block navigation, and text search.
+// maxCollapsedLines is the maximum number of visible lines for a collapsed comment.
+const maxCollapsedLines = 10
+
 type PRInfoPanel struct {
 	active   bool
 	viewport viewport.Model
@@ -26,6 +29,10 @@ type PRInfoPanel struct {
 	pr            *review.PullRequest
 	issueComments []review.IssueComment
 	renderMD      func(body string, width int) string // markdown renderer
+
+	// Comment hover/expand
+	hoveredBlock     int          // index into blocks (0 = description, 1+ = comments)
+	expandedComments map[int]bool // comment indices that are expanded
 
 	// Search
 	searchActive bool   // true when typing in search input
@@ -74,6 +81,8 @@ func (p *PRInfoPanel) Open(totalWidth, totalHeight int) {
 	p.searchQuery = ""
 	p.searchLines = nil
 	p.searchCursor = 0
+	p.hoveredBlock = 0
+	p.expandedComments = make(map[int]bool)
 }
 
 // HandleKey processes a key event while the PR info popup is active.
@@ -96,6 +105,14 @@ func (p *PRInfoPanel) HandleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "/":
 		p.searchActive = true
 		p.searchInput = ""
+		return nil
+	case "e":
+		// Toggle expand/collapse on the hovered comment
+		commentIdx := p.hoveredBlock - 1 // block 0 is description
+		if commentIdx >= 0 && commentIdx < len(p.issueComments) {
+			p.expandedComments[commentIdx] = !p.expandedComments[commentIdx]
+			p.rebuildContent()
+		}
 		return nil
 	case "n":
 		if p.searchQuery != "" {
@@ -153,6 +170,21 @@ func (p *PRInfoPanel) clearSearch() {
 	p.searchCursor = 0
 	p.content = p.buildContent("")
 	p.viewport.SetContent(p.content)
+}
+
+// rebuildContent rebuilds the viewport content preserving the current scroll
+// position as closely as possible (snapping to the hovered block).
+func (p *PRInfoPanel) rebuildContent() {
+	if p.searchQuery != "" {
+		p.computeSearchMatches()
+	} else {
+		p.content = p.buildContent("")
+		p.viewport.SetContent(p.content)
+	}
+	// Snap to the hovered block after rebuild.
+	if p.hoveredBlock >= 0 && p.hoveredBlock < len(p.blocks) {
+		p.viewport.SetYOffset(p.blocks[p.hoveredBlock])
+	}
 }
 
 // computeSearchMatches rebuilds content with search-aware borders, finds
@@ -247,16 +279,35 @@ func (p *PRInfoPanel) buildContent(searchQuery string) string {
 		lowerQuery := strings.ToLower(searchQuery)
 		commentBoxWidth := width - 4 // border(2) + padding(2)
 
-		for _, c := range p.issueComments {
+		for ci, c := range p.issueComments {
 			blocks = append(blocks, lineCount())
 
 			header := fmt.Sprintf("💬 %s:", styles.CommentAuthor.Render("@"+c.Author))
 			rendered := p.renderMD(c.Body, commentBoxWidth)
+
+			// Truncate long comments unless expanded.
+			truncated := false
+			if !p.expandedComments[ci] {
+				lines := strings.Split(rendered, "\n")
+				if len(lines) > maxCollapsedLines {
+					rendered = strings.Join(lines[:maxCollapsedLines], "\n")
+					truncated = true
+				}
+			}
+
 			inner := header + "\n" + rendered
+			if truncated {
+				more := lipgloss.NewStyle().Foreground(styles.Muted).Render("  ▼ e to expand")
+				inner += "\n" + more
+			}
 
 			borderColor := styles.Cyan
+			isHovered := len(blocks)-1 == p.hoveredBlock // current block index
+			if isHovered {
+				borderColor = styles.Primary
+			}
 			if searchQuery != "" {
-				plain := xansi.Strip(rendered)
+				plain := xansi.Strip(p.renderMD(c.Body, commentBoxWidth))
 				if strings.Contains(strings.ToLower(plain), lowerQuery) {
 					borderColor = styles.Warning
 				}
@@ -369,22 +420,17 @@ func (p *PRInfoPanel) jumpBlock(dir int) {
 	if len(p.blocks) == 0 {
 		return
 	}
-	current := p.viewport.YOffset()
-	if dir > 0 {
-		for _, offset := range p.blocks {
-			if offset > current {
-				p.viewport.SetYOffset(offset)
-				return
-			}
-		}
-	} else {
-		for i := len(p.blocks) - 1; i >= 0; i-- {
-			if p.blocks[i] < current {
-				p.viewport.SetYOffset(p.blocks[i])
-				return
-			}
-		}
+	newIdx := p.hoveredBlock + dir
+	if newIdx < 0 {
+		newIdx = 0
+	} else if newIdx >= len(p.blocks) {
+		newIdx = len(p.blocks) - 1
 	}
+	if newIdx == p.hoveredBlock {
+		return
+	}
+	p.hoveredBlock = newIdx
+	p.rebuildContent()
 }
 
 // --- Rendering ---
@@ -415,7 +461,7 @@ func (p *PRInfoPanel) RenderPopup(totalWidth int) string {
 			fmt.Sprintf("  /%s%s", p.searchQuery, matchInfo))
 		footer = styles.HelpStyle.Render("  n/N next/prev match  esc clear  i close") + searchStatus + scrollPct
 	} else {
-		footer = styles.HelpStyle.Render("  j/k scroll  n/N next/prev block  / search  i/esc close") + scrollPct
+		footer = styles.HelpStyle.Render("  j/k scroll  n/N next/prev block  e expand  / search  i/esc close") + scrollPct
 	}
 
 	content := title + "\n" + p.viewport.View() + "\n" + footer

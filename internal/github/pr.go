@@ -167,7 +167,7 @@ func (c *Client) searchPRs(qualifier string) ([]review.PullRequest, error) {
 
 	// Lightweight list query — scalar fields only for the table rows.
 	// Nested data (check runs, reviews, review requests) are fetched
-	// lazily via GetPR / enrichVisible.
+	// lazily via GetPR when a PR is selected.
 	graphqlQuery := fmt.Sprintf(`
 	query($query: String!) {
 		viewer { login }

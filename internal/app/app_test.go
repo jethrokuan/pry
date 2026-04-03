@@ -446,6 +446,7 @@ var _ = Describe("App message routing", func() {
 			// AI agent may or may not be present depending on env, so just
 			// check that no identity/mentionable/ownerFilter options are added.
 			m.aiAgent = nil // isolate from env
+			m.useJJ = false // isolate from env (jj detection)
 			opts := m.diffviewOpts()
 			Expect(opts).To(BeEmpty())
 		})
