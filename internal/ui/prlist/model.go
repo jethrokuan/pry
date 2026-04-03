@@ -255,15 +255,14 @@ func New(filters []review.PRFilter) Model {
 
 	tabs := make([]tabbar.Tab, len(filters))
 	for i, f := range filters {
-		tabs[i] = tabbar.Tab{Label: f.Name, Count: -1}
+		tabs[i] = tabbar.Tab{Label: f.Name, Count: -1, Loading: true}
 	}
 
 	tabStates := make([]tabState, len(filters))
 	for i := range tabStates {
 		tabStates[i].inFlight = make(map[int]bool)
+		tabStates[i].loading = true
 	}
-	// First tab starts loading immediately via Init()
-	tabStates[0].loading = true
 
 	return Model{
 		filters:     filters,
@@ -277,9 +276,12 @@ func New(filters []review.PRFilter) Model {
 	}
 }
 
-// Init starts the initial PR fetch.
+// Init starts the initial PR fetch for all tabs.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spinner.Tick, m.fetchPRs()}
+	cmds := []tea.Cmd{m.spinner.Tick}
+	for i := range m.filters {
+		cmds = append(cmds, m.fetchPRsForTab(i))
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -318,8 +320,14 @@ func (m Model) activeFilter() review.PRFilter {
 }
 
 func (m Model) fetchPRs() tea.Cmd {
-	filter := m.activeFilter()
-	tabIdx := m.filterIdx
+	return m.fetchPRsForTab(m.filterIdx)
+}
+
+func (m Model) fetchPRsForTab(tabIdx int) tea.Cmd {
+	filter := m.filters[tabIdx]
+	if tabIdx == m.filterIdx && m.customFilter != nil {
+		filter = *m.customFilter
+	}
 	return func() tea.Msg {
 		prs, err := data.FetchPullRequests(filter)
 		return prsLoadedMsg{tabIdx: tabIdx, prs: prs, err: err}
@@ -342,6 +350,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		t := &m.tabs[msg.tabIdx]
 		t.loading = false
+		m.tabBar.SetLoading(msg.tabIdx, false)
 		dismissCmd := flash.DismissMsg{ID: "pr-refresh"}.Cmd()
 		if msg.err != nil {
 			errFlash := flash.ShowMsg{ID: "fetch-error", Text: fmt.Sprintf("Fetch failed: %v", msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
@@ -436,9 +445,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.tab().loading || m.hasEnrichmentPending() {
+		anyLoading := m.hasEnrichmentPending()
+		for i := range m.tabs {
+			if m.tabs[i].loading {
+				anyLoading = true
+				break
+			}
+		}
+		if anyLoading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
+			m.tabBar.SetSpinnerView(m.spinner.View())
 			return m, cmd
 		}
 
@@ -986,6 +1003,7 @@ func (m *Model) startFetch() tea.Cmd {
 		cmds = append(cmds, flash.ShowMsg{ID: "pr-refresh", Text: "Refreshing…", Style: flash.StyleSpinner}.Cmd())
 	} else {
 		t.loading = true
+		m.tabBar.SetLoading(m.filterIdx, true)
 	}
 	return tea.Batch(cmds...)
 }

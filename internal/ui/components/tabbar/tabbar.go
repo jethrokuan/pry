@@ -11,15 +11,17 @@ import (
 
 // Tab represents a single tab in the bar.
 type Tab struct {
-	Label string
-	Count int // -1 means don't show count
+	Label   string
+	Count   int  // -1 means don't show count
+	Loading bool // true shows a spinner instead of count
 }
 
 // Model is a horizontal tab bar with overflow indicators.
 type Model struct {
-	tabs   []Tab
-	active int
-	width  int
+	tabs         []Tab
+	active       int
+	width        int
+	spinnerView  string // current spinner frame, set externally
 }
 
 // New creates a new tab bar.
@@ -48,6 +50,14 @@ func (m *Model) SetWidth(w int) {
 func (m *Model) SetCount(i, count int) {
 	if i >= 0 && i < len(m.tabs) {
 		m.tabs[i].Count = count
+		m.tabs[i].Loading = false
+	}
+}
+
+// SetLoading marks a tab as loading.
+func (m *Model) SetLoading(i int, loading bool) {
+	if i >= 0 && i < len(m.tabs) {
+		m.tabs[i].Loading = loading
 	}
 }
 
@@ -62,6 +72,11 @@ func (m *Model) SetTabs(tabs []Tab) {
 // Len returns the number of tabs.
 func (m Model) Len() int {
 	return len(m.tabs)
+}
+
+// SetSpinnerView sets the current spinner frame string (from Charm spinner.View()).
+func (m *Model) SetSpinnerView(v string) {
+	m.spinnerView = v
 }
 
 // Next moves to the next tab. Returns true if the tab changed.
@@ -110,7 +125,9 @@ func (m Model) View() string {
 	var rendered []string
 	for i, tab := range m.tabs {
 		label := tab.Label
-		if tab.Count >= 0 {
+		if tab.Loading && m.spinnerView != "" {
+			label = fmt.Sprintf("%s %s", label, m.spinnerView)
+		} else if tab.Count >= 0 {
 			label = fmt.Sprintf("%s (%d)", label, tab.Count)
 		}
 		if i == m.active {
