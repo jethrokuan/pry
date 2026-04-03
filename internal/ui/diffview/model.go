@@ -319,7 +319,7 @@ type diffLineInfo struct {
 type Option func(*Model)
 
 // WithUserIdentity sets the owner filter identities from a resolved user identity.
-// When provided, the owner filter defaults to on (loading CODEOWNERS lazily).
+// The identities are stored so the user can toggle the owner filter on manually.
 func WithUserIdentity(id *review.UserIdentity) Option {
 	return func(m *Model) {
 		if id == nil {
@@ -330,12 +330,7 @@ func WithUserIdentity(id *review.UserIdentity) Option {
 		for _, t := range id.Teams {
 			m.filter.ownerIdentities = append(m.filter.ownerIdentities, "@"+t)
 		}
-		m.filter.ownerEnabled = true
 		m.filter.codeowners = loadCodeowners()
-		if m.filter.codeowners == nil {
-			// No CODEOWNERS file — disable owner filter silently
-			m.filter.ownerEnabled = false
-		}
 	}
 }
 
@@ -362,10 +357,12 @@ func WithJujutsu() Option {
 	}
 }
 
-// WithOwnerFilterDisabled explicitly disables the owner filter regardless of identity.
-func WithOwnerFilterDisabled() Option {
+// WithOwnerFilterEnabled explicitly enables the owner filter (requires identity and CODEOWNERS).
+func WithOwnerFilterEnabled() Option {
 	return func(m *Model) {
-		m.filter.ownerEnabled = false
+		if len(m.filter.ownerIdentities) > 0 && m.filter.codeowners != nil {
+			m.filter.ownerEnabled = true
+		}
 	}
 }
 
@@ -768,15 +765,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			for _, t := range msg.Identity.Teams {
 				m.filter.ownerIdentities = append(m.filter.ownerIdentities, "@"+t)
 			}
-			m.filter.ownerEnabled = true
 			if m.filter.codeowners == nil {
 				m.filter.codeowners = loadCodeowners()
-			}
-			if m.filter.codeowners == nil {
-				m.filter.ownerEnabled = false
-			}
-			if m.filter.ownerEnabled && len(m.files) > 0 {
-				m.applyFilters()
 			}
 		}
 

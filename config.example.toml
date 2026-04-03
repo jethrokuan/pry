@@ -89,7 +89,7 @@
 
 # [file_tree]
 # Enable CODEOWNERS-based owner filter in the diff file tree.
-# true = always on, false = always off, omit = auto (on when identity available).
+# Defaults to off. Set to true to filter files to those you own.
 # owner_filter = true
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,7 @@ type FilterConfig struct {
 // FileTreeConfig holds file tree display settings.
 type FileTreeConfig struct {
 	// OwnerFilter controls whether the CODEOWNERS-based owner filter is enabled
-	// by default. nil = default (on when identity is available), true = on, false = off.
+	// by default. nil/false = off (default), true = on.
 	OwnerFilter *bool `koanf:"owner_filter"`
 }
 

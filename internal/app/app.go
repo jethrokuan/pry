@@ -132,8 +132,8 @@ func (m Model) diffviewOpts() []diffview.Option {
 	if len(m.mentionableUsers) > 0 {
 		opts = append(opts, diffview.WithMentionableUsers(m.mentionableUsers))
 	}
-	if m.cfg.FileTree.OwnerFilter != nil && !*m.cfg.FileTree.OwnerFilter {
-		opts = append(opts, diffview.WithOwnerFilterDisabled())
+	if m.cfg.FileTree.OwnerFilter != nil && *m.cfg.FileTree.OwnerFilter {
+		opts = append(opts, diffview.WithOwnerFilterEnabled())
 	}
 	if m.useJJ {
 		opts = append(opts, diffview.WithJujutsu())
