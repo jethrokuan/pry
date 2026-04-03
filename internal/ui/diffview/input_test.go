@@ -466,10 +466,10 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m.nav.focus = FocusDiff
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'i'})
-			gomega.Expect(m.prInfoActive).To(gomega.BeTrue())
+			gomega.Expect(m.prInfo.active).To(gomega.BeTrue())
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-			gomega.Expect(m.prInfoActive).To(gomega.BeFalse())
+			gomega.Expect(m.prInfo.active).To(gomega.BeFalse())
 		})
 
 		ginkgo.It("should close with i key again", func() {
@@ -477,10 +477,10 @@ var _ = ginkgo.Describe("Input Handling", func() {
 			m.nav.focus = FocusDiff
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'i'})
-			gomega.Expect(m.prInfoActive).To(gomega.BeTrue())
+			gomega.Expect(m.prInfo.active).To(gomega.BeTrue())
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'i'})
-			gomega.Expect(m.prInfoActive).To(gomega.BeFalse())
+			gomega.Expect(m.prInfo.active).To(gomega.BeFalse())
 		})
 	})
 

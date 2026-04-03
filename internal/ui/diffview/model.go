@@ -283,10 +283,7 @@ type Model struct {
 	useJJ bool // true when repo is managed by Jujutsu
 
 	// PR info popup
-	prInfoActive   bool
-	prInfoViewport viewport.Model
-	issueComments  []review.IssueComment // top-level conversation comments
-	prInfoBlocks   []int                 // line offsets of each block (description, comments) for n/N nav
+	prInfo PRInfoPanel
 
 	// Commit-level diff viewing
 	commits            []review.Commit // all PR commits (loaded lazily)
@@ -613,7 +610,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			// Reopen to resize the popup viewport
 			m.openCommentPopup()
 		}
-		if m.prInfoActive {
+		if m.prInfo.active {
 			m.openPRInfoPopup()
 		}
 
@@ -758,8 +755,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case issueCommentsMsg:
 		if msg.err == nil {
-			m.issueComments = msg.comments
-			if m.prInfoActive {
+			m.prInfo.issueComments = msg.comments
+			if m.prInfo.active {
 				m.openPRInfoPopup()
 			}
 		}
@@ -806,7 +803,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			*m.pr = *msg.PR
 			m.pendingReview = pendingReview
 			m.pr.Threads = threads
-			if m.prInfoActive {
+			if m.prInfo.active {
 				m.openPRInfoPopup()
 			}
 			// Viewed files may not have been loaded yet if PRNodeID was
@@ -938,9 +935,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case tea.MouseWheelMsg:
 		// Forward mouse wheel events to active popup viewports for scroll support
-		if m.prInfoActive {
+		if m.prInfo.active {
 			var cmd tea.Cmd
-			m.prInfoViewport, cmd = m.prInfoViewport.Update(msg)
+			m.prInfo.viewport, cmd = m.prInfo.viewport.Update(msg)
 			return m, cmd
 		}
 		if m.comments.popupActive {
@@ -1501,7 +1498,7 @@ func (m Model) View() string {
 	if m.comments.popupActive {
 		result = m.overlayCommentPopup(result)
 	}
-	if m.prInfoActive {
+	if m.prInfo.active {
 		result = m.overlayPRInfoPopup(result)
 	}
 	if m.commitPickerActive {

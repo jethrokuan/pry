@@ -6,7 +6,6 @@ import (
 
 	"image/color"
 
-	"charm.land/bubbles/v2/viewport"
 	"charm.land/glamour/v2"
 	"charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
@@ -725,17 +724,12 @@ func (m *Model) openPRInfoPopup() {
 	vpH := popupH - 2     // title + footer
 
 	content := m.buildPRInfoContent(contentW)
-
-	vp := viewport.New(viewport.WithWidth(contentW), viewport.WithHeight(vpH))
-	vp.SetContent(content)
-
-	m.prInfoActive = true
-	m.prInfoViewport = vp
+	m.prInfo.Open(content, contentW, vpH)
 }
 
 // buildPRInfoContent builds the PR info popup content showing metadata,
 // description, issue comments, and review comments. It also records
-// block line offsets in m.prInfoBlocks for n/N navigation.
+// block line offsets in m.prInfo.blocks for n/N navigation.
 func (m *Model) buildPRInfoContent(width int) string {
 	authorStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
 	labelStyle := lipgloss.NewStyle().Foreground(styles.Muted)
@@ -795,13 +789,13 @@ func (m *Model) buildPRInfoContent(width int) string {
 	}
 
 	// --- Blocks: Issue comments (top-level conversation) ---
-	if len(m.issueComments) > 0 {
+	if len(m.prInfo.issueComments) > 0 {
 		b.WriteString("\n\n" + separator + "\n")
 		commentHeader := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
-		b.WriteString(commentHeader.Render(fmt.Sprintf("Comments (%d)", len(m.issueComments))) + "\n\n")
+		b.WriteString(commentHeader.Render(fmt.Sprintf("Comments (%d)", len(m.prInfo.issueComments))) + "\n\n")
 
 		innerSep := sepStyle.Render(strings.Repeat("─", width/2))
-		for _, c := range m.issueComments {
+		for _, c := range m.prInfo.issueComments {
 			blocks = append(blocks, lineCount())
 			b.WriteString("💬 " + authorStyle.Render("@"+c.Author) + "\n")
 			rendered := m.renderMarkdown(c.Body, width)
@@ -810,37 +804,13 @@ func (m *Model) buildPRInfoContent(width int) string {
 		}
 	}
 
-	m.prInfoBlocks = blocks
+	m.prInfo.blocks = blocks
 	return strings.TrimRight(b.String(), "\n")
 }
 
 // renderPRInfoPopup builds the bordered PR info popup.
 func (m Model) renderPRInfoPopup() string {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
-	title := titleStyle.Render(fmt.Sprintf("  PR #%d: %s", m.pr.Number, m.pr.Title))
-
-	scrollPct := ""
-	if m.prInfoViewport.TotalLineCount() > m.prInfoViewport.Height() {
-		pct := int(m.prInfoViewport.ScrollPercent() * 100)
-		scrollPct = lipgloss.NewStyle().Foreground(styles.Muted).Render(fmt.Sprintf(" (%d%%)", pct))
-	}
-
-	help := styles.HelpStyle.Render("  j/k scroll  n/N next/prev block  i/esc close") + scrollPct
-
-	content := title + "\n" + m.prInfoViewport.View() + "\n" + help
-
-	popupW := m.width - 6
-	if popupW > 120 {
-		popupW = 120
-	}
-
-	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Primary).
-		Padding(0, 1).
-		Width(popupW)
-
-	return boxStyle.Render(content)
+	return m.prInfo.RenderPopup(m.pr, m.width)
 }
 
 // overlayPRInfoPopup renders the PR info popup centered over the base content.

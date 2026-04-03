@@ -51,7 +51,7 @@ func (m Model) activeMode() inputMode {
 		return modeCommitPicker
 	case m.showHelp:
 		return modeHelp
-	case m.prInfoActive:
+	case m.prInfo.active:
 		return modePRInfo
 	case m.comments.popupActive:
 		return modeCommentPopup
@@ -278,7 +278,7 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.Info):
 		m.openPRInfoPopup()
-		if m.issueComments == nil {
+		if m.prInfo.issueComments == nil {
 			return m, m.fetchIssueCommentsCmd()
 		}
 		return m, nil

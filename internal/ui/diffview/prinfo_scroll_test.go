@@ -40,19 +40,19 @@ var _ = ginkgo.Describe("PR Info Popup Scrolling", func() {
 
 		// Open PR info popup via 'i'
 		m, _ = m.Update(tea.KeyPressMsg{Code: 'i'})
-		gomega.Expect(m.prInfoActive).To(gomega.BeTrue())
+		gomega.Expect(m.prInfo.active).To(gomega.BeTrue())
 		
-		gomega.Expect(m.prInfoViewport.TotalLineCount()).To(
-			gomega.BeNumerically(">", m.prInfoViewport.Height()), "Content should overflow viewport")
+		gomega.Expect(m.prInfo.viewport.TotalLineCount()).To(
+			gomega.BeNumerically(">", m.prInfo.viewport.Height()), "Content should overflow viewport")
 
 		// Capture initial rendered popup
 		initialPopup := m.renderPRInfoPopup()
-		initialOffset := m.prInfoViewport.YOffset()
+		initialOffset := m.prInfo.viewport.YOffset()
 		gomega.Expect(initialOffset).To(gomega.Equal(0))
 
 		// Press j to scroll down
 		m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
-		gomega.Expect(m.prInfoViewport.YOffset()).To(gomega.Equal(1),
+		gomega.Expect(m.prInfo.viewport.YOffset()).To(gomega.Equal(1),
 			"YOffset should be 1 after pressing j")
 
 		// Verify popup render changed
@@ -67,11 +67,11 @@ var _ = ginkgo.Describe("PR Info Popup Scrolling", func() {
 
 		// Press down arrow
 		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-		gomega.Expect(m.prInfoViewport.YOffset()).To(gomega.Equal(1))
+		gomega.Expect(m.prInfo.viewport.YOffset()).To(gomega.Equal(1))
 
 		// Press up arrow
 		m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-		gomega.Expect(m.prInfoViewport.YOffset()).To(gomega.Equal(0))
+		gomega.Expect(m.prInfo.viewport.YOffset()).To(gomega.Equal(0))
 	})
 
 	ginkgo.It("should handle multiple scroll actions", func() {
@@ -81,20 +81,20 @@ var _ = ginkgo.Describe("PR Info Popup Scrolling", func() {
 		for i := 0; i < 10; i++ {
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
 		}
-		gomega.Expect(m.prInfoViewport.YOffset()).To(gomega.Equal(10))
+		gomega.Expect(m.prInfo.viewport.YOffset()).To(gomega.Equal(10))
 	})
 
 	ginkgo.It("should not scroll beyond content", func() {
 		m := newTestModel()
 		m, _ = m.Update(tea.KeyPressMsg{Code: 'i'})
 
-		maxOffset := m.prInfoViewport.TotalLineCount() - m.prInfoViewport.Height()
+		maxOffset := m.prInfo.viewport.TotalLineCount() - m.prInfo.viewport.Height()
 		
 		// Scroll way past the end
 		for i := 0; i < 200; i++ {
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
 		}
-		gomega.Expect(m.prInfoViewport.YOffset()).To(gomega.BeNumerically("<=", maxOffset))
+		gomega.Expect(m.prInfo.viewport.YOffset()).To(gomega.BeNumerically("<=", maxOffset))
 	})
 
 	ginkgo.It("View should change after scrolling", func() {
@@ -115,13 +115,13 @@ var _ = ginkgo.Describe("PR Info Popup Scrolling", func() {
 	ginkgo.It("should scroll down with mouse wheel", func() {
 		m := newTestModel()
 		m, _ = m.Update(tea.KeyPressMsg{Code: 'i'})
-		gomega.Expect(m.prInfoActive).To(gomega.BeTrue())
+		gomega.Expect(m.prInfo.active).To(gomega.BeTrue())
 
-		initialOffset := m.prInfoViewport.YOffset()
+		initialOffset := m.prInfo.viewport.YOffset()
 
 		// Simulate mouse wheel down
 		m, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
-		gomega.Expect(m.prInfoViewport.YOffset()).To(gomega.BeNumerically(">", initialOffset),
+		gomega.Expect(m.prInfo.viewport.YOffset()).To(gomega.BeNumerically(">", initialOffset),
 			"YOffset should increase after mouse wheel down")
 	})
 
@@ -133,11 +133,11 @@ var _ = ginkgo.Describe("PR Info Popup Scrolling", func() {
 		for i := 0; i < 10; i++ {
 			m, _ = m.Update(tea.KeyPressMsg{Code: 'j'})
 		}
-		offsetAfterDown := m.prInfoViewport.YOffset()
+		offsetAfterDown := m.prInfo.viewport.YOffset()
 
 		// Simulate mouse wheel up
 		m, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
-		gomega.Expect(m.prInfoViewport.YOffset()).To(gomega.BeNumerically("<", offsetAfterDown),
+		gomega.Expect(m.prInfo.viewport.YOffset()).To(gomega.BeNumerically("<", offsetAfterDown),
 			"YOffset should decrease after mouse wheel up")
 	})
 })
