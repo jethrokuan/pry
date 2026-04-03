@@ -712,105 +712,16 @@ func (m Model) renderCommentPopup() string {
 
 // openPRInfoPopup opens the PR details popup with description and metadata.
 func (m *Model) openPRInfoPopup() {
-	popupW := m.width - 6
-	if popupW > 120 {
-		popupW = 120
+	m.prInfo.pr = m.pr
+	m.prInfo.renderMD = func(body string, width int) string {
+		return m.renderMarkdown(body, width)
 	}
-	popupH := m.height - 6
-	if popupH < 5 {
-		popupH = 5
-	}
-	contentW := popupW - 4 // border(2) + padding(2)
-	vpH := popupH - 2     // title + footer
-
-	content := m.buildPRInfoContent(contentW)
-	m.prInfo.Open(content, contentW, vpH)
-}
-
-// buildPRInfoContent builds the PR info popup content showing metadata,
-// description, issue comments, and review comments. It also records
-// block line offsets in m.prInfo.blocks for n/N navigation.
-func (m *Model) buildPRInfoContent(width int) string {
-	authorStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
-	labelStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-	sepStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-	separator := sepStyle.Render(strings.Repeat("─", width))
-
-	var b strings.Builder
-	lineCount := func() int { return strings.Count(b.String(), "\n") }
-	var blocks []int
-
-	// --- Block: Description ---
-	blocks = append(blocks, 0)
-
-	// Metadata
-	b.WriteString(authorStyle.Render("@"+m.pr.Author) + " → " + m.pr.Base + "\n")
-	b.WriteString(fmt.Sprintf("+%d/-%d  |  %d files\n", m.pr.Additions, m.pr.Deletions, m.pr.Files))
-
-	// Labels
-	if len(m.pr.Labels) > 0 {
-		var labels []string
-		for _, l := range m.pr.Labels {
-			labels = append(labels, styles.LabelStyle.Render(l))
-		}
-		b.WriteString("Labels: " + strings.Join(labels, " ") + "\n")
-	}
-
-	// Merge status
-	mergeLabel := "unknown"
-	mergeStyle := lipgloss.NewStyle().Foreground(styles.Muted)
-	switch m.pr.MergeState {
-	case "CLEAN", "HAS_HOOKS":
-		mergeLabel = "ready to merge"
-		mergeStyle = lipgloss.NewStyle().Foreground(styles.Success)
-	case "BLOCKED":
-		mergeLabel = "blocked"
-		mergeStyle = lipgloss.NewStyle().Foreground(styles.Danger)
-	case "UNSTABLE":
-		mergeLabel = "unstable"
-		mergeStyle = lipgloss.NewStyle().Foreground(styles.Warning)
-	case "DIRTY":
-		mergeLabel = "merge conflicts"
-		mergeStyle = lipgloss.NewStyle().Foreground(styles.Danger)
-	case "DRAFT":
-		mergeLabel = "draft"
-		mergeStyle = lipgloss.NewStyle().Foreground(styles.Muted)
-	}
-	b.WriteString(labelStyle.Render("Merge: ") + mergeStyle.Render(mergeLabel) + "\n")
-
-	b.WriteString(separator + "\n\n")
-
-	// Body
-	if m.pr.Body == "" {
-		b.WriteString(labelStyle.Render("No description provided."))
-	} else {
-		rendered := m.renderMarkdown(m.pr.Body, width)
-		b.WriteString(rendered)
-	}
-
-	// --- Blocks: Issue comments (top-level conversation) ---
-	if len(m.prInfo.issueComments) > 0 {
-		b.WriteString("\n\n" + separator + "\n")
-		commentHeader := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
-		b.WriteString(commentHeader.Render(fmt.Sprintf("Comments (%d)", len(m.prInfo.issueComments))) + "\n\n")
-
-		innerSep := sepStyle.Render(strings.Repeat("─", width/2))
-		for _, c := range m.prInfo.issueComments {
-			blocks = append(blocks, lineCount())
-			b.WriteString("💬 " + authorStyle.Render("@"+c.Author) + "\n")
-			rendered := m.renderMarkdown(c.Body, width)
-			b.WriteString(rendered + "\n")
-			b.WriteString(innerSep + "\n\n")
-		}
-	}
-
-	m.prInfo.blocks = blocks
-	return strings.TrimRight(b.String(), "\n")
+	m.prInfo.Open(m.width, m.height)
 }
 
 // renderPRInfoPopup builds the bordered PR info popup.
 func (m Model) renderPRInfoPopup() string {
-	return m.prInfo.RenderPopup(m.pr, m.width)
+	return m.prInfo.RenderPopup(m.width)
 }
 
 // overlayPRInfoPopup renders the PR info popup centered over the base content.

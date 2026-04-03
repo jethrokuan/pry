@@ -18,11 +18,14 @@ import (
 type PRInfoPanel struct {
 	active   bool
 	viewport viewport.Model
+	contentW int    // usable content width inside the popup
 	content  string // raw content string (kept for search)
 	blocks   []int  // line offsets of each block (description, comments) for n/N nav
 
-	// Issue comments (top-level conversation) — loaded lazily.
+	// Data — set by the parent before Open.
+	pr            *review.PullRequest
 	issueComments []review.IssueComment
+	renderMD      func(body string, width int) string // markdown renderer
 
 	// Search
 	searchActive bool   // true when typing in search input
@@ -45,10 +48,23 @@ func (p *PRInfoPanel) Close() {
 	p.searchCursor = 0
 }
 
-// Open opens the popup with the given content at the given dimensions.
-func (p *PRInfoPanel) Open(content string, contentW, vpH int) {
-	vp := viewport.New(viewport.WithWidth(contentW), viewport.WithHeight(vpH))
+// Open builds the popup content and opens the viewport at the given dimensions.
+func (p *PRInfoPanel) Open(totalWidth, totalHeight int) {
+	popupW := totalWidth - 6
+	if popupW > 120 {
+		popupW = 120
+	}
+	popupH := totalHeight - 6
+	if popupH < 5 {
+		popupH = 5
+	}
+	p.contentW = popupW - 4 // border(2) + padding(2)
+	vpH := popupH - 2       // title + footer
+
+	content := p.buildContent("")
+	vp := viewport.New(viewport.WithWidth(p.contentW), viewport.WithHeight(vpH))
 	vp.SetContent(content)
+
 	p.active = true
 	p.viewport = vp
 	p.content = content
@@ -60,16 +76,7 @@ func (p *PRInfoPanel) Open(content string, contentW, vpH int) {
 	p.searchCursor = 0
 }
 
-// SetContent updates the viewport content (and cached raw content).
-func (p *PRInfoPanel) SetContent(content string) {
-	yOff := p.viewport.YOffset()
-	p.viewport.SetContent(content)
-	p.viewport.SetYOffset(yOff)
-	p.content = content
-}
-
 // HandleKey processes a key event while the PR info popup is active.
-// Returns whether the popup should close (so the parent can set prInfoActive = false).
 func (p *PRInfoPanel) HandleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if p.searchActive {
 		return p.handleSearchInput(msg)
@@ -106,7 +113,6 @@ func (p *PRInfoPanel) HandleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 
-	// Delegate scrolling to the viewport
 	var cmd tea.Cmd
 	p.viewport, cmd = p.viewport.Update(msg)
 	return cmd
@@ -145,18 +151,19 @@ func (p *PRInfoPanel) clearSearch() {
 	p.searchQuery = ""
 	p.searchLines = nil
 	p.searchCursor = 0
-	// Restore original (unhighlighted) content
+	p.content = p.buildContent("")
 	p.viewport.SetContent(p.content)
 }
 
-// computeSearchMatches finds all lines in the viewport content that match the
-// search query (case-insensitive) and updates the viewport with highlighted content.
+// computeSearchMatches rebuilds content with search-aware borders, finds
+// matching lines, and applies text highlighting.
 func (p *PRInfoPanel) computeSearchMatches() {
 	p.searchLines = nil
 	p.searchCursor = 0
 	if p.searchQuery == "" {
 		return
 	}
+	p.content = p.buildContent(p.searchQuery)
 	query := strings.ToLower(p.searchQuery)
 	lines := strings.Split(p.content, "\n")
 	highlighted := make([]string, len(lines))
@@ -172,15 +179,112 @@ func (p *PRInfoPanel) computeSearchMatches() {
 	p.viewport.SetContent(strings.Join(highlighted, "\n"))
 }
 
+// --- Content building ---
+
+// buildContent builds the scrollable popup content. When searchQuery is
+// non-empty, comment boxes whose body matches get a highlighted border.
+func (p *PRInfoPanel) buildContent(searchQuery string) string {
+	width := p.contentW
+	authorStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Cyan)
+	labelStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	sepStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	separator := sepStyle.Render(strings.Repeat("─", width))
+
+	var b strings.Builder
+	lineCount := func() int { return strings.Count(b.String(), "\n") }
+	var blocks []int
+
+	// --- Block: Description ---
+	blocks = append(blocks, 0)
+
+	b.WriteString(authorStyle.Render("@"+p.pr.Author) + " → " + p.pr.Base + "\n")
+	b.WriteString(fmt.Sprintf("+%d/-%d  |  %d files\n", p.pr.Additions, p.pr.Deletions, p.pr.Files))
+
+	if len(p.pr.Labels) > 0 {
+		var labels []string
+		for _, l := range p.pr.Labels {
+			labels = append(labels, styles.LabelStyle.Render(l))
+		}
+		b.WriteString("Labels: " + strings.Join(labels, " ") + "\n")
+	}
+
+	mergeLabel := "unknown"
+	mergeStyle := lipgloss.NewStyle().Foreground(styles.Muted)
+	switch p.pr.MergeState {
+	case "CLEAN", "HAS_HOOKS":
+		mergeLabel = "ready to merge"
+		mergeStyle = lipgloss.NewStyle().Foreground(styles.Success)
+	case "BLOCKED":
+		mergeLabel = "blocked"
+		mergeStyle = lipgloss.NewStyle().Foreground(styles.Danger)
+	case "UNSTABLE":
+		mergeLabel = "unstable"
+		mergeStyle = lipgloss.NewStyle().Foreground(styles.Warning)
+	case "DIRTY":
+		mergeLabel = "merge conflicts"
+		mergeStyle = lipgloss.NewStyle().Foreground(styles.Danger)
+	case "DRAFT":
+		mergeLabel = "draft"
+		mergeStyle = lipgloss.NewStyle().Foreground(styles.Muted)
+	}
+	b.WriteString(labelStyle.Render("Merge: ") + mergeStyle.Render(mergeLabel) + "\n")
+
+	b.WriteString(separator + "\n\n")
+
+	if p.pr.Body == "" {
+		b.WriteString(labelStyle.Render("No description provided."))
+	} else {
+		rendered := p.renderMD(p.pr.Body, width)
+		b.WriteString(rendered)
+	}
+
+	// --- Blocks: Issue comments ---
+	if len(p.issueComments) > 0 {
+		b.WriteString("\n\n" + separator + "\n")
+		commentHeader := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
+		b.WriteString(commentHeader.Render(fmt.Sprintf("Comments (%d)", len(p.issueComments))) + "\n\n")
+
+		lowerQuery := strings.ToLower(searchQuery)
+		commentBoxWidth := width - 4 // border(2) + padding(2)
+
+		for _, c := range p.issueComments {
+			blocks = append(blocks, lineCount())
+
+			header := fmt.Sprintf("💬 %s:", styles.CommentAuthor.Render("@"+c.Author))
+			rendered := p.renderMD(c.Body, commentBoxWidth)
+			inner := header + "\n" + rendered
+
+			borderColor := styles.Cyan
+			if searchQuery != "" {
+				plain := xansi.Strip(rendered)
+				if strings.Contains(strings.ToLower(plain), lowerQuery) {
+					borderColor = styles.Warning
+				}
+			}
+
+			box := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(borderColor).
+				Padding(0, 1).
+				Width(width).
+				Render(inner)
+			b.WriteString(box + "\n")
+		}
+	}
+
+	p.blocks = blocks
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// --- Search text highlighting ---
+
 // highlightANSILine highlights all case-insensitive occurrences of query in a
-// line that may contain ANSI escape sequences. plain is the ANSI-stripped version
-// of line and must correspond character-for-character to the visible output.
+// line that may contain ANSI escape sequences.
 func highlightANSILine(styled, plain, query string) string {
 	lowerPlain := strings.ToLower(plain)
 	qLen := len(query)
 
-	// Find all match positions in the plain text
-	var matches [][2]int // [start, end) in plain-text byte offsets
+	var matches [][2]int
 	pos := 0
 	for {
 		idx := strings.Index(lowerPlain[pos:], query)
@@ -198,30 +302,25 @@ func highlightANSILine(styled, plain, query string) string {
 	hlStart := "\x1b[1;30;43m" // bold, black fg, yellow bg
 	hlEnd := "\x1b[0m"
 
-	// Walk through styled text, tracking visible character position.
-	// When we hit a match boundary, insert highlight start/end markers.
 	var b strings.Builder
-	visPos := 0 // position in plain text
+	visPos := 0
 	matchIdx := 0
 	inHighlight := false
 	i := 0
 	for i < len(styled) {
-		// Check if this is an ANSI escape sequence
 		if styled[i] == '\x1b' && i+1 < len(styled) && styled[i+1] == '[' {
-			// Find end of sequence
 			j := i + 2
 			for j < len(styled) && styled[j] != 'm' {
 				j++
 			}
 			if j < len(styled) {
-				j++ // include 'm'
+				j++
 			}
 			b.WriteString(styled[i:j])
 			i = j
 			continue
 		}
 
-		// Visible character — check match boundaries
 		if matchIdx < len(matches) && visPos == matches[matchIdx][0] && !inHighlight {
 			b.WriteString(hlStart)
 			inHighlight = true
@@ -230,7 +329,6 @@ func highlightANSILine(styled, plain, query string) string {
 			b.WriteString(hlEnd)
 			inHighlight = false
 			matchIdx++
-			// Check if next match starts at this same position
 			if matchIdx < len(matches) && visPos == matches[matchIdx][0] {
 				b.WriteString(hlStart)
 				inHighlight = true
@@ -247,7 +345,8 @@ func highlightANSILine(styled, plain, query string) string {
 	return b.String()
 }
 
-// jumpSearch jumps to the next (dir=1) or previous (dir=-1) search match.
+// --- Navigation ---
+
 func (p *PRInfoPanel) jumpSearch(dir int) {
 	if len(p.searchLines) == 0 {
 		return
@@ -266,7 +365,6 @@ func (p *PRInfoPanel) jumpSearch(dir int) {
 	p.viewport.SetYOffset(p.searchLines[p.searchCursor])
 }
 
-// jumpBlock scrolls to the next (dir=1) or previous (dir=-1) content block.
 func (p *PRInfoPanel) jumpBlock(dir int) {
 	if len(p.blocks) == 0 {
 		return
@@ -289,10 +387,12 @@ func (p *PRInfoPanel) jumpBlock(dir int) {
 	}
 }
 
+// --- Rendering ---
+
 // RenderPopup builds the bordered PR info popup.
-func (p *PRInfoPanel) RenderPopup(pr *review.PullRequest, totalWidth int) string {
+func (p *PRInfoPanel) RenderPopup(totalWidth int) string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(styles.Primary)
-	title := titleStyle.Render(fmt.Sprintf("  PR #%d: %s", pr.Number, pr.Title))
+	title := titleStyle.Render(fmt.Sprintf("  PR #%d: %s", p.pr.Number, p.pr.Title))
 
 	scrollPct := ""
 	if p.viewport.TotalLineCount() > p.viewport.Height() {
