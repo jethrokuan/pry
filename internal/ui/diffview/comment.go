@@ -625,10 +625,11 @@ func (m Model) handleEditorSave(msg inlineEditorSaveMsg) (Model, tea.Cmd) {
 		if c != nil {
 			oldBody := c.Body
 			commentID := c.ID
+			commentNodeID := c.NodeID
 			// Optimistically update body
 			m.updateCommentBody(commentID, msg.body)
 			m.closeInlineComment()
-			return m, m.editCommentCmd(commentID, msg.body, oldBody)
+			return m, m.editCommentCmd(commentID, commentNodeID, msg.body, oldBody)
 		}
 		m.closeInlineComment()
 		return m, nil

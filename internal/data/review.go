@@ -477,19 +477,31 @@ func DeleteReviewComment(prNumber, commentID int) error {
 }
 
 // EditReviewComment updates the body of a review comment.
-func EditReviewComment(prNumber, commentID int, body string) error {
-	endpoint := fmt.Sprintf("repos/%s/%s/pulls/comments/%d", owner, repo, commentID)
-	payload, err := json.Marshal(map[string]string{"body": body})
-	if err != nil {
-		slog.Error("failed to marshal edit comment payload", "commentID", commentID, "error", err)
-		return fmt.Errorf("failed to marshal edit comment payload: %w", err)
+func EditReviewComment(commentNodeID, body string) error {
+	mutation := `
+	mutation($commentID: ID!, $body: String!) {
+		updatePullRequestReviewComment(input: {
+			pullRequestReviewCommentId: $commentID
+			body: $body
+		}) {
+			pullRequestReviewComment {
+				databaseId
+			}
+		}
+	}`
+
+	vars := map[string]any{
+		"commentID": commentNodeID,
+		"body":      body,
 	}
-	err = rest.Do(http.MethodPatch, endpoint, bytes.NewReader(payload), nil)
+
+	slog.Debug("editing review comment", "commentNodeID", commentNodeID)
+	err := graphql.Do(mutation, vars, nil)
 	if err != nil {
-		slog.Error("failed to edit review comment", "commentID", commentID, "error", err)
-		return fmt.Errorf("failed to edit review comment: %w", err)
+		slog.Error("failed to edit review comment", "commentNodeID", commentNodeID, "error", err)
+		return fmt.Errorf("graphql updatePullRequestReviewComment: %w", err)
 	}
-	slog.Debug("edited review comment", "commentID", commentID)
+	slog.Debug("edited review comment", "commentNodeID", commentNodeID)
 	return nil
 }
 

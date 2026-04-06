@@ -553,13 +553,12 @@ func (m Model) deleteCommentCmd(commentID int) tea.Cmd {
 	}
 }
 
-func (m Model) editCommentCmd(commentID int, body, oldBody string) tea.Cmd {
-	if commentID <= 0 {
+func (m Model) editCommentCmd(commentID int, commentNodeID, body, oldBody string) tea.Cmd {
+	if commentID <= 0 || commentNodeID == "" {
 		return nil
 	}
-	prNumber := m.pr.Number
 	return func() tea.Msg {
-		err := data.EditReviewComment(prNumber, commentID, body)
+		err := data.EditReviewComment(commentNodeID, body)
 		return commentEditedMsg{commentID: commentID, body: body, oldBody: oldBody, err: err}
 	}
 }
