@@ -76,6 +76,9 @@ func RepoName() string { return repo }
 
 // InvalidateListPRs clears cached PR list and detail entries.
 func InvalidateListPRs() {
+	if repoCache == nil {
+		return
+	}
 	repoCache.DeleteByPrefix("listprs__")
 	repoCache.DeleteByPrefix("pr__")
 }

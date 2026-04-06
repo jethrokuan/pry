@@ -423,7 +423,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		// Invalidate cache and refresh to reflect the change.
 		data.InvalidateListPRs()
 		flashCmd := flash.ShowMsg{ID: "pr-action", Text: fmt.Sprintf("%s #%d", msg.action, msg.prNumber), Expires: 3 * time.Second}.Cmd()
-		return m, tea.Batch(flashCmd, m.startFetch())
+		return m, tea.Batch(flashCmd, m.StartFetch())
 
 	case checkoutMsg:
 		if msg.err != nil {
@@ -493,7 +493,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					Name:      "Custom",
 					Qualifier: qualifier,
 				}
-				return m, m.startFetch()
+				return m, m.StartFetch()
 			case "esc", "ctrl+c":
 				m.editing = false
 				m.filterInput.Blur()
@@ -652,7 +652,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.Refresh):
 			data.InvalidateListPRs()
-			return m, m.startFetch()
+			return m, m.StartFetch()
 		case key.Matches(msg, keys.CopyNumber):
 			if t.hasCursor() {
 				pr := t.prs[t.cur()]
@@ -996,7 +996,7 @@ func helpSections() []helppopup.Section {
 // startFetch triggers a PR fetch for the active tab. If the tab already has
 // data, it shows a non-blocking refresh spinner (via flash msg to root)
 // instead of the full-screen loading state.
-func (m *Model) startFetch() tea.Cmd {
+func (m *Model) StartFetch() tea.Cmd {
 	t := m.tab()
 	cmds := []tea.Cmd{m.fetchPRs(), m.spinner.Tick}
 	if len(t.prs) > 0 {
@@ -1017,7 +1017,7 @@ func (m *Model) switchTab() tea.Cmd {
 		// Tab already has data — just refresh the sidebar.
 		return m.refreshSidebarPreview()
 	}
-	return m.startFetch()
+	return m.StartFetch()
 }
 
 

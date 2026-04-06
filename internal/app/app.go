@@ -369,8 +369,8 @@ func (m Model) updateSubmit(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case submit.SubmittedMsg:
 		m.selectedPR = nil
 		m.screen = ScreenPRList
-		m.prList = prlist.New(m.filters)
-		return m, tea.Batch(m.prList.Init(), m.windowSizeCmd())
+		data.InvalidateListPRs()
+		return m, tea.Batch(m.prList.StartFetch(), m.windowSizeCmd())
 	case submit.CancelledMsg:
 		m.screen = ScreenDiffView
 		return m, m.windowSizeCmd()

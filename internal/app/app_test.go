@@ -323,8 +323,8 @@ var _ = Describe("App message routing", func() {
 		})
 	})
 
-	Describe("SubmittedMsg resets PR list", func() {
-		It("creates a fresh PR list after submission", func() {
+	Describe("SubmittedMsg returns to PR list", func() {
+		It("returns to PR list and clears selected PR after submission", func() {
 			m = update(m, prlist.PRSelectedMsg{PR: testPR()})
 			m = update(m, diffview.SubmitReviewMsg{})
 			Expect(m.screen).To(Equal(ScreenSubmit))

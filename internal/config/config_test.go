@@ -13,7 +13,7 @@ var _ = ginkgo.Describe("Config", func() {
 	ginkgo.Describe("load with no file", func() {
 		ginkgo.It("returns defaults when path is nil", func() {
 			cfg := load(nil)
-			gomega.Expect(cfg.PageSize).To(gomega.Equal(50))
+			gomega.Expect(cfg.PageSize).To(gomega.Equal(30))
 			gomega.Expect(cfg.PRList.SidebarWidth).To(gomega.Equal(50))
 			gomega.Expect(cfg.Cache.Enabled).To(gomega.BeTrue())
 		})
@@ -21,7 +21,7 @@ var _ = ginkgo.Describe("Config", func() {
 		ginkgo.It("returns defaults when file does not exist", func() {
 			path := "/nonexistent/config.toml"
 			cfg := load(&path)
-			gomega.Expect(cfg.PageSize).To(gomega.Equal(50))
+			gomega.Expect(cfg.PageSize).To(gomega.Equal(30))
 		})
 	})
 
