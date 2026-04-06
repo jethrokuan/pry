@@ -243,7 +243,7 @@ var inlineKeys = struct {
 }{
 	Save:       key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "save")),
 	Cancel:     key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "cancel")),
-	OpenEditor: key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "open $EDITOR")),
+	OpenEditor: key.NewBinding(key.WithKeys("f2"), key.WithHelp("f2", "open $EDITOR")),
 }
 
 // --- Model ---
