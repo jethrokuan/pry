@@ -29,6 +29,11 @@ type CommitsLoadedMsg struct {
 	Err      error
 }
 
+// OpenCheckLogsMsg is sent when the user wants to view logs for a check run.
+type OpenCheckLogsMsg struct {
+	Check review.CheckRun
+}
+
 // Model manages the PR preview sidebar content and async body fetching.
 type Model struct {
 	userIdentity *review.UserIdentity
@@ -46,6 +51,10 @@ type Model struct {
 
 	summaryExpanded bool // when true, show full summary without truncation
 	checksExpanded  bool // when true, show all checks individually instead of collapsing passed/skipped
+
+	// Check run cursor for the Checks tab.
+	checksCursor   int              // index into flatChecks
+	flatChecks     []review.CheckRun // ordered check runs matching current render
 }
 
 // New creates a new PR preview model.
@@ -109,6 +118,43 @@ func (m *Model) PrevSection() {
 	if m.tabs.Prev() {
 		m.rerender()
 	}
+}
+
+// ChecksCursorDown moves the check cursor down by one within the checks tab.
+func (m *Model) ChecksCursorDown() {
+	if m.tabs.Active() == tabChecks && len(m.flatChecks) > 0 {
+		if m.checksCursor < len(m.flatChecks)-1 {
+			m.checksCursor++
+			m.rerender()
+		}
+	}
+}
+
+// ChecksCursorUp moves the check cursor up by one within the checks tab.
+func (m *Model) ChecksCursorUp() {
+	if m.tabs.Active() == tabChecks && len(m.flatChecks) > 0 {
+		if m.checksCursor > 0 {
+			m.checksCursor--
+			m.rerender()
+		}
+	}
+}
+
+// SelectedCheck returns the currently selected check run, or nil if none.
+func (m *Model) SelectedCheck() *review.CheckRun {
+	if m.tabs.Active() != tabChecks || len(m.flatChecks) == 0 {
+		return nil
+	}
+	if m.checksCursor >= len(m.flatChecks) {
+		return nil
+	}
+	cr := m.flatChecks[m.checksCursor]
+	return &cr
+}
+
+// IsChecksTab reports whether the checks tab is currently active.
+func (m *Model) IsChecksTab() bool {
+	return m.tabs.Active() == tabChecks
 }
 
 // ToggleExpanded toggles the expand state for the current tab's collapsible content.
@@ -431,8 +477,9 @@ func (m *Model) renderChecksTab(b *strings.Builder, pr *review.PullRequest) {
 	}
 
 	// All Checks list grouped by status category.
-	// Failing and pending checks are shown individually (actionable).
-	// Skipped and successful checks are collapsed into summary counts.
+	// Failing and pending checks are shown individually (always).
+	// Skipped and successful checks are collapsed unless expanded.
+	// Build flatChecks for cursor navigation.
 	if len(pr.CheckRuns) > 0 {
 		var failing, pending, skipped, successful []review.CheckRun
 		for _, cr := range pr.CheckRuns {
@@ -448,22 +495,48 @@ func (m *Model) renderChecksTab(b *strings.Builder, pr *review.PullRequest) {
 			}
 		}
 
+		// Build flat list matching render order for cursor indexing.
+		m.flatChecks = nil
+		m.flatChecks = append(m.flatChecks, failing...)
+		m.flatChecks = append(m.flatChecks, pending...)
+		if m.checksExpanded {
+			m.flatChecks = append(m.flatChecks, skipped...)
+			m.flatChecks = append(m.flatChecks, successful...)
+		}
+		if m.checksCursor >= len(m.flatChecks) {
+			m.checksCursor = len(m.flatChecks) - 1
+		}
+		if m.checksCursor < 0 {
+			m.checksCursor = 0
+		}
+
 		dangerIcon := lipgloss.NewStyle().Foreground(styles.Danger).Render("✗")
 		warnIcon := lipgloss.NewStyle().Foreground(styles.Warning).Render("◑")
 		skipIcon := muted.Render("○")
 		passIcon := lipgloss.NewStyle().Foreground(styles.Success).Render("✓")
+		selected := lipgloss.NewStyle().Background(styles.BgSelected)
+
+		flatIdx := 0
+		renderCheck := func(icon string, name string, nameStyle lipgloss.Style) {
+			label := nameStyle.Render(name)
+			if flatIdx == m.checksCursor {
+				label = selected.Render(label)
+			}
+			b.WriteString("  " + icon + " " + label + "\n")
+			flatIdx++
+		}
 
 		if len(failing) > 0 {
 			b.WriteString(sectionHeader.Render("✗ Failing") + "\n\n")
 			for _, cr := range failing {
-				b.WriteString("  " + dangerIcon + " " + cr.Name + "\n")
+				renderCheck(dangerIcon, cr.Name, lipgloss.NewStyle())
 			}
 			b.WriteString("\n")
 		}
 		if len(pending) > 0 {
 			b.WriteString(sectionHeader.Render("◑ Pending") + "\n\n")
 			for _, cr := range pending {
-				b.WriteString("  " + warnIcon + " " + cr.Name + "\n")
+				renderCheck(warnIcon, cr.Name, lipgloss.NewStyle())
 			}
 			b.WriteString("\n")
 		}
@@ -471,7 +544,7 @@ func (m *Model) renderChecksTab(b *strings.Builder, pr *review.PullRequest) {
 			if m.checksExpanded {
 				b.WriteString(sectionHeader.Render("○ Skipped") + "\n\n")
 				for _, cr := range skipped {
-					b.WriteString("  " + skipIcon + " " + muted.Render(cr.Name) + "\n")
+					renderCheck(skipIcon, cr.Name, muted)
 				}
 				b.WriteString("\n")
 			} else {
@@ -482,7 +555,7 @@ func (m *Model) renderChecksTab(b *strings.Builder, pr *review.PullRequest) {
 			if m.checksExpanded {
 				b.WriteString(sectionHeader.Render("✓ Successful") + "\n\n")
 				for _, cr := range successful {
-					b.WriteString("  " + passIcon + " " + cr.Name + "\n")
+					renderCheck(passIcon, cr.Name, lipgloss.NewStyle().Foreground(styles.Success))
 				}
 				b.WriteString("\n")
 			} else {
@@ -490,11 +563,18 @@ func (m *Model) renderChecksTab(b *strings.Builder, pr *review.PullRequest) {
 			}
 		}
 
-		// Hint to toggle expanded view
+		// Hints
+		var hints []string
 		if m.checksExpanded {
-			b.WriteString("\n" + muted.Render("Press e to collapse") + "\n")
+			hints = append(hints, "e collapse")
 		} else if len(skipped)+len(successful) > 0 {
-			b.WriteString("\n" + muted.Render("Press e to expand all") + "\n")
+			hints = append(hints, "e expand all")
+		}
+		if len(m.flatChecks) > 0 {
+			hints = append(hints, "J/K navigate", "enter open logs")
+		}
+		if len(hints) > 0 {
+			b.WriteString("\n" + muted.Render(strings.Join(hints, " · ")) + "\n")
 		}
 	} else if m.loading {
 		b.WriteString(muted.Render("Loading checks...") + "\n")

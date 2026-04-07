@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"log/slog"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -67,6 +68,18 @@ type commitsLoadedMsg struct {
 	PRNumber int
 	Commits  []review.Commit
 	Err      error
+}
+
+// checkLogsLoadedMsg carries the result of fetching check run logs.
+type checkLogsLoadedMsg struct {
+	tmpPath string // path to temp file with logs
+	err     error
+}
+
+// checkLogsEditorDoneMsg is sent when the editor closes after viewing logs.
+type checkLogsEditorDoneMsg struct {
+	tmpPath string
+	err     error
 }
 
 
@@ -425,6 +438,25 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		flashCmd := flash.ShowMsg{ID: "pr-action", Text: fmt.Sprintf("%s #%d", msg.action, msg.prNumber), Expires: 3 * time.Second}.Cmd()
 		return m, tea.Batch(flashCmd, m.StartFetch())
 
+	case checkLogsLoadedMsg:
+		if msg.err != nil {
+			return m, flash.ShowMsg{ID: "check-logs", Text: msg.err.Error(), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
+		}
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vim"
+		}
+		tmpPath := msg.tmpPath
+		return m, tea.ExecProcess(exec.Command(editor, tmpPath), func(err error) tea.Msg {
+			return checkLogsEditorDoneMsg{tmpPath: tmpPath, err: err}
+		})
+
+	case checkLogsEditorDoneMsg:
+		if msg.tmpPath != "" {
+			os.Remove(msg.tmpPath)
+		}
+		return m, nil
+
 	case checkoutMsg:
 		if msg.err != nil {
 			return m, flash.ShowMsg{ID: "checkout", Text: fmt.Sprintf("Checkout failed: %v", msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
@@ -606,7 +638,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				return m, m.refreshSidebarPreview()
 			}
 		case key.Matches(msg, keys.Select):
-			if t.hasCursor() {
+			if m.preview.IsChecksTab() {
+				if cr := m.preview.SelectedCheck(); cr != nil {
+					flashCmd := flash.ShowMsg{ID: "check-logs", Text: fmt.Sprintf("Fetching logs for %s…", cr.Name), Expires: 30 * time.Second}.Cmd()
+					return m, tea.Batch(flashCmd, openCheckLogs(*cr))
+				}
+			} else if t.hasCursor() {
 				pr := t.prs[t.cur()]
 				return m, func() tea.Msg {
 					return PRSelectedMsg{PR: &pr}
@@ -631,9 +668,17 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.filterInput.Focus()
 			return m, nil
 		case key.Matches(msg, keys.SidebarDown):
-			m.preview.ScrollDown(3)
+			if m.preview.IsChecksTab() {
+				m.preview.ChecksCursorDown()
+			} else {
+				m.preview.ScrollDown(3)
+			}
 		case key.Matches(msg, keys.SidebarUp):
-			m.preview.ScrollUp(3)
+			if m.preview.IsChecksTab() {
+				m.preview.ChecksCursorUp()
+			} else {
+				m.preview.ScrollUp(3)
+			}
 		case key.Matches(msg, keys.SidebarNextTab):
 			m.preview.NextSection()
 			if cmd := m.fetchCommitsIfNeeded(); cmd != nil {
@@ -1125,6 +1170,64 @@ func (m Model) renderTable(width, height int) string {
 	}
 
 	return b.String()
+}
+
+// checkRunJobID extracts the GitHub Actions job ID from a CheckRun.
+// It prefers the database ID field, falling back to parsing the DetailsURL.
+func checkRunJobID(cr review.CheckRun) int64 {
+	if cr.ID != 0 {
+		return cr.ID
+	}
+	// DetailsURL format: https://github.com/{owner}/{repo}/actions/runs/{run_id}/job/{job_id}
+	if idx := strings.LastIndex(cr.DetailsURL, "/job/"); idx >= 0 {
+		s := cr.DetailsURL[idx+5:]
+		var id int64
+		for _, c := range s {
+			if c < '0' || c > '9' {
+				break
+			}
+			id = id*10 + int64(c-'0')
+		}
+		if id > 0 {
+			return id
+		}
+	}
+	return 0
+}
+
+// openCheckLogs fetches logs for a GitHub Actions check run and writes them to a temp file.
+func openCheckLogs(cr review.CheckRun) tea.Cmd {
+	jobID := checkRunJobID(cr)
+	slog.Debug("openCheckLogs", "name", cr.Name, "id", cr.ID, "jobID", jobID, "detailsURL", cr.DetailsURL)
+	if jobID == 0 {
+		return flash.ShowMsg{
+			ID:      "check-logs",
+			Text:    "No logs available (not a GitHub Actions check)",
+			Style:   flash.StyleDanger,
+			Expires: 3 * time.Second,
+		}.Cmd()
+	}
+	return func() tea.Msg {
+		tmpFile, err := os.CreateTemp("", fmt.Sprintf("pry-check-%d-*.log", jobID))
+		if err != nil {
+			return checkLogsLoadedMsg{err: fmt.Errorf("create temp file: %w", err)}
+		}
+		tmpPath := tmpFile.Name()
+		tmpFile.Close()
+
+		endpoint := fmt.Sprintf("repos/%s/%s/actions/jobs/%d/logs", data.RepoOwner(), data.RepoName(), jobID)
+		cmd := exec.Command("gh", "api", endpoint)
+		out, err := cmd.Output()
+		if err != nil {
+			os.Remove(tmpPath)
+			return checkLogsLoadedMsg{err: fmt.Errorf("fetch logs for %s: %w", cr.Name, err)}
+		}
+		if err := os.WriteFile(tmpPath, out, 0600); err != nil {
+			os.Remove(tmpPath)
+			return checkLogsLoadedMsg{err: fmt.Errorf("write logs: %w", err)}
+		}
+		return checkLogsLoadedMsg{tmpPath: tmpPath}
+	}
 }
 
 // openBrowser opens the given URL in the user's default browser.

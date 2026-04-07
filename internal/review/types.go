@@ -36,6 +36,7 @@ const (
 
 // CheckRun represents an individual CI check run or status context.
 type CheckRun struct {
+	ID          int64 // GitHub Actions job database ID (0 for non-Actions checks)
 	Name        string
 	Status      CheckRunStatus
 	Conclusion  CheckRunConclusion

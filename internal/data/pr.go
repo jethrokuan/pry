@@ -88,6 +88,7 @@ type graphqlCountByState struct {
 
 type graphqlCheckContext struct {
 	TypeName    string     `json:"__typename"`
+	DatabaseID  int64      `json:"databaseId"`
 	Name        string     `json:"name"`
 	Status      string     `json:"status"`
 	Conclusion  string     `json:"conclusion"`
@@ -381,6 +382,7 @@ func graphqlContextToCheckRun(ctx graphqlCheckContext) review.CheckRun {
 	cr := review.CheckRun{}
 
 	if ctx.TypeName == "CheckRun" {
+		cr.ID = ctx.DatabaseID
 		cr.Name = ctx.Name
 		cr.Status = review.CheckRunStatus(ctx.Status)
 		cr.Conclusion = review.CheckRunConclusion(ctx.Conclusion)
@@ -619,6 +621,7 @@ func fetchRemainingCheckContexts(number int, after string) ([]graphqlCheckContex
 										nodes {
 											__typename
 											... on CheckRun {
+												databaseId
 												name
 												status
 												conclusion
