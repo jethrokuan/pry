@@ -1172,34 +1172,10 @@ func (m Model) renderTable(width, height int) string {
 	return b.String()
 }
 
-// checkRunJobID extracts the GitHub Actions job ID from a CheckRun.
-// It prefers the database ID field, falling back to parsing the DetailsURL.
-func checkRunJobID(cr review.CheckRun) int64 {
-	if cr.ID != 0 {
-		return cr.ID
-	}
-	// DetailsURL format: https://github.com/{owner}/{repo}/actions/runs/{run_id}/job/{job_id}
-	if idx := strings.LastIndex(cr.DetailsURL, "/job/"); idx >= 0 {
-		s := cr.DetailsURL[idx+5:]
-		var id int64
-		for _, c := range s {
-			if c < '0' || c > '9' {
-				break
-			}
-			id = id*10 + int64(c-'0')
-		}
-		if id > 0 {
-			return id
-		}
-	}
-	return 0
-}
-
 // openCheckLogs fetches logs for a GitHub Actions check run and writes them to a temp file.
 func openCheckLogs(cr review.CheckRun) tea.Cmd {
-	jobID := checkRunJobID(cr)
-	slog.Debug("openCheckLogs", "name", cr.Name, "id", cr.ID, "jobID", jobID, "detailsURL", cr.DetailsURL)
-	if jobID == 0 {
+	slog.Debug("openCheckLogs", "name", cr.Name, "id", cr.ID)
+	if cr.ID == 0 {
 		return flash.ShowMsg{
 			ID:      "check-logs",
 			Text:    "No logs available (not a GitHub Actions check)",
@@ -1208,14 +1184,14 @@ func openCheckLogs(cr review.CheckRun) tea.Cmd {
 		}.Cmd()
 	}
 	return func() tea.Msg {
-		tmpFile, err := os.CreateTemp("", fmt.Sprintf("pry-check-%d-*.log", jobID))
+		tmpFile, err := os.CreateTemp("", fmt.Sprintf("pry-check-%d-*.log", cr.ID))
 		if err != nil {
 			return checkLogsLoadedMsg{err: fmt.Errorf("create temp file: %w", err)}
 		}
 		tmpPath := tmpFile.Name()
 		tmpFile.Close()
 
-		endpoint := fmt.Sprintf("repos/%s/%s/actions/jobs/%d/logs", data.RepoOwner(), data.RepoName(), jobID)
+		endpoint := fmt.Sprintf("repos/%s/%s/actions/jobs/%d/logs", data.RepoOwner(), data.RepoName(), cr.ID)
 		cmd := exec.Command("gh", "api", endpoint)
 		out, err := cmd.Output()
 		if err != nil {
