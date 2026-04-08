@@ -504,6 +504,7 @@ func FetchPR(number int) (*review.PullRequest, error) {
 									nodes {
 										__typename
 										... on CheckRun {
+											databaseId
 											name
 											status
 											conclusion
