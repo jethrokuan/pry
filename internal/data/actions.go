@@ -114,6 +114,17 @@ func AssignPR(prNumber int, login string) error {
 	return nil
 }
 
+// RerunCheckRun re-runs a single GitHub Actions job via REST.
+func RerunCheckRun(jobID int64) error {
+	endpoint := fmt.Sprintf("repos/%s/%s/actions/jobs/%d/rerun", owner, repo, jobID)
+	slog.Debug("rerunning check run", "jobID", jobID)
+	err := rest.Do(http.MethodPost, endpoint, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to rerun job %d: %w", jobID, err)
+	}
+	return nil
+}
+
 // UnassignPR removes a user as an assignee from a PR via REST.
 func UnassignPR(prNumber int, login string) error {
 	endpoint := fmt.Sprintf("repos/%s/%s/issues/%d/assignees", owner, repo, prNumber)

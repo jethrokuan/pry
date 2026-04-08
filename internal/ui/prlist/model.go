@@ -108,6 +108,9 @@ type KeyMap struct {
 	// Navigation
 	GoToPR key.Binding
 
+	// Check actions
+	RerunCheck key.Binding
+
 	// PR actions
 	Assign         key.Binding
 	Unassign       key.Binding
@@ -139,6 +142,8 @@ var keys = KeyMap{
 	Quit:         key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
 	Help:         key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 
+	RerunCheck:     key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "rerun check")),
+
 	Assign:         key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "assign self")),
 	Unassign:       key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "unassign self")),
 	Close:          key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "close PR")),
@@ -156,6 +161,7 @@ const (
 	confirmNone  confirmAction = iota
 	confirmClose
 	confirmMerge
+	confirmRerun
 )
 
 // prActionMsg carries the result of an async PR action (close, merge, etc.).
@@ -163,6 +169,11 @@ type prActionMsg struct {
 	action   string // human-readable action name for flash
 	prNumber int
 	err      error
+}
+
+type checkRerunMsg struct {
+	name string
+	err  error
 }
 
 type checkoutMsg struct {
@@ -228,7 +239,9 @@ type Model struct {
 	showHelp bool
 
 	// Confirmation prompt for destructive actions
-	confirm     confirmAction
+	confirm        confirmAction
+	pendingRerunID int64  // job ID for pending rerun confirmation
+	pendingRerunName string // check name for pending rerun confirmation
 	currentUser string // cached login for assign/unassign
 	useJJ       bool   // true when repo is Jujutsu-managed
 
@@ -457,6 +470,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case checkRerunMsg:
+		if msg.err != nil {
+			return m, flash.ShowMsg{ID: "check-rerun", Text: fmt.Sprintf("Rerun failed: %v", msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
+		}
+		return m, flash.ShowMsg{ID: "check-rerun", Text: fmt.Sprintf("Rerun triggered for %s", msg.name), Style: flash.StyleSuccess, Expires: 3 * time.Second}.Cmd()
+
 	case checkoutMsg:
 		if msg.err != nil {
 			return m, flash.ShowMsg{ID: "checkout", Text: fmt.Sprintf("Checkout failed: %v", msg.err), Style: flash.StyleDanger, Expires: 5 * time.Second}.Cmd()
@@ -584,19 +603,32 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			action := m.confirm
 			m.confirm = confirmNone
 			if msg.String() == "y" || msg.String() == "Y" {
-				t := m.tab()
-				if t.hasCursor() {
-					pr := t.prs[t.cur()]
-					switch action {
-					case confirmClose:
-						return m, func() tea.Msg {
-							err := data.ClosePR(pr.Number)
-							return prActionMsg{action: "Closed", prNumber: pr.Number, err: err}
-						}
-					case confirmMerge:
-						return m, func() tea.Msg {
-							err := data.MergePR(pr.Number)
-							return prActionMsg{action: "Merged", prNumber: pr.Number, err: err}
+				switch action {
+				case confirmRerun:
+					jobID := m.pendingRerunID
+					name := m.pendingRerunName
+					return m, tea.Batch(
+						flash.ShowMsg{ID: "check-rerun", Text: fmt.Sprintf("Rerunning %s…", name), Expires: 30 * time.Second}.Cmd(),
+						func() tea.Msg {
+							err := data.RerunCheckRun(jobID)
+							return checkRerunMsg{name: name, err: err}
+						},
+					)
+				default:
+					t := m.tab()
+					if t.hasCursor() {
+						pr := t.prs[t.cur()]
+						switch action {
+						case confirmClose:
+							return m, func() tea.Msg {
+								err := data.ClosePR(pr.Number)
+								return prActionMsg{action: "Closed", prNumber: pr.Number, err: err}
+							}
+						case confirmMerge:
+							return m, func() tea.Msg {
+								err := data.MergePR(pr.Number)
+								return prActionMsg{action: "Merged", prNumber: pr.Number, err: err}
+							}
 						}
 					}
 				}
@@ -751,8 +783,18 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.confirm = confirmMerge
 				return m, flash.ShowMsg{ID: "confirm", Text: "Merge PR? Press y to confirm", Expires: 5 * time.Second}.Cmd()
 			}
-		case key.Matches(msg, keys.ReadyForReview):
-			if t.hasCursor() {
+		case key.Matches(msg, keys.RerunCheck):
+			if m.preview.IsChecksTab() {
+				if cr := m.preview.SelectedCheck(); cr != nil {
+					if cr.ID == 0 {
+						return m, flash.ShowMsg{ID: "check-rerun", Text: "Cannot rerun: not a GitHub Actions check", Style: flash.StyleDanger, Expires: 3 * time.Second}.Cmd()
+					}
+					m.confirm = confirmRerun
+					m.pendingRerunID = cr.ID
+					m.pendingRerunName = cr.Name
+					return m, flash.ShowMsg{ID: "confirm", Text: fmt.Sprintf("Rerun %s? Press y to confirm", cr.Name), Expires: 5 * time.Second}.Cmd()
+				}
+			} else if t.hasCursor() {
 				pr := t.prs[t.cur()]
 				if !pr.Draft {
 					return m, flash.ShowMsg{ID: "pr-action", Text: "PR is not a draft", Expires: 2 * time.Second}.Cmd()
@@ -1031,7 +1073,7 @@ func helpSections() []helppopup.Section {
 	return []helppopup.Section{
 		helppopup.Bind("Navigation", keys.Up, keys.Down, keys.HalfPageDown, keys.HalfPageUp, keys.Select, keys.GoToPR),
 		helppopup.Bind("Tabs & Filters", keys.NextTab, keys.PrevTab, keys.EditFilter),
-		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp, keys.SidebarNextTab, keys.SidebarPrevTab, keys.SidebarExpandAll),
+		helppopup.Bind("Preview", keys.SidebarDown, keys.SidebarUp, keys.SidebarNextTab, keys.SidebarPrevTab, keys.SidebarExpandAll, keys.RerunCheck),
 		helppopup.Bind("PR Actions", keys.Assign, keys.Unassign, keys.Close, keys.Reopen, keys.Merge, keys.ReadyForReview, keys.Checkout),
 		helppopup.Bind("Copy", keys.CopyNumber, keys.CopyURL),
 		helppopup.Bind("Other", keys.OpenInBrowser, keys.Refresh, keys.Help, keys.Quit),

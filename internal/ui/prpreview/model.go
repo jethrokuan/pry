@@ -571,7 +571,7 @@ func (m *Model) renderChecksTab(b *strings.Builder, pr *review.PullRequest) {
 			hints = append(hints, "e expand all")
 		}
 		if len(m.flatChecks) > 0 {
-			hints = append(hints, "J/K navigate", "enter open logs")
+			hints = append(hints, "J/K navigate", "enter open logs", "R rerun")
 		}
 		if len(hints) > 0 {
 			b.WriteString("\n" + muted.Render(strings.Join(hints, " · ")) + "\n")
