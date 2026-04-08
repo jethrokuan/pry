@@ -1176,12 +1176,9 @@ func (m Model) renderTable(width, height int) string {
 func openCheckLogs(cr review.CheckRun) tea.Cmd {
 	slog.Debug("openCheckLogs", "name", cr.Name, "id", cr.ID)
 	if cr.ID == 0 {
-		return flash.ShowMsg{
-			ID:      "check-logs",
-			Text:    "No logs available (not a GitHub Actions check)",
-			Style:   flash.StyleDanger,
-			Expires: 3 * time.Second,
-		}.Cmd()
+		return func() tea.Msg {
+			return checkLogsLoadedMsg{err: fmt.Errorf("no logs available for %s (not a GitHub Actions check)", cr.Name)}
+		}
 	}
 	return func() tea.Msg {
 		tmpFile, err := os.CreateTemp("", fmt.Sprintf("pry-check-%d-*.log", cr.ID))
@@ -1196,6 +1193,9 @@ func openCheckLogs(cr review.CheckRun) tea.Cmd {
 		out, err := cmd.Output()
 		if err != nil {
 			os.Remove(tmpPath)
+			if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
+				return checkLogsLoadedMsg{err: fmt.Errorf("fetch logs for %s: %s", cr.Name, strings.TrimSpace(string(exitErr.Stderr)))}
+			}
 			return checkLogsLoadedMsg{err: fmt.Errorf("fetch logs for %s: %w", cr.Name, err)}
 		}
 		if err := os.WriteFile(tmpPath, out, 0600); err != nil {
