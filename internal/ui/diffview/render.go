@@ -12,6 +12,7 @@ import (
 	"github.com/jethrokuan/pry/internal/diff"
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/styles"
+	"github.com/jethrokuan/pry/internal/ui/submit"
 )
 
 // renderMarkdown renders a markdown string using Glamour.
@@ -641,6 +642,20 @@ func (m Model) renderCommentPopup() string {
 		Width(popupW)
 
 	return boxStyle.Render(content)
+}
+
+// --- Submit Review Modal ---
+
+// openSubmitModal initializes and opens the submit review modal.
+func (m *Model) openSubmitModal() {
+	m.submitPanel = submit.New(m.pr, m.currentUser)
+	m.submitPanel.Open(m.width, m.height)
+}
+
+// overlaySubmitPopup renders the submit popup centered over the base content.
+func (m Model) overlaySubmitPopup(base string) string {
+	popup := m.submitPanel.RenderPopup()
+	return m.overlayGeneric(base, popup)
 }
 
 // --- PR Info Popup ---

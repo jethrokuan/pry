@@ -24,6 +24,7 @@ import (
 	"github.com/jethrokuan/pry/internal/ui/components/flash"
 	"github.com/jethrokuan/pry/internal/ui/components/helppopup"
 	"github.com/jethrokuan/pry/internal/ui/styles"
+	"github.com/jethrokuan/pry/internal/ui/submit"
 )
 
 // --- Messages ---
@@ -209,7 +210,7 @@ var keys = KeyMap{
 	EditComment:   key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit comment")),
 	ViewComment:   key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "view comment")),
 	SelectLine:    key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "select")),
-	Submit:        key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "submit review")),
+	Submit:        key.NewBinding(key.WithKeys("ctrl+enter"), key.WithHelp("ctrl+enter", "submit review")),
 	ToggleComment: key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle fold")),
 	FoldComment:   key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("S-tab", "toggle all folds")),
 	MarkViewed:    key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "mark viewed")),
@@ -241,7 +242,7 @@ var inlineKeys = struct {
 	Cancel     key.Binding
 	OpenEditor key.Binding
 }{
-	Save:       key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "save")),
+	Save:       key.NewBinding(key.WithKeys("ctrl+enter"), key.WithHelp("ctrl+enter", "save")),
 	Cancel:     key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "cancel")),
 	OpenEditor: key.NewBinding(key.WithKeys("f2"), key.WithHelp("f2", "open $EDITOR")),
 }
@@ -292,6 +293,9 @@ type Model struct {
 	commitPickerActive bool            // overlay visible
 	commitPickerCursor int             // cursor position in picker
 	commitPickerAnchor int             // range anchor index (-1 = no anchor)
+
+	// Submit review modal
+	submitPanel submit.Model
 
 	// AI review assistant panel
 	aiPanel     AIPanel
@@ -575,6 +579,14 @@ func (m Model) fetchIssueCommentsCmd() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case submit.SubmittedMsg:
+		m.submitPanel.Close()
+		return m, func() tea.Msg { return SubmitReviewMsg{} }
+
+	case submit.CancelledMsg:
+		m.submitPanel.Close()
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -593,6 +605,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		if m.prInfo.active {
 			m.openPRInfoPopup()
+		}
+		if m.submitPanel.Active() {
+			m.submitPanel.Open(m.width, m.height)
 		}
 
 	case filesLoadedMsg:
@@ -900,6 +915,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			aiCmd := m.aiPanel.HandleStreamMsg(msg)
 			cmds = append(cmds, aiCmd)
 		}
+		if m.submitPanel.Active() {
+			m.submitPanel, cmd = m.submitPanel.Update(msg)
+			cmds = append(cmds, cmd)
+		}
 		return m, tea.Batch(cmds...)
 
 	case tea.MouseWheelMsg:
@@ -938,6 +957,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.editor.ta, cmd = m.editor.ta.Update(msg)
 		m.updateDiffContent()
+		return m, cmd
+	}
+
+	// Forward unmatched messages to submit panel (e.g. submitResultMsg)
+	if m.submitPanel.Active() {
+		var cmd tea.Cmd
+		m.submitPanel, cmd = m.submitPanel.Update(msg)
 		return m, cmd
 	}
 
@@ -1400,7 +1426,7 @@ func (m Model) View() string {
 			if m.aiEnabled {
 				helpParts = append(helpParts, "a AI")
 			}
-			helpParts = append(helpParts, "ctrl+s submit")
+			helpParts = append(helpParts, "ctrl+enter submit")
 			helpParts = append(helpParts, "? help")
 		} else {
 			helpParts = append(helpParts, "j/k scroll")
@@ -1424,7 +1450,7 @@ func (m Model) View() string {
 			if m.aiEnabled {
 				helpParts = append(helpParts, "a AI")
 			}
-			helpParts = append(helpParts, "ctrl+s submit")
+			helpParts = append(helpParts, "ctrl+enter submit")
 			helpParts = append(helpParts, "? help")
 		}
 
@@ -1469,6 +1495,9 @@ func (m Model) View() string {
 	}
 	if m.prInfo.active {
 		result = m.overlayPRInfoPopup(result)
+	}
+	if m.submitPanel.Active() {
+		result = m.overlaySubmitPopup(result)
 	}
 	if m.commitPickerActive {
 		result = m.overlayGeneric(result, m.renderCommitPicker())

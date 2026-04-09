@@ -44,8 +44,8 @@ func pressEsc(m Model) (Model, tea.Cmd) {
 	return m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 }
 
-func pressCtrlS(m Model) (Model, tea.Cmd) {
-	return m.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+func pressCtrlEnter(m Model) (Model, tea.Cmd) {
+	return m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModCtrl})
 }
 
 var _ = ginkgo.Describe("Submit Model", func() {
@@ -123,9 +123,9 @@ var _ = ginkgo.Describe("Submit Model", func() {
 	})
 
 	ginkgo.Describe("submit", func() {
-		ginkgo.It("sets submitting flag on ctrl+s", func() {
+		ginkgo.It("sets submitting flag on ctrl+enter", func() {
 			m := sized(newTestModel())
-			m, cmd := pressCtrlS(m)
+			m, cmd := pressCtrlEnter(m)
 			gomega.Expect(m.submitting).To(gomega.BeTrue())
 			gomega.Expect(cmd).ToNot(gomega.BeNil())
 		})
@@ -199,7 +199,7 @@ var _ = ginkgo.Describe("Submit Model", func() {
 			m.err = fmt.Errorf("API error")
 			view := m.View()
 			gomega.Expect(view).To(gomega.ContainSubstring("Error: API error"))
-			gomega.Expect(view).To(gomega.ContainSubstring("ctrl+s to retry"))
+			gomega.Expect(view).To(gomega.ContainSubstring("ctrl+enter to retry"))
 		})
 
 		ginkgo.It("shows submitting spinner text", func() {

@@ -1174,6 +1174,14 @@ func (m Model) handleInlineEditorKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	return m, cmd
 }
 
+// --- Submit modal key handling ---
+
+func (m Model) handleSubmitKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.submitPanel, cmd = m.submitPanel.Update(msg)
+	return m, cmd
+}
+
 // --- PR info popup key handling ---
 
 func (m Model) handlePRInfoKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {

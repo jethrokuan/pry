@@ -107,7 +107,7 @@ PR List → Diff View → Submit Review
 | `w` | Open PR in browser |
 | `y` | Copy link to current line |
 | `ctrl+e` | Open file in `$EDITOR` at current line |
-| `ctrl+s` | Submit review |
+| `ctrl+enter` | Submit review |
 | `?` | Show help |
 | `esc` | Back to PR list |
 
@@ -128,7 +128,7 @@ When a comment is selected:
 
 | Key | Action |
 |-----|--------|
-| `ctrl+s` | Save comment |
+| `ctrl+enter` | Save comment |
 | `ctrl+e` | Open in `$EDITOR` |
 | `esc` | Cancel |
 
@@ -140,7 +140,7 @@ When a comment is selected:
 |-----|--------|
 | `1` / `2` / `3` | Comment / Approve / Request Changes |
 | `b` | Edit review body |
-| `ctrl+s` | Submit |
+| `ctrl+enter` | Submit |
 | `esc` | Cancel (keep pending comments) |
 
 ## Code Suggestions

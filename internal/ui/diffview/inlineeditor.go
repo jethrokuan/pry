@@ -358,9 +358,9 @@ func (e InlineEditor) View() string {
 	header := lipgloss.NewStyle().Foreground(styles.Primary).Bold(true).
 		Render(fmt.Sprintf(" %s on %s ", modeStr, location))
 
-	helpText := "ctrl+s save  F2 $EDITOR  esc cancel"
+	helpText := "ctrl+enter save  F2 $EDITOR  esc cancel"
 	if e.confirmDiscard {
-		helpText = "Press esc again to discard  ctrl+s save"
+		helpText = "Press esc again to discard  ctrl+enter save"
 	}
 	help := styles.HelpStyle.Render(helpText)
 

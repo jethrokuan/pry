@@ -18,7 +18,6 @@ import (
 	"github.com/jethrokuan/pry/internal/ui/diffview"
 	"github.com/jethrokuan/pry/internal/ui/prlist"
 	"github.com/jethrokuan/pry/internal/ui/styles"
-	"github.com/jethrokuan/pry/internal/ui/submit"
 )
 
 // Screen represents the current active screen.
@@ -27,7 +26,6 @@ type Screen int
 const (
 	ScreenPRList Screen = iota
 	ScreenDiffView
-	ScreenSubmit
 )
 
 // Model is the top-level application model.
@@ -43,7 +41,6 @@ type Model struct {
 	// Screen models
 	prList   prlist.Model
 	diffView diffview.Model
-	submit   submit.Model
 
 	// Flash messages (stacked, newer on top)
 	flash flash.Model
@@ -283,8 +280,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		model, screenCmd = m.updatePRList(msg)
 	case ScreenDiffView:
 		model, screenCmd = m.updateDiffView(msg)
-	case ScreenSubmit:
-		model, screenCmd = m.updateSubmit(msg)
 	default:
 		return m, flashCmd
 	}
@@ -339,14 +334,10 @@ func (m Model) updatePRList(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case diffview.SubmitReviewMsg:
-		m.selectedPR.PendingReview = m.diffView.PendingReview()
-		currentUser := ""
-		if m.userIdentity != nil {
-			currentUser = m.userIdentity.Login
-		}
-		m.submit = submit.New(m.selectedPR, currentUser)
-		m.screen = ScreenSubmit
-		return m, tea.Batch(m.submit.Init(), m.windowSizeCmd())
+		m.selectedPR = nil
+		m.screen = ScreenPRList
+		data.InvalidateListPRs()
+		return m, tea.Batch(m.prList.StartFetch(), m.windowSizeCmd())
 	case diffview.BackMsg:
 		m.selectedPR = nil
 		m.screen = ScreenPRList
@@ -364,23 +355,6 @@ func (m Model) updateDiffView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) updateSubmit(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg.(type) {
-	case submit.SubmittedMsg:
-		m.selectedPR = nil
-		m.screen = ScreenPRList
-		data.InvalidateListPRs()
-		return m, tea.Batch(m.prList.StartFetch(), m.windowSizeCmd())
-	case submit.CancelledMsg:
-		m.screen = ScreenDiffView
-		return m, m.windowSizeCmd()
-	}
-
-	var cmd tea.Cmd
-	m.submit, cmd = m.submit.Update(msg)
-	return m, cmd
-}
-
 // View renders the active screen.
 func (m Model) View() tea.View {
 	var content string
@@ -389,8 +363,6 @@ func (m Model) View() tea.View {
 		content = m.prList.View()
 	case ScreenDiffView:
 		content = m.diffView.View()
-	case ScreenSubmit:
-		content = m.submit.View()
 	}
 
 	// Overlay flash messages using Canvas compositing.

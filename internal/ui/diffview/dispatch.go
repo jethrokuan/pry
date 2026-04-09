@@ -23,6 +23,7 @@ const (
 	modePRInfo
 	modeCommentPopup
 	modeCommentSelect
+	modeSubmit
 	modeAIInput
 	modeAIPanel
 	modeCommitPicker
@@ -33,6 +34,8 @@ const (
 // first, then overlay modes, then normal.
 func (m Model) activeMode() inputMode {
 	switch {
+	case m.submitPanel.Active():
+		return modeSubmit
 	case m.aiPanel.IsInputActive():
 		return modeAIInput
 	case m.aiPanel.IsOpen():
@@ -65,6 +68,8 @@ func (m Model) activeMode() inputMode {
 // handleKey dispatches a key event to the appropriate mode handler.
 func (m Model) handleKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch m.activeMode() {
+	case modeSubmit:
+		return m.handleSubmitKey(msg)
 	case modeAIInput:
 		return m.handleAIInputKey(msg)
 	case modeAIPanel:
@@ -294,7 +299,8 @@ func (m Model) handleNormalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.jumpForward()
 
 	case key.Matches(msg, keys.Submit):
-		return m, func() tea.Msg { return SubmitReviewMsg{} }
+		m.openSubmitModal()
+		return m, nil
 
 	case key.Matches(msg, keys.Refresh):
 		if m.refreshing {

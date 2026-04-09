@@ -12,7 +12,6 @@ import (
 	"github.com/jethrokuan/pry/internal/review"
 	"github.com/jethrokuan/pry/internal/ui/diffview"
 	"github.com/jethrokuan/pry/internal/ui/prlist"
-	"github.com/jethrokuan/pry/internal/ui/submit"
 )
 
 // defaultFilters provides a minimal filter set so prlist.Init() doesn't panic.
@@ -85,9 +84,14 @@ var _ = Describe("App message routing", func() {
 		})
 
 		Describe("SubmitReviewMsg", func() {
-			It("transitions to the submit screen", func() {
+			It("transitions to the PR list", func() {
 				m = update(m, diffview.SubmitReviewMsg{})
-				Expect(m.screen).To(Equal(ScreenSubmit))
+				Expect(m.screen).To(Equal(ScreenPRList))
+			})
+
+			It("clears the selected PR", func() {
+				m = update(m, diffview.SubmitReviewMsg{})
+				Expect(m.selectedPR).To(BeNil())
 			})
 		})
 
@@ -114,33 +118,6 @@ var _ = Describe("App message routing", func() {
 				Expect(m.selectedPR.Title).To(Equal("Updated Title"))
 				Expect(m.selectedPR.NodeID).To(Equal("PR_full_node"))
 				Expect(m.selectedPR.HeadSHA).To(Equal("def456"))
-			})
-		})
-	})
-
-	Describe("Submit screen transitions", func() {
-		BeforeEach(func() {
-			m = update(m, prlist.PRSelectedMsg{PR: testPR()})
-			m = update(m, diffview.SubmitReviewMsg{})
-			Expect(m.screen).To(Equal(ScreenSubmit))
-		})
-
-		Describe("SubmittedMsg", func() {
-			It("transitions back to the PR list", func() {
-				m = update(m, submit.SubmittedMsg{})
-				Expect(m.screen).To(Equal(ScreenPRList))
-			})
-
-			It("clears the selected PR and pending review", func() {
-				m = update(m, submit.SubmittedMsg{})
-				Expect(m.selectedPR).To(BeNil())
-			})
-		})
-
-		Describe("CancelledMsg", func() {
-			It("transitions back to the diff view", func() {
-				m = update(m, submit.CancelledMsg{})
-				Expect(m.screen).To(Equal(ScreenDiffView))
 			})
 		})
 	})
@@ -311,25 +288,10 @@ var _ = Describe("App message routing", func() {
 		})
 	})
 
-	Describe("SubmitReviewMsg preserves review state", func() {
-		It("copies pending review to selectedPR before entering submit screen", func() {
-			m = update(m, prlist.PRSelectedMsg{PR: testPR()})
-			Expect(m.screen).To(Equal(ScreenDiffView))
-			Expect(m.selectedPR.PendingReview).NotTo(BeNil())
-
-			m = update(m, diffview.SubmitReviewMsg{})
-			Expect(m.screen).To(Equal(ScreenSubmit))
-			Expect(m.selectedPR.PendingReview).NotTo(BeNil())
-		})
-	})
-
-	Describe("SubmittedMsg returns to PR list", func() {
-		It("returns to PR list and clears selected PR after submission", func() {
+	Describe("SubmitReviewMsg returns to PR list", func() {
+		It("returns to PR list and clears selected PR", func() {
 			m = update(m, prlist.PRSelectedMsg{PR: testPR()})
 			m = update(m, diffview.SubmitReviewMsg{})
-			Expect(m.screen).To(Equal(ScreenSubmit))
-
-			m = update(m, submit.SubmittedMsg{})
 			Expect(m.screen).To(Equal(ScreenPRList))
 			Expect(m.selectedPR).To(BeNil())
 		})
@@ -423,38 +385,22 @@ var _ = Describe("App message routing", func() {
 			m = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 			Expect(m.screen).To(Equal(ScreenDiffView))
 		})
-
-		It("forwards unhandled messages to submit on submit screen", func() {
-			m = update(m, prlist.PRSelectedMsg{PR: testPR()})
-			m = update(m, diffview.SubmitReviewMsg{})
-			Expect(m.screen).To(Equal(ScreenSubmit))
-
-			m = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
-			Expect(m.screen).To(Equal(ScreenSubmit))
-		})
 	})
 
 	Describe("full navigation cycle", func() {
-		It("can navigate PRList → DiffView → Submit → PRList", func() {
+		It("can navigate PRList → DiffView → PRList via submit", func() {
 			Expect(m.screen).To(Equal(ScreenPRList))
 
 			m = update(m, prlist.PRSelectedMsg{PR: testPR()})
 			Expect(m.screen).To(Equal(ScreenDiffView))
 
 			m = update(m, diffview.SubmitReviewMsg{})
-			Expect(m.screen).To(Equal(ScreenSubmit))
-
-			m = update(m, submit.SubmittedMsg{})
 			Expect(m.screen).To(Equal(ScreenPRList))
 			Expect(m.selectedPR).To(BeNil())
 		})
 
-		It("can navigate PRList → DiffView → Submit → DiffView → PRList", func() {
+		It("can navigate PRList → DiffView → PRList via back", func() {
 			m = update(m, prlist.PRSelectedMsg{PR: testPR()})
-			m = update(m, diffview.SubmitReviewMsg{})
-			Expect(m.screen).To(Equal(ScreenSubmit))
-
-			m = update(m, submit.CancelledMsg{})
 			Expect(m.screen).To(Equal(ScreenDiffView))
 
 			m = update(m, diffview.BackMsg{})
