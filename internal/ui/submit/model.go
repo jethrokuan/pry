@@ -65,9 +65,10 @@ func (m *Model) Open(width, height int) {
 	m.active = true
 	m.width = width
 	m.height = height
-	popupW := min(width-4, 80)
-	m.textarea.SetWidth(popupW - 6)
-	m.textarea.SetHeight(5)
+	popupW := min(width*3/4, 100)
+	// popup border(2) + popup padding(4) + body border(2) + body padding(2) = 10
+	m.textarea.SetWidth(popupW - 10)
+	m.textarea.SetHeight(3)
 }
 
 // Close closes the submit modal and resets transient state.
@@ -85,6 +86,7 @@ func New(pr *review.PullRequest, currentUser string) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Review summary (optional)..."
 	ta.CharLimit = 0
+	ta.ShowLineNumbers = false
 
 	s := spinner.New()
 	s.Spinner = spinner.Dot
@@ -269,7 +271,7 @@ func (m Model) View() string {
 
 // RenderPopup renders the submit form as a bordered popup suitable for overlay.
 func (m Model) RenderPopup() string {
-	popupW := min(m.width-4, 80)
+	popupW := min(m.width*3/4, 100)
 
 	var b strings.Builder
 	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(styles.Primary).Render("Submit Review") + "\n\n")
@@ -285,12 +287,14 @@ func (m Model) RenderPopup() string {
 	}
 	b.WriteString(fmt.Sprintf("%d inline comments pending\n\n", pendingCount))
 
-	// Review body
+	// Review body — constrain to inner width of popup
+	innerW := popupW - 6 // popup border(2) + popup padding(4)
 	b.WriteString("Review body (press 'b' to edit):\n")
 	bodyStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Muted).
-		Padding(0, 1)
+		Padding(0, 1).
+		Width(innerW)
 	if m.focusBody {
 		bodyStyle = bodyStyle.BorderForeground(styles.Primary)
 	}
